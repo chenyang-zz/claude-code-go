@@ -52,8 +52,8 @@ type Output struct {
 	FilePath string `json:"filePath"`
 	// Content stores the final content written to disk.
 	Content string `json:"content"`
-	// OriginalContent stores the previous file content when an existing file was overwritten.
-	OriginalContent *string `json:"originalContent,omitempty"`
+	// OriginalFile stores the previous file content when an existing file was overwritten.
+	OriginalFile *string `json:"originalFile"`
 	// StructuredPatch stores the minimal diff payload shared with other write-oriented tools.
 	StructuredPatch []toolshared.Hunk `json:"structuredPatch"`
 }
@@ -169,8 +169,8 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		Type:            writeType,
 		FilePath:        platformfs.ToRelativePath(filePath, call.Context.WorkingDir),
 		Content:         input.Content,
-		OriginalContent: originalContent,
-		StructuredPatch: toolshared.BuildStructuredPatch(derefString(originalContent), input.Content),
+		OriginalFile:    originalContent,
+		StructuredPatch: buildWriteStructuredPatch(writeType, originalContent, input.Content),
 	}
 
 	logger.DebugCF("file_write_tool", "file write finished", map[string]any{
@@ -223,6 +223,15 @@ func derefString(value *string) string {
 	}
 
 	return *value
+}
+
+// buildWriteStructuredPatch keeps create/update patch semantics aligned with the source FileWriteTool.
+func buildWriteStructuredPatch(writeType string, originalContent *string, newContent string) []toolshared.Hunk {
+	if writeType == "create" {
+		return []toolshared.Hunk{}
+	}
+
+	return toolshared.BuildStructuredPatch(derefString(originalContent), newContent)
 }
 
 // validateExistingFileReadState enforces the minimal "read before overwrite" and drift-protection guards for existing files.

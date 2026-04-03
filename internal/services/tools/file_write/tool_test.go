@@ -59,14 +59,11 @@ func TestToolInvokeCreatesFile(t *testing.T) {
 	if data.Type != "create" || data.FilePath != "docs/output.txt" {
 		t.Fatalf("Invoke() metadata = %#v", data)
 	}
-	if data.OriginalContent != nil {
-		t.Fatalf("Invoke() original content = %v, want nil", *data.OriginalContent)
+	if data.OriginalFile != nil {
+		t.Fatalf("Invoke() original file = %v, want nil", *data.OriginalFile)
 	}
-	if len(data.StructuredPatch) != 1 {
-		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
-	}
-	if data.StructuredPatch[0].NewLines != 2 {
-		t.Fatalf("Invoke() structured patch = %#v", data.StructuredPatch)
+	if len(data.StructuredPatch) != 0 {
+		t.Fatalf("Invoke() structured patch = %#v, want empty patch for create", data.StructuredPatch)
 	}
 }
 
@@ -116,7 +113,7 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 	}
 
 	data := result.Meta["data"].(Output)
-	if data.Type != "update" || data.OriginalContent == nil || *data.OriginalContent != "before\n" {
+	if data.Type != "update" || data.OriginalFile == nil || *data.OriginalFile != "before\n" {
 		t.Fatalf("Invoke() metadata = %#v", data)
 	}
 	if len(data.StructuredPatch) != 1 {
