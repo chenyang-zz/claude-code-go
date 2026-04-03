@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -77,9 +78,33 @@ func (p *FilesystemPolicy) EvaluateFilesystem(ctx context.Context, req Filesyste
 	}
 }
 
-// evaluateRead applies the minimal batch-01 read policy: allow inside the working directory and ask outside it.
+// evaluateRead applies the minimal batch-01 read policy: explicit rules win first, then the working-directory default.
 func (p *FilesystemPolicy) evaluateRead(req FilesystemRequest, normalizedPath string, normalizedWorkingDir string) Evaluation {
-	_ = p
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Read, DecisionDeny); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem read denied by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionDeny,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Permission to read %s has been denied.", req.Path),
+		}
+	}
+
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Read, DecisionAsk); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem read requires approval by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionAsk,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
+		}
+	}
 
 	if pathWithinRoot(normalizedWorkingDir, normalizedPath) {
 		logger.DebugCF("permission", "filesystem read allowed inside working directory", map[string]any{
@@ -93,6 +118,18 @@ func (p *FilesystemPolicy) evaluateRead(req FilesystemRequest, normalizedPath st
 		"path":        normalizedPath,
 		"working_dir": normalizedWorkingDir,
 	})
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Read, DecisionAllow); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem read allowed by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionAllow,
+			Rule:     matchedRule,
+		}
+	}
+
 	return Evaluation{
 		Decision: DecisionAsk,
 		Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
@@ -119,9 +156,45 @@ func (p *FilesystemPolicy) CheckWritePermissionForTool(ctx context.Context, tool
 	})
 }
 
-// evaluateWrite applies the minimal batch-01 write policy and currently requests approval for all writes.
+// evaluateWrite applies the minimal batch-01 write policy: explicit rules win, otherwise writes require approval.
 func (p *FilesystemPolicy) evaluateWrite(req FilesystemRequest, normalizedPath string, normalizedWorkingDir string) Evaluation {
-	_ = p
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Write, DecisionDeny); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem write denied by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionDeny,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Permission to write %s has been denied.", req.Path),
+		}
+	}
+
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Write, DecisionAsk); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem write requires approval by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionAsk,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Claude requested permissions to write to %s, but you haven't granted it yet.", req.Path),
+		}
+	}
+
+	if matchedRule := matchingRuleForInput(normalizedPath, normalizedWorkingDir, p.Rules.Write, DecisionAllow); matchedRule != nil {
+		logger.DebugCF("permission", "filesystem write allowed by rule", map[string]any{
+			"path":     normalizedPath,
+			"pattern":  matchedRule.Pattern,
+			"base_dir": matchedRule.BaseDir,
+		})
+		return Evaluation{
+			Decision: DecisionAllow,
+			Rule:     matchedRule,
+		}
+	}
 
 	logger.DebugCF("permission", "filesystem write requires approval", map[string]any{
 		"path":        normalizedPath,
@@ -207,4 +280,108 @@ func pathWithinRoot(root string, target string) bool {
 	}
 
 	return !strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
+}
+
+// matchingRuleForInput returns the first rule of the requested decision that matches the normalized path.
+func matchingRuleForInput(normalizedPath string, normalizedWorkingDir string, rules []Rule, decision Decision) *Rule {
+	for index := range rules {
+		rule := &rules[index]
+		if rule.Decision != decision {
+			continue
+		}
+
+		matched, err := matchRule(normalizedPath, normalizedWorkingDir, *rule)
+		if err != nil {
+			logger.DebugCF("permission", "filesystem rule match failed", map[string]any{
+				"path":     normalizedPath,
+				"pattern":  rule.Pattern,
+				"base_dir": rule.BaseDir,
+				"error":    err.Error(),
+			})
+			continue
+		}
+		if matched {
+			return rule
+		}
+	}
+
+	return nil
+}
+
+// matchRule evaluates the batch-01 subset of matchingRuleForInput semantics using rule-relative glob matching.
+func matchRule(normalizedPath string, normalizedWorkingDir string, rule Rule) (bool, error) {
+	ruleRoot := normalizedWorkingDir
+	if strings.TrimSpace(rule.BaseDir) != "" {
+		expandedBaseDir, err := expandPermissionPath(rule.BaseDir, normalizedWorkingDir)
+		if err != nil {
+			return false, err
+		}
+		ruleRoot = expandedBaseDir
+	}
+
+	if !pathWithinRoot(ruleRoot, normalizedPath) {
+		return false, nil
+	}
+
+	relativePath, err := filepath.Rel(ruleRoot, normalizedPath)
+	if err != nil {
+		return false, err
+	}
+
+	return matchPermissionPattern(filepath.ToSlash(relativePath), filepath.ToSlash(strings.TrimSpace(rule.Pattern))), nil
+}
+
+// matchPermissionPattern matches a normalized relative path against the minimal gitignore-like pattern subset needed by batch-01.
+func matchPermissionPattern(relativePath string, patternValue string) bool {
+	if patternValue == "" {
+		return false
+	}
+
+	normalizedRelativePath := strings.TrimPrefix(path.Clean(relativePath), "./")
+	normalizedPattern := strings.TrimPrefix(path.Clean(patternValue), "./")
+
+	if normalizedRelativePath == "." {
+		normalizedRelativePath = ""
+	}
+	if normalizedPattern == "." {
+		normalizedPattern = ""
+	}
+
+	return matchPatternSegments(splitPermissionSegments(normalizedRelativePath), splitPermissionSegments(normalizedPattern))
+}
+
+// splitPermissionSegments converts a slash-normalized path into path segments while preserving the empty root case.
+func splitPermissionSegments(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, "/")
+}
+
+// matchPatternSegments applies '*' and '?' within a segment and '**' across path segments.
+func matchPatternSegments(pathSegments []string, patternSegments []string) bool {
+	if len(patternSegments) == 0 {
+		return len(pathSegments) == 0
+	}
+
+	if patternSegments[0] == "**" {
+		if matchPatternSegments(pathSegments, patternSegments[1:]) {
+			return true
+		}
+		if len(pathSegments) == 0 {
+			return false
+		}
+		return matchPatternSegments(pathSegments[1:], patternSegments)
+	}
+
+	if len(pathSegments) == 0 {
+		return false
+	}
+
+	matched, err := path.Match(patternSegments[0], pathSegments[0])
+	if err != nil || !matched {
+		return false
+	}
+
+	return matchPatternSegments(pathSegments[1:], patternSegments[1:])
 }

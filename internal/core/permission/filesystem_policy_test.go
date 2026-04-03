@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,26 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 
 	workspace := filepath.Join(string(filepath.Separator), "workspace")
 
-	policy, err := NewFilesystemPolicy(RuleSet{})
+	policy, err := NewFilesystemPolicy(RuleSet{
+		Read: []Rule{
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionDeny,
+				Pattern:  "secrets/**",
+			},
+			{
+				Source:   RuleSourceProjectSettings,
+				Decision: DecisionAsk,
+				Pattern:  "gated/**",
+			},
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionAllow,
+				BaseDir:  filepath.Join(workspace, "vendor"),
+				Pattern:  "**/*.md",
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewFilesystemPolicy() error = %v", err)
 	}
@@ -44,6 +64,28 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 		wantDecision Decision
 		wantMessage  string
 	}{
+		{
+			name: "deny relative path by rule inside working dir",
+			req: FilesystemRequest{
+				ToolName:   "file_read",
+				Path:       "secrets/token.txt",
+				WorkingDir: workspace,
+				Access:     AccessRead,
+			},
+			wantDecision: DecisionDeny,
+			wantMessage:  "Permission to read secrets/token.txt has been denied.",
+		},
+		{
+			name: "ask relative path by rule inside working dir",
+			req: FilesystemRequest{
+				ToolName:   "file_read",
+				Path:       "gated/spec.md",
+				WorkingDir: workspace,
+				Access:     AccessRead,
+			},
+			wantDecision: DecisionAsk,
+			wantMessage:  "Claude requested permissions to read from gated/spec.md",
+		},
 		{
 			name: "allow relative path inside working dir",
 			req: FilesystemRequest{
@@ -59,6 +101,16 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 			req: FilesystemRequest{
 				ToolName:   "glob",
 				Path:       filepath.Join(workspace, "src", "main.go"),
+				WorkingDir: workspace,
+				Access:     AccessRead,
+			},
+			wantDecision: DecisionAllow,
+		},
+		{
+			name: "allow outside working dir by explicit rule",
+			req: FilesystemRequest{
+				ToolName:   "file_read",
+				Path:       filepath.Join(workspace, "vendor", "docs", "guide.md"),
 				WorkingDir: workspace,
 				Access:     AccessRead,
 			},
@@ -99,6 +151,9 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 			if tt.wantMessage != "" && !strings.Contains(got.Message, tt.wantMessage) {
 				t.Fatalf("EvaluateFilesystem() message = %q, want substring %q", got.Message, tt.wantMessage)
 			}
+			if got.Decision != DecisionAllow && got.ToError(tt.req) == nil {
+				t.Fatal("EvaluateFilesystem().ToError() = nil, want permission error")
+			}
 		})
 	}
 }
@@ -106,20 +161,95 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 func TestFilesystemPolicyEvaluateFilesystemWriteDefaultsToAsk(t *testing.T) {
 	t.Parallel()
 
-	policy, err := NewFilesystemPolicy(RuleSet{})
+	workspace := filepath.Join(string(filepath.Separator), "workspace")
+
+	policy, err := NewFilesystemPolicy(RuleSet{
+		Write: []Rule{
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionDeny,
+				Pattern:  "protected/**",
+			},
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionAsk,
+				Pattern:  "review/**",
+			},
+			{
+				Source:   RuleSourceProjectSettings,
+				Decision: DecisionAllow,
+				Pattern:  "scratch/**",
+			},
+		},
+	})
 	if err != nil {
 		t.Fatalf("NewFilesystemPolicy() error = %v", err)
 	}
 
-	got := policy.EvaluateFilesystem(context.Background(), FilesystemRequest{
-		ToolName:   "file_write",
-		Path:       "output.txt",
-		WorkingDir: filepath.Join(string(filepath.Separator), "workspace"),
-		Access:     AccessWrite,
-	})
+	tests := []struct {
+		name         string
+		req          FilesystemRequest
+		wantDecision Decision
+		wantMessage  string
+	}{
+		{
+			name: "deny write by rule",
+			req: FilesystemRequest{
+				ToolName:   "file_write",
+				Path:       "protected/config.yaml",
+				WorkingDir: workspace,
+				Access:     AccessWrite,
+			},
+			wantDecision: DecisionDeny,
+			wantMessage:  "Permission to write protected/config.yaml has been denied.",
+		},
+		{
+			name: "ask write by rule",
+			req: FilesystemRequest{
+				ToolName:   "file_write",
+				Path:       "review/output.txt",
+				WorkingDir: workspace,
+				Access:     AccessWrite,
+			},
+			wantDecision: DecisionAsk,
+			wantMessage:  "Claude requested permissions to write to review/output.txt",
+		},
+		{
+			name: "allow write by rule",
+			req: FilesystemRequest{
+				ToolName:   "file_write",
+				Path:       "scratch/output.txt",
+				WorkingDir: workspace,
+				Access:     AccessWrite,
+			},
+			wantDecision: DecisionAllow,
+		},
+		{
+			name: "default write ask without rule",
+			req: FilesystemRequest{
+				ToolName:   "file_write",
+				Path:       "output.txt",
+				WorkingDir: workspace,
+				Access:     AccessWrite,
+			},
+			wantDecision: DecisionAsk,
+			wantMessage:  "Claude requested permissions to write to output.txt",
+		},
+	}
 
-	if got.Decision != DecisionAsk {
-		t.Fatalf("EvaluateFilesystem() decision = %q, want %q", got.Decision, DecisionAsk)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := policy.EvaluateFilesystem(context.Background(), tt.req)
+			if got.Decision != tt.wantDecision {
+				t.Fatalf("EvaluateFilesystem() decision = %q, want %q", got.Decision, tt.wantDecision)
+			}
+			if tt.wantMessage != "" && !strings.Contains(got.Message, tt.wantMessage) {
+				t.Fatalf("EvaluateFilesystem() message = %q, want substring %q", got.Message, tt.wantMessage)
+			}
+		})
 	}
 }
 
@@ -173,5 +303,75 @@ func TestNormalizeFilesystemRequestPath(t *testing.T) {
 	}
 	if gotWorkingDir != workspace {
 		t.Fatalf("normalizeFilesystemRequestPath() working dir = %q, want %q", gotWorkingDir, workspace)
+	}
+}
+
+func TestMatchPermissionPattern(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		path    string
+		pattern string
+		want    bool
+	}{
+		{name: "exact file", path: "README.md", pattern: "README.md", want: true},
+		{name: "single segment wildcard", path: "src/main.go", pattern: "src/*.go", want: true},
+		{name: "double star nested", path: "vendor/docs/guide.md", pattern: "**/*.md", want: true},
+		{name: "directory wildcard suffix", path: "secrets/token.txt", pattern: "secrets/**", want: true},
+		{name: "outside pattern", path: "src/main.go", pattern: "docs/**", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := matchPermissionPattern(tt.path, tt.pattern); got != tt.want {
+				t.Fatalf("matchPermissionPattern(%q, %q) = %v, want %v", tt.path, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEvaluationToError(t *testing.T) {
+	t.Parallel()
+
+	req := FilesystemRequest{
+		ToolName:   "file_read",
+		Path:       "secrets/token.txt",
+		WorkingDir: filepath.Join(string(filepath.Separator), "workspace"),
+		Access:     AccessRead,
+	}
+	rule := &Rule{
+		Source:   RuleSourceSession,
+		Decision: DecisionDeny,
+		Pattern:  "secrets/**",
+	}
+
+	err := (Evaluation{
+		Decision: DecisionDeny,
+		Rule:     rule,
+		Message:  "Permission to read secrets/token.txt has been denied.",
+	}).ToError(req)
+	if err == nil {
+		t.Fatal("Evaluation.ToError() = nil, want permission error")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("Evaluation.ToError() error is not recognized as ErrUnauthorized")
+	}
+
+	var permissionErr *PermissionError
+	if !errors.As(err, &permissionErr) {
+		t.Fatal("Evaluation.ToError() error is not a *PermissionError")
+	}
+	if permissionErr.Decision != DecisionDeny {
+		t.Fatalf("PermissionError.Decision = %q, want %q", permissionErr.Decision, DecisionDeny)
+	}
+	if permissionErr.Rule != rule {
+		t.Fatal("PermissionError.Rule does not retain matched rule")
+	}
+	if got := (Evaluation{Decision: DecisionAllow}).ToError(req); got != nil {
+		t.Fatalf("Evaluation.ToError() for allow = %v, want nil", got)
 	}
 }
