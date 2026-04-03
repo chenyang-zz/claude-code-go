@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,12 @@ const (
 	Name = "Grep"
 	// defaultCommandName is the ripgrep binary name used by the first migration pass.
 	defaultCommandName = "rg"
+	// outputModeFilesWithMatches returns the matched file list view.
+	outputModeFilesWithMatches = "files_with_matches"
+	// outputModeContent returns matching content lines directly from ripgrep.
+	outputModeContent = "content"
+	// outputModeCount returns per-file match counts from ripgrep.
+	outputModeCount = "count"
 )
 
 var vcsDirectoriesToExclude = []string{
@@ -51,16 +58,26 @@ type Input struct {
 	Path string `json:"path,omitempty"`
 	// Glob optionally adds one ripgrep --glob filter.
 	Glob string `json:"glob,omitempty"`
+	// OutputMode selects whether grep returns filenames, matching content, or counts.
+	OutputMode string `json:"output_mode,omitempty"`
 }
 
 // Output is the structured search result returned in tool metadata.
 type Output struct {
+	// Mode records which result projection is returned to the caller.
+	Mode string `json:"mode,omitempty"`
 	// DurationMs records the end-to-end search latency.
 	DurationMs int64 `json:"durationMs"`
 	// NumFiles reports how many filenames are included in the result payload.
 	NumFiles int `json:"numFiles"`
 	// Filenames contains the caller-facing relative or absolute paths for matched files.
 	Filenames []string `json:"filenames"`
+	// Content stores the caller-facing ripgrep content or count lines for non-file modes.
+	Content string `json:"content,omitempty"`
+	// NumLines reports how many content lines are returned in content mode.
+	NumLines int `json:"numLines,omitempty"`
+	// NumMatches reports the summed per-file match count in count mode.
+	NumMatches int `json:"numMatches,omitempty"`
 }
 
 // matchCandidate stores one ripgrep hit together with its modification time for stable sorting.
@@ -87,7 +104,7 @@ func (t *Tool) Name() string {
 
 // Description returns the summary exposed to callers and tests.
 func (t *Tool) Description() string {
-	return "Fast content search tool backed by ripgrep that returns matching file paths sorted by modification time."
+	return "Fast content search tool backed by ripgrep that returns matching file paths, content lines, or match counts."
 }
 
 // IsReadOnly reports that grep search never mutates external state.
@@ -143,36 +160,27 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		"pattern":     input.Pattern,
 		"search_path": searchPath,
 		"glob":        input.Glob,
+		"output_mode": normalizeOutputMode(input.OutputMode),
 		"working_dir": call.Context.WorkingDir,
 	})
 
-	results, err := t.runRipgrep(ctx, strings.TrimSpace(input.Pattern), strings.TrimSpace(input.Glob), searchPath)
+	output, err := t.runSearch(ctx, searchRequest{
+		pattern:    strings.TrimSpace(input.Pattern),
+		glob:       strings.TrimSpace(input.Glob),
+		searchPath: searchPath,
+		workingDir: call.Context.WorkingDir,
+		outputMode: normalizeOutputMode(input.OutputMode),
+		start:      start,
+	})
 	if err != nil {
 		return coretool.Result{Error: err.Error()}, nil
-	}
-
-	matches, err := t.collectMatches(results)
-	if err != nil {
-		return coretool.Result{}, err
-	}
-
-	sortMatches(matches)
-
-	filenames := make([]string, 0, len(matches))
-	for _, match := range matches {
-		filenames = append(filenames, platformfs.ToRelativePath(match.absolutePath, call.Context.WorkingDir))
-	}
-
-	output := Output{
-		DurationMs: time.Since(start).Milliseconds(),
-		NumFiles:   len(filenames),
-		Filenames:  filenames,
 	}
 
 	logger.DebugCF("grep_tool", "grep search finished", map[string]any{
 		"pattern":     input.Pattern,
 		"search_path": searchPath,
 		"glob":        input.Glob,
+		"output_mode": output.Mode,
 		"num_files":   output.NumFiles,
 		"is_dir":      info.IsDir(),
 	})
@@ -202,12 +210,88 @@ func inputSchema() coretool.InputSchema {
 				Type:        coretool.ValueKindString,
 				Description: "Optional glob filter passed through to ripgrep.",
 			},
+			"output_mode": {
+				Type:        coretool.ValueKindString,
+				Description: `Optional result mode: "files_with_matches" (default), "content", or "count".`,
+			},
 		},
 	}
 }
 
-// runRipgrep executes the host ripgrep binary and returns absolute matching file paths.
-func (t *Tool) runRipgrep(ctx context.Context, pattern string, glob string, searchPath string) ([]string, error) {
+// searchRequest collects the minimal parameters needed to project one grep output mode.
+type searchRequest struct {
+	// pattern stores the ripgrep pattern after input normalization.
+	pattern string
+	// glob stores the optional caller-supplied ripgrep glob.
+	glob string
+	// searchPath stores the absolute file or directory handed to ripgrep.
+	searchPath string
+	// workingDir stores the caller cwd used for relative path rendering.
+	workingDir string
+	// outputMode selects the ripgrep flags and result projection.
+	outputMode string
+	// start stores the invocation start time for duration accounting.
+	start time.Time
+}
+
+// runSearch dispatches to the output-mode-specific ripgrep path and result shaping.
+func (t *Tool) runSearch(ctx context.Context, request searchRequest) (Output, error) {
+	switch request.outputMode {
+	case outputModeContent:
+		lines, err := t.runRipgrep(ctx, request.pattern, request.glob, request.searchPath, request.outputMode)
+		if err != nil {
+			return Output{}, err
+		}
+		relativeLines := relativizeRipgrepLines(lines, request.workingDir)
+		return Output{
+			Mode:       outputModeContent,
+			DurationMs: time.Since(request.start).Milliseconds(),
+			Content:    strings.Join(relativeLines, "\n"),
+			NumLines:   len(relativeLines),
+		}, nil
+	case outputModeCount:
+		lines, err := t.runRipgrep(ctx, request.pattern, request.glob, request.searchPath, request.outputMode)
+		if err != nil {
+			return Output{}, err
+		}
+		relativeLines := relativizeRipgrepLines(lines, request.workingDir)
+		numFiles, numMatches := summarizeCountLines(relativeLines)
+		return Output{
+			Mode:       outputModeCount,
+			DurationMs: time.Since(request.start).Milliseconds(),
+			NumFiles:   numFiles,
+			Content:    strings.Join(relativeLines, "\n"),
+			NumMatches: numMatches,
+		}, nil
+	default:
+		paths, err := t.runRipgrep(ctx, request.pattern, request.glob, request.searchPath, request.outputMode)
+		if err != nil {
+			return Output{}, err
+		}
+
+		matches, err := t.collectMatches(paths)
+		if err != nil {
+			return Output{}, err
+		}
+
+		sortMatches(matches)
+
+		filenames := make([]string, 0, len(matches))
+		for _, match := range matches {
+			filenames = append(filenames, platformfs.ToRelativePath(match.absolutePath, request.workingDir))
+		}
+
+		return Output{
+			Mode:       outputModeFilesWithMatches,
+			DurationMs: time.Since(request.start).Milliseconds(),
+			NumFiles:   len(filenames),
+			Filenames:  filenames,
+		}, nil
+	}
+}
+
+// runRipgrep executes the host ripgrep binary and returns one line per ripgrep output row.
+func (t *Tool) runRipgrep(ctx context.Context, pattern string, glob string, searchPath string, outputMode string) ([]string, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("grep tool: pattern is required")
 	}
@@ -217,7 +301,15 @@ func (t *Tool) runRipgrep(ctx context.Context, pattern string, glob string, sear
 		commandName = defaultCommandName
 	}
 
-	args := []string{"--hidden", "--files-with-matches"}
+	args := []string{"--hidden"}
+	switch outputMode {
+	case outputModeContent:
+		// No extra flags: ripgrep returns matching lines in path:line format.
+	case outputModeCount:
+		args = append(args, "--count")
+	default:
+		args = append(args, "--files-with-matches")
+	}
 	for _, dir := range vcsDirectoriesToExclude {
 		args = append(args, "--glob", "!"+dir)
 	}
@@ -302,12 +394,82 @@ func parseRipgrepOutput(stdout string) []string {
 	return paths
 }
 
-// renderOutput formats the caller-facing result body for the first migration pass.
-func renderOutput(output Output) string {
-	if output.NumFiles == 0 {
-		return "No files found"
+// relativizeRipgrepLines rewrites ripgrep output rows so leading absolute paths become cwd-relative.
+func relativizeRipgrepLines(lines []string, workingDir string) []string {
+	relativeLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		colonIndex := strings.Index(line, ":")
+		if colonIndex <= 0 {
+			relativeLines = append(relativeLines, line)
+			continue
+		}
+
+		absolutePath := filepath.Clean(line[:colonIndex])
+		relativePath := platformfs.ToRelativePath(absolutePath, workingDir)
+		relativeLines = append(relativeLines, relativePath+line[colonIndex:])
 	}
-	return strings.Join(output.Filenames, "\n")
+	return relativeLines
+}
+
+// summarizeCountLines aggregates per-file count rows into file and match totals.
+func summarizeCountLines(lines []string) (int, int) {
+	numFiles := 0
+	numMatches := 0
+	for _, line := range lines {
+		colonIndex := strings.LastIndex(line, ":")
+		if colonIndex <= 0 {
+			continue
+		}
+
+		count, err := strconv.Atoi(strings.TrimSpace(line[colonIndex+1:]))
+		if err != nil {
+			continue
+		}
+
+		numFiles++
+		numMatches += count
+	}
+	return numFiles, numMatches
+}
+
+// normalizeOutputMode keeps unknown modes aligned with the default files-with-matches path.
+func normalizeOutputMode(outputMode string) string {
+	switch strings.TrimSpace(outputMode) {
+	case outputModeContent:
+		return outputModeContent
+	case outputModeCount:
+		return outputModeCount
+	default:
+		return outputModeFilesWithMatches
+	}
+}
+
+// renderOutput formats the caller-facing result body for the current migration pass.
+func renderOutput(output Output) string {
+	switch output.Mode {
+	case outputModeContent:
+		if strings.TrimSpace(output.Content) == "" {
+			return "No matches found"
+		}
+		return output.Content
+	case outputModeCount:
+		if strings.TrimSpace(output.Content) == "" {
+			return "No matches found"
+		}
+		summary := fmt.Sprintf(
+			"\n\nFound %d total %s across %d %s.",
+			output.NumMatches,
+			pluralize(output.NumMatches, "occurrence", "occurrences"),
+			output.NumFiles,
+			pluralize(output.NumFiles, "file", "files"),
+		)
+		return output.Content + summary
+	default:
+		if output.NumFiles == 0 {
+			return "No files found"
+		}
+		return strings.Join(output.Filenames, "\n")
+	}
 }
 
 // inputPathOrWorkingDir keeps handled validation errors aligned with the user-provided path.
@@ -316,4 +478,12 @@ func inputPathOrWorkingDir(inputPath string, expandedPath string) string {
 		return expandedPath
 	}
 	return inputPath
+}
+
+// pluralize chooses a singular or plural label for small caller-facing summaries.
+func pluralize(count int, singular string, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }

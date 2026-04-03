@@ -59,8 +59,117 @@ func TestToolInvokeMatchesFiles(t *testing.T) {
 	if data.NumFiles != 2 {
 		t.Fatalf("Invoke() numFiles = %d, want 2", data.NumFiles)
 	}
+	if data.Mode != outputModeFilesWithMatches {
+		t.Fatalf("Invoke() mode = %q, want %q", data.Mode, outputModeFilesWithMatches)
+	}
 	if len(data.Filenames) != 2 || data.Filenames[0] != filepath.Join("nested", "second.go") || data.Filenames[1] != "first.go" {
 		t.Fatalf("Invoke() filenames = %#v", data.Filenames)
+	}
+}
+
+// TestToolInvokeContentMode verifies content output mode returns relativized matching lines.
+func TestToolInvokeContentMode(t *testing.T) {
+	projectDir := t.TempDir()
+	mustMkdirAll(t, filepath.Join(projectDir, "nested"))
+	mustWriteFile(t, filepath.Join(projectDir, "main.go"), "package main\nconst target = true\n")
+	mustWriteFile(t, filepath.Join(projectDir, "nested", "helper.go"), "package nested\nconst target = true\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":     "\\btarget\\b",
+			"glob":        "*.go",
+			"output_mode": "content",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	data, ok := result.Meta["data"].(Output)
+	if !ok {
+		t.Fatalf("Invoke() meta data type = %T", result.Meta["data"])
+	}
+
+	if data.Mode != outputModeContent {
+		t.Fatalf("Invoke() mode = %q, want %q", data.Mode, outputModeContent)
+	}
+	if data.NumLines != 2 {
+		t.Fatalf("Invoke() numLines = %d, want 2", data.NumLines)
+	}
+	if data.Content != "main.go:const target = true\nnested/helper.go:const target = true" {
+		t.Fatalf("Invoke() content = %q", data.Content)
+	}
+	if result.Output != data.Content {
+		t.Fatalf("Invoke() output = %q, want content output", result.Output)
+	}
+}
+
+// TestToolInvokeCountMode verifies count output mode returns relative per-file counts and summary totals.
+func TestToolInvokeCountMode(t *testing.T) {
+	projectDir := t.TempDir()
+	mustMkdirAll(t, filepath.Join(projectDir, "nested"))
+	mustWriteFile(t, filepath.Join(projectDir, "main.go"), "package main\nconst target = true\nconst targetAgain = true\n")
+	mustWriteFile(t, filepath.Join(projectDir, "nested", "helper.go"), "package nested\nconst target = true\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":     "\\btarget\\b",
+			"glob":        "*.go",
+			"output_mode": "count",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	data, ok := result.Meta["data"].(Output)
+	if !ok {
+		t.Fatalf("Invoke() meta data type = %T", result.Meta["data"])
+	}
+
+	if data.Mode != outputModeCount {
+		t.Fatalf("Invoke() mode = %q, want %q", data.Mode, outputModeCount)
+	}
+	if data.NumFiles != 2 {
+		t.Fatalf("Invoke() numFiles = %d, want 2", data.NumFiles)
+	}
+	if data.NumMatches != 2 {
+		t.Fatalf("Invoke() numMatches = %d, want 2", data.NumMatches)
+	}
+	if data.Content != "main.go:1\nnested/helper.go:1" {
+		t.Fatalf("Invoke() content = %q", data.Content)
+	}
+	wantOutput := "main.go:1\nnested/helper.go:1\n\nFound 2 total occurrences across 2 files."
+	if result.Output != wantOutput {
+		t.Fatalf("Invoke() output = %q, want %q", result.Output, wantOutput)
 	}
 }
 
