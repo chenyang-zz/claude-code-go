@@ -1,0 +1,6 @@
+app:
+  name: claude-code-go
+runtime:
+  provider: anthropic
+  model: claude-sonnet
+  approval_mode: ask
