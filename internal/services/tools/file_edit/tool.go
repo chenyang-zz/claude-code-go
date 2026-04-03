@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -16,6 +17,10 @@ import (
 const (
 	// Name is the stable registry identifier used by the migrated FileEditTool.
 	Name = "Edit"
+	// unreadBeforeEditError mirrors the source tool's rejection when an existing file was not fully read first.
+	unreadBeforeEditError = "File has not been read yet. Read it first before writing to it."
+	// modifiedSinceReadError mirrors the source tool's rejection when the file changed after the recorded read.
+	modifiedSinceReadError = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it."
 )
 
 // Tool implements the first-batch FileEditTool.
@@ -141,6 +146,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if info.IsDir() {
 		return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
 	}
+	if err := validateExistingFileReadState(call.Context, filePath, info.ModTime()); err != nil {
+		return coretool.Result{Error: err.Error()}, nil
+	}
 
 	originalBytes, err := t.fs.ReadFile(filePath)
 	if err != nil {
@@ -229,4 +237,17 @@ func inputSchema() coretool.InputSchema {
 // renderOutput converts the structured edit result into the minimal caller-facing text payload.
 func renderOutput(output Output) string {
 	return fmt.Sprintf("Updated file: %s (%d replacement)", output.FilePath, output.Replacements)
+}
+
+// validateExistingFileReadState enforces the minimal "read before edit" and drift-protection guards for existing files.
+func validateExistingFileReadState(context coretool.UseContext, filePath string, currentModTime time.Time) error {
+	state, ok := context.LookupReadState(filePath)
+	if !ok || state.IsPartial {
+		return fmt.Errorf(unreadBeforeEditError)
+	}
+	if !state.ObservedModTime.IsZero() && currentModTime.After(state.ObservedModTime) {
+		return fmt.Errorf(modifiedSinceReadError)
+	}
+
+	return nil
 }

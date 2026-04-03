@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -17,6 +18,10 @@ func TestToolInvokeReplacesSingleOccurrence(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "main.go")
 	mustWriteFile(t, filePath, "package main\n\nfunc main() {}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
 
 	policy, err := newAllowWritePolicy(projectDir)
 	if err != nil {
@@ -34,6 +39,14 @@ func TestToolInvokeReplacesSingleOccurrence(t *testing.T) {
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -71,6 +84,10 @@ func TestToolInvokeRequiresReplaceAllForAmbiguousMatch(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "notes.txt")
 	mustWriteFile(t, filePath, "foo\nfoo\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
 
 	policy, err := newAllowWritePolicy(projectDir)
 	if err != nil {
@@ -88,6 +105,14 @@ func TestToolInvokeRequiresReplaceAllForAmbiguousMatch(t *testing.T) {
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -103,6 +128,10 @@ func TestToolInvokeSupportsReplaceAll(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "notes.txt")
 	mustWriteFile(t, filePath, "foo\nfoo\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
 
 	policy, err := newAllowWritePolicy(projectDir)
 	if err != nil {
@@ -121,6 +150,14 @@ func TestToolInvokeSupportsReplaceAll(t *testing.T) {
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -136,6 +173,124 @@ func TestToolInvokeSupportsReplaceAll(t *testing.T) {
 	}
 	if len(data.StructuredPatch) != 1 {
 		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
+	}
+}
+
+// TestToolInvokeRejectsEditWithoutReadState verifies existing files must be read before in-place editing.
+func TestToolInvokeRejectsEditWithoutReadState(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": "before",
+			"new_string": "after",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != unreadBeforeEditError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, unreadBeforeEditError)
+	}
+}
+
+// TestToolInvokeRejectsEditAfterPartialRead verifies partial reads do not satisfy the edit safety guard.
+func TestToolInvokeRejectsEditAfterPartialRead(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": "before",
+			"new_string": "after",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: time.Unix(90, 0),
+						IsPartial:       true,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != unreadBeforeEditError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, unreadBeforeEditError)
+	}
+}
+
+// TestToolInvokeRejectsEditAfterFileDrift verifies later file modifications invalidate an earlier full read.
+func TestToolInvokeRejectsEditAfterFileDrift(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	driftTime := time.Unix(200, 0)
+	if err := os.Chtimes(filePath, driftTime, driftTime); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": "before",
+			"new_string": "after",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(150, 0),
+						ObservedModTime: time.Unix(100, 0),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != modifiedSinceReadError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, modifiedSinceReadError)
 	}
 }
 
@@ -181,6 +336,10 @@ func TestToolInvokeRejectsMissingString(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "notes.txt")
 	mustWriteFile(t, filePath, "before\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
 
 	policy, err := newAllowWritePolicy(projectDir)
 	if err != nil {
@@ -198,6 +357,14 @@ func TestToolInvokeRejectsMissingString(t *testing.T) {
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
