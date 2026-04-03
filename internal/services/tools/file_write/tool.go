@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -23,6 +24,8 @@ const (
 	defaultDirPerm = 0o755
 	// unreadBeforeWriteError mirrors the source tool's rejection when an existing file was not fully read first.
 	unreadBeforeWriteError = "File has not been read yet. Read it first before writing to it."
+	// modifiedSinceReadError mirrors the source tool's rejection when the file changed after the recorded read.
+	modifiedSinceReadError = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it."
 )
 
 // Tool implements the first-batch FileWriteTool.
@@ -134,7 +137,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		if info.IsDir() {
 			return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
 		}
-		if err := validateExistingFileReadState(call.Context, filePath); err != nil {
+		if err := validateExistingFileReadState(call.Context, filePath, info.ModTime()); err != nil {
 			return coretool.Result{Error: err.Error()}, nil
 		}
 		writeType = "update"
@@ -222,11 +225,14 @@ func derefString(value *string) string {
 	return *value
 }
 
-// validateExistingFileReadState enforces the minimal "read before overwrite" guard for existing files.
-func validateExistingFileReadState(context coretool.UseContext, filePath string) error {
+// validateExistingFileReadState enforces the minimal "read before overwrite" and drift-protection guards for existing files.
+func validateExistingFileReadState(context coretool.UseContext, filePath string, currentModTime time.Time) error {
 	state, ok := context.LookupReadState(filePath)
 	if !ok || state.IsPartial {
 		return fmt.Errorf(unreadBeforeWriteError)
+	}
+	if !state.ObservedModTime.IsZero() && currentModTime.After(state.ObservedModTime) {
+		return fmt.Errorf(modifiedSinceReadError)
 	}
 
 	return nil

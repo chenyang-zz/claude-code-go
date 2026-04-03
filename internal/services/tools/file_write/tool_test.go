@@ -75,6 +75,10 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "notes.txt")
 	mustWriteFile(t, filePath, "before\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
 
 	policy, err := newAllowWritePolicy(projectDir)
 	if err != nil {
@@ -95,7 +99,7 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 				Files: map[string]coretool.ReadState{
 					filePath: {
 						ReadAt:          time.Unix(100, 0),
-						ObservedModTime: time.Unix(90, 0),
+						ObservedModTime: info.ModTime(),
 					},
 				},
 			},
@@ -207,6 +211,58 @@ func TestToolInvokeRejectsOverwriteAfterPartialRead(t *testing.T) {
 	}
 	if result.Error != unreadBeforeWriteError {
 		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, unreadBeforeWriteError)
+	}
+}
+
+// TestToolInvokeRejectsOverwriteAfterFileDrift verifies a later file modification invalidates an earlier full read.
+func TestToolInvokeRejectsOverwriteAfterFileDrift(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	driftTime := time.Unix(200, 0)
+	if err := os.Chtimes(filePath, driftTime, driftTime); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "notes.txt",
+			"content":   "after\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(150, 0),
+						ObservedModTime: time.Unix(100, 0),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != modifiedSinceReadError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, modifiedSinceReadError)
+	}
+
+	writtenContent, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(writtenContent) != "before\n" {
+		t.Fatalf("written content = %q, want %q", string(writtenContent), "before\n")
 	}
 }
 
