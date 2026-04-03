@@ -3,6 +3,8 @@ package file_edit
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -18,10 +20,16 @@ import (
 const (
 	// Name is the stable registry identifier used by the migrated FileEditTool.
 	Name = "Edit"
+	// defaultFilePerm is the fallback file mode for files created through the empty-old-string branch.
+	defaultFilePerm = 0o644
+	// defaultDirPerm is the fallback directory mode for parent directories created by the tool.
+	defaultDirPerm = 0o755
 	// unreadBeforeEditError mirrors the source tool's rejection when an existing file was not fully read first.
 	unreadBeforeEditError = "File has not been read yet. Read it first before writing to it."
 	// modifiedSinceReadError mirrors the source tool's rejection when the file changed after the recorded read.
 	modifiedSinceReadError = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it."
+	// fileAlreadyExistsForCreateError mirrors the source tool's rejection when an empty-old-string create is attempted against a non-empty file.
+	fileAlreadyExistsForCreateError = "Cannot create new file - file already exists."
 )
 
 // Tool implements the first-batch FileEditTool.
@@ -109,9 +117,6 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if strings.TrimSpace(input.FilePath) == "" {
 		return coretool.Result{Error: "file_path is required"}, nil
 	}
-	if input.OldString == "" {
-		return coretool.Result{Error: "old_string must not be empty"}, nil
-	}
 	if input.OldString == input.NewString {
 		return coretool.Result{Error: "No changes to make: old_string and new_string are exactly the same."}, nil
 	}
@@ -137,29 +142,15 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		"replace_all": input.ReplaceAll,
 	})
 
-	info, err := t.fs.Stat(filePath)
+	if input.OldString == "" {
+		return t.handleEmptyOldString(call.Context, input, filePath)
+	}
+
+	originalContent, filePerm, err := t.readEditableFile(call.Context, input.FilePath, filePath)
 	if err != nil {
-		if platformfs.IsNotExist(err) {
-			return coretool.Result{Error: fmt.Sprintf("File does not exist: %s", input.FilePath)}, nil
-		}
-		return coretool.Result{Error: fmt.Sprintf("file edit tool: inspect target: %v", err)}, nil
-	}
-	if info.IsDir() {
-		return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
-	}
-	if err := validateExistingFileReadState(call.Context, filePath, info.ModTime()); err != nil {
 		return coretool.Result{Error: err.Error()}, nil
 	}
 
-	originalBytes, err := t.fs.ReadFile(filePath)
-	if err != nil {
-		return coretool.Result{Error: fmt.Sprintf("file edit tool: read file: %v", err)}, nil
-	}
-	if !utf8.Valid(originalBytes) {
-		return coretool.Result{Error: "This tool cannot edit binary files. The file appears to contain non-text content."}, nil
-	}
-
-	originalContent := string(originalBytes)
 	actualOldString, ok := findActualString(originalContent, input.OldString)
 	if !ok {
 		return coretool.Result{
@@ -189,7 +180,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		updatedContent = strings.Replace(originalContent, actualOldString, actualNewString, 1)
 	}
 
-	if err := t.fs.WriteFile(filePath, []byte(updatedContent), info.Mode().Perm()); err != nil {
+	if err := t.fs.WriteFile(filePath, []byte(updatedContent), filePerm); err != nil {
 		return coretool.Result{Error: fmt.Sprintf("file edit tool: write file: %v", err)}, nil
 	}
 
@@ -206,6 +197,95 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	logger.DebugCF("file_edit_tool", "file edit finished", map[string]any{
 		"file_path":    filePath,
 		"replacements": replacementCount,
+	})
+
+	return coretool.Result{
+		Output: renderOutput(output),
+		Meta: map[string]any{
+			"data": output,
+		},
+	}, nil
+}
+
+// readEditableFile loads the current file content for the normal edit path and enforces existing-file safety checks.
+func (t *Tool) readEditableFile(useContext coretool.UseContext, requestedPath string, filePath string) (string, os.FileMode, error) {
+	info, err := t.fs.Stat(filePath)
+	if err != nil {
+		if platformfs.IsNotExist(err) {
+			return "", defaultFilePerm, fmt.Errorf("File does not exist: %s", requestedPath)
+		}
+		return "", 0, fmt.Errorf("file edit tool: inspect target: %v", err)
+	}
+	if info.IsDir() {
+		return "", 0, fmt.Errorf("Path is a directory, not a file: %s", requestedPath)
+	}
+	if err := validateExistingFileReadState(useContext, filePath, info.ModTime()); err != nil {
+		return "", 0, err
+	}
+
+	originalBytes, err := t.fs.ReadFile(filePath)
+	if err != nil {
+		return "", 0, fmt.Errorf("file edit tool: read file: %v", err)
+	}
+	if !utf8.Valid(originalBytes) {
+		return "", 0, fmt.Errorf("This tool cannot edit binary files. The file appears to contain non-text content.")
+	}
+
+	return string(originalBytes), info.Mode().Perm(), nil
+}
+
+// handleEmptyOldString applies the source-aligned create/empty-file replacement branch used when old_string is empty.
+func (t *Tool) handleEmptyOldString(useContext coretool.UseContext, input Input, filePath string) (coretool.Result, error) {
+	filePerm := os.FileMode(defaultFilePerm)
+	originalContent := ""
+
+	info, err := t.fs.Stat(filePath)
+	switch {
+	case err == nil:
+		if info.IsDir() {
+			return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
+		}
+		originalBytes, readErr := t.fs.ReadFile(filePath)
+		if readErr != nil {
+			return coretool.Result{Error: fmt.Sprintf("file edit tool: read file: %v", readErr)}, nil
+		}
+		if !utf8.Valid(originalBytes) {
+			return coretool.Result{Error: "This tool cannot edit binary files. The file appears to contain non-text content."}, nil
+		}
+
+		originalContent = string(originalBytes)
+		filePerm = info.Mode().Perm()
+		if strings.TrimSpace(originalContent) != "" {
+			return coretool.Result{Error: fileAlreadyExistsForCreateError}, nil
+		}
+	case platformfs.IsNotExist(err):
+		originalContent = ""
+	default:
+		return coretool.Result{Error: fmt.Sprintf("file edit tool: inspect target: %v", err)}, nil
+	}
+
+	parentDir := filepath.Dir(filePath)
+	if err := t.fs.MkdirAll(parentDir, defaultDirPerm); err != nil {
+		return coretool.Result{Error: fmt.Sprintf("file edit tool: create parent directories: %v", err)}, nil
+	}
+	if err := t.fs.WriteFile(filePath, []byte(input.NewString), filePerm); err != nil {
+		return coretool.Result{Error: fmt.Sprintf("file edit tool: write file: %v", err)}, nil
+	}
+
+	output := Output{
+		FilePath:        platformfs.ToRelativePath(filePath, useContext.WorkingDir),
+		OldString:       input.OldString,
+		NewString:       input.NewString,
+		Replacements:    1,
+		Content:         input.NewString,
+		OriginalContent: originalContent,
+		StructuredPatch: toolshared.BuildStructuredPatch(originalContent, input.NewString),
+	}
+
+	logger.DebugCF("file_edit_tool", "file edit finished", map[string]any{
+		"file_path":    filePath,
+		"replacements": 1,
+		"empty_old":    true,
 	})
 
 	return coretool.Result{

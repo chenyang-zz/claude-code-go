@@ -280,6 +280,133 @@ func TestToolInvokePreservesCurlySingleQuotes(t *testing.T) {
 	}
 }
 
+// TestToolInvokeCreatesFileWhenOldStringEmpty verifies empty old_string can create a missing file without prior read state.
+func TestToolInvokeCreatesFileWhenOldStringEmpty(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "new.txt")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "new.txt",
+			"old_string": "",
+			"new_string": "created\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	content, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(content) != "created\n" {
+		t.Fatalf("created content = %q", string(content))
+	}
+
+	data := result.Meta["data"].(Output)
+	if data.OriginalContent != "" {
+		t.Fatalf("Invoke() original content = %q, want empty", data.OriginalContent)
+	}
+	if data.Replacements != 1 {
+		t.Fatalf("Invoke() replacements = %d, want 1", data.Replacements)
+	}
+}
+
+// TestToolInvokeWritesIntoEmptyFileWhenOldStringEmpty verifies an existing empty file can be filled through the empty-old-string branch.
+func TestToolInvokeWritesIntoEmptyFileWhenOldStringEmpty(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "empty.txt")
+	mustWriteFile(t, filePath, "")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "empty.txt",
+			"old_string": "",
+			"new_string": "seed\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	content, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(content) != "seed\n" {
+		t.Fatalf("updated content = %q", string(content))
+	}
+}
+
+// TestToolInvokeRejectsCreateWhenTargetAlreadyHasContent verifies empty old_string does not overwrite a non-empty file.
+func TestToolInvokeRejectsCreateWhenTargetAlreadyHasContent(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": "",
+			"new_string": "after\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != fileAlreadyExistsForCreateError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, fileAlreadyExistsForCreateError)
+	}
+
+	content, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(content) != "before\n" {
+		t.Fatalf("file content = %q, want unchanged", string(content))
+	}
+}
+
 // TestToolInvokeRejectsEditWithoutReadState verifies existing files must be read before in-place editing.
 func TestToolInvokeRejectsEditWithoutReadState(t *testing.T) {
 	projectDir := t.TempDir()
