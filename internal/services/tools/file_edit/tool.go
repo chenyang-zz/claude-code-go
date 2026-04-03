@@ -9,6 +9,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	toolshared "github.com/sheepzhao/claude-code-go/internal/services/tools/shared"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -51,6 +52,8 @@ type Output struct {
 	Content string `json:"content"`
 	// OriginalContent stores the pre-edit file content for callers and tests.
 	OriginalContent string `json:"originalContent"`
+	// StructuredPatch stores the minimal diff payload shared with other write-oriented tools.
+	StructuredPatch []toolshared.Hunk `json:"structuredPatch"`
 }
 
 // NewTool constructs a FileEditTool with explicit host dependencies.
@@ -180,6 +183,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		Replacements:    replacementCount,
 		Content:         updatedContent,
 		OriginalContent: originalContent,
+		StructuredPatch: toolshared.BuildStructuredPatch(originalContent, updatedContent),
 	}
 
 	logger.DebugCF("file_edit_tool", "file edit finished", map[string]any{

@@ -61,6 +61,12 @@ func TestToolInvokeCreatesFile(t *testing.T) {
 	if data.OriginalContent != nil {
 		t.Fatalf("Invoke() original content = %v, want nil", *data.OriginalContent)
 	}
+	if len(data.StructuredPatch) != 1 {
+		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
+	}
+	if data.StructuredPatch[0].NewLines != 2 {
+		t.Fatalf("Invoke() structured patch = %#v", data.StructuredPatch)
+	}
 }
 
 // TestToolInvokeUpdatesExistingFile verifies existing file content is replaced and surfaced in metadata.
@@ -99,6 +105,12 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 	data := result.Meta["data"].(Output)
 	if data.Type != "update" || data.OriginalContent == nil || *data.OriginalContent != "before\n" {
 		t.Fatalf("Invoke() metadata = %#v", data)
+	}
+	if len(data.StructuredPatch) != 1 {
+		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
+	}
+	if got := data.StructuredPatch[0].Lines; len(got) != 2 || got[0] != "-before" || got[1] != "+after" {
+		t.Fatalf("Invoke() structured patch lines = %#v", got)
 	}
 
 	writtenContent, readErr := os.ReadFile(filePath)

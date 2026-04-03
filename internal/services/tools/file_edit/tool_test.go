@@ -58,6 +58,12 @@ func TestToolInvokeReplacesSingleOccurrence(t *testing.T) {
 	if data.Replacements != 1 || data.Content != string(updatedContent) {
 		t.Fatalf("Invoke() metadata = %#v", data)
 	}
+	if len(data.StructuredPatch) != 1 {
+		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
+	}
+	if got := data.StructuredPatch[0].Lines; len(got) != 2 || got[0] != "-func main() {}" || got[1] != "+func run() {}" {
+		t.Fatalf("Invoke() structured patch lines = %#v", got)
+	}
 }
 
 // TestToolInvokeRequiresReplaceAllForAmbiguousMatch verifies repeated matches are rejected unless replace_all is enabled.
@@ -127,6 +133,9 @@ func TestToolInvokeSupportsReplaceAll(t *testing.T) {
 	data := result.Meta["data"].(Output)
 	if data.Replacements != 2 {
 		t.Fatalf("Invoke() replacements = %d, want 2", data.Replacements)
+	}
+	if len(data.StructuredPatch) != 1 {
+		t.Fatalf("Invoke() structured patch = %#v, want one hunk", data.StructuredPatch)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	toolshared "github.com/sheepzhao/claude-code-go/internal/services/tools/shared"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -48,6 +49,8 @@ type Output struct {
 	Content string `json:"content"`
 	// OriginalContent stores the previous file content when an existing file was overwritten.
 	OriginalContent *string `json:"originalContent,omitempty"`
+	// StructuredPatch stores the minimal diff payload shared with other write-oriented tools.
+	StructuredPatch []toolshared.Hunk `json:"structuredPatch"`
 }
 
 // NewTool constructs a FileWriteTool with explicit host dependencies.
@@ -159,6 +162,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		FilePath:        platformfs.ToRelativePath(filePath, call.Context.WorkingDir),
 		Content:         input.Content,
 		OriginalContent: originalContent,
+		StructuredPatch: toolshared.BuildStructuredPatch(derefString(originalContent), input.Content),
 	}
 
 	logger.DebugCF("file_write_tool", "file write finished", map[string]any{
@@ -202,4 +206,13 @@ func renderOutput(output Output) string {
 	default:
 		return fmt.Sprintf("Wrote file: %s", output.FilePath)
 	}
+}
+
+// derefString converts an optional string pointer into a stable concrete value for shared patch generation.
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+
+	return *value
 }
