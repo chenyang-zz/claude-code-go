@@ -173,3 +173,75 @@ func TestToolExecutorMaintainsReadState(t *testing.T) {
 		t.Fatal("Execute(write) IsPartial = true, want false")
 	}
 }
+
+// TestToolExecutorMergesInlineReadState verifies executor state is merged with caller-supplied snapshots before invocation.
+func TestToolExecutorMergesInlineReadState(t *testing.T) {
+	modules, err := wiring.NewModules(readTrackingTool{}, writeTrackingTool{})
+	if err != nil {
+		t.Fatalf("NewModules() error = %v", err)
+	}
+
+	executor := NewToolExecutor(modules.Tools)
+
+	if _, err := executor.Execute(context.Background(), tool.Call{
+		ID:   "call-read",
+		Name: "read",
+		Context: tool.UseContext{
+			WorkingDir: "/tmp/project",
+		},
+	}); err != nil {
+		t.Fatalf("Execute(read) error = %v", err)
+	}
+
+	inlineReadAt := time.Unix(200, 0)
+	inlineModTime := time.Unix(180, 0)
+	result, err := executor.Execute(context.Background(), tool.Call{
+		ID:   "call-write",
+		Name: "write",
+		Context: tool.UseContext{
+			WorkingDir: "/tmp/project",
+			ReadState: tool.ReadStateSnapshot{
+				Files: map[string]tool.ReadState{
+					"/tmp/project/other.go": {
+						ReadAt:          inlineReadAt,
+						ObservedModTime: inlineModTime,
+						IsPartial:       true,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute(write) error = %v", err)
+	}
+
+	snapshot, ok := result.Meta["read_state"].(tool.ReadStateSnapshot)
+	if !ok {
+		t.Fatalf("Execute(write) read_state type = %T", result.Meta["read_state"])
+	}
+	if len(snapshot.Files) != 2 {
+		t.Fatalf("Execute(write) len(read_state.Files) = %d, want 2", len(snapshot.Files))
+	}
+
+	trackedState, ok := snapshot.Lookup("/tmp/project/main.go")
+	if !ok {
+		t.Fatal("Execute(write) missing executor-tracked read state")
+	}
+	if trackedState.ReadAt != time.Unix(100, 0) {
+		t.Fatalf("Execute(write) tracked ReadAt = %v, want %v", trackedState.ReadAt, time.Unix(100, 0))
+	}
+
+	inlineState, ok := snapshot.Lookup("/tmp/project/other.go")
+	if !ok {
+		t.Fatal("Execute(write) missing inline read state")
+	}
+	if inlineState.ReadAt != inlineReadAt {
+		t.Fatalf("Execute(write) inline ReadAt = %v, want %v", inlineState.ReadAt, inlineReadAt)
+	}
+	if inlineState.ObservedModTime != inlineModTime {
+		t.Fatalf("Execute(write) inline ObservedModTime = %v, want %v", inlineState.ObservedModTime, inlineModTime)
+	}
+	if !inlineState.IsPartial {
+		t.Fatal("Execute(write) inline IsPartial = false, want true")
+	}
+}

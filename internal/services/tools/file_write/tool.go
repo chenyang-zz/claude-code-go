@@ -21,6 +21,8 @@ const (
 	defaultFilePerm = 0o644
 	// defaultDirPerm is the fallback directory mode for parent directories created by the tool.
 	defaultDirPerm = 0o755
+	// unreadBeforeWriteError mirrors the source tool's rejection when an existing file was not fully read first.
+	unreadBeforeWriteError = "File has not been read yet. Read it first before writing to it."
 )
 
 // Tool implements the first-batch FileWriteTool.
@@ -132,6 +134,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		if info.IsDir() {
 			return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
 		}
+		if err := validateExistingFileReadState(call.Context, filePath); err != nil {
+			return coretool.Result{Error: err.Error()}, nil
+		}
 		writeType = "update"
 		filePerm = info.Mode().Perm()
 
@@ -215,4 +220,14 @@ func derefString(value *string) string {
 	}
 
 	return *value
+}
+
+// validateExistingFileReadState enforces the minimal "read before overwrite" guard for existing files.
+func validateExistingFileReadState(context coretool.UseContext, filePath string) error {
+	state, ok := context.LookupReadState(filePath)
+	if !ok || state.IsPartial {
+		return fmt.Errorf(unreadBeforeWriteError)
+	}
+
+	return nil
 }

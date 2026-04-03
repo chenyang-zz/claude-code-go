@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -90,6 +91,14 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: time.Unix(90, 0),
+					},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -119,6 +128,85 @@ func TestToolInvokeUpdatesExistingFile(t *testing.T) {
 	}
 	if string(writtenContent) != "after\n" {
 		t.Fatalf("written content = %q", string(writtenContent))
+	}
+}
+
+// TestToolInvokeRejectsOverwriteWithoutReadState verifies existing files must be read before full overwrite.
+func TestToolInvokeRejectsOverwriteWithoutReadState(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "notes.txt",
+			"content":   "after\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != unreadBeforeWriteError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, unreadBeforeWriteError)
+	}
+
+	writtenContent, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(writtenContent) != "before\n" {
+		t.Fatalf("written content = %q, want %q", string(writtenContent), "before\n")
+	}
+}
+
+// TestToolInvokeRejectsOverwriteAfterPartialRead verifies partial reads do not satisfy the overwrite safety guard.
+func TestToolInvokeRejectsOverwriteAfterPartialRead(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "notes.txt",
+			"content":   "after\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: time.Unix(90, 0),
+						IsPartial:       true,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != unreadBeforeWriteError {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, unreadBeforeWriteError)
 	}
 }
 
