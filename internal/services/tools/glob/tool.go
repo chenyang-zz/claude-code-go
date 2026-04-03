@@ -357,11 +357,3 @@ func matchPathSegments(pathSegments []string, patternSegments []string) (bool, e
 
 	return matchPathSegments(pathSegments[1:], patternSegments[1:])
 }
-
-// min keeps small slice-capacity setup readable without dragging in extra helpers.
-func min(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

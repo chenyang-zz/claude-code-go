@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 
@@ -41,6 +42,13 @@ func (LocalFS) ReadFile(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	logFSResult("readfile", path, err)
 	return data, err
+}
+
+// OpenRead opens one filesystem entry for streaming reads.
+func (LocalFS) OpenRead(path string) (io.ReadCloser, error) {
+	file, err := os.Open(path)
+	logFSResult("openread", path, err)
+	return file, err
 }
 
 // WriteFile writes or replaces a file with the provided permissions.

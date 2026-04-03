@@ -1,6 +1,9 @@
 package fs
 
-import "os"
+import (
+	"io"
+	"os"
+)
 
 // FileSystem defines the minimal filesystem contract shared by the first-batch tools.
 type FileSystem interface {
@@ -12,6 +15,8 @@ type FileSystem interface {
 	ReadDir(path string) ([]os.DirEntry, error)
 	// ReadFile loads the entire file into memory.
 	ReadFile(path string) ([]byte, error)
+	// OpenRead opens one filesystem entry for streaming reads.
+	OpenRead(path string) (io.ReadCloser, error)
 	// WriteFile writes or replaces a file with the provided permissions.
 	WriteFile(path string, data []byte, perm os.FileMode) error
 	// MkdirAll creates the directory tree required by path.
