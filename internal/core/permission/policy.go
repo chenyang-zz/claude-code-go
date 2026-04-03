@@ -2,7 +2,8 @@ package permission
 
 import "context"
 
-type PolicyEngine interface {
-	EvaluateTool(ctx context.Context, req ToolRequest) Decision
-	EvaluateCommand(ctx context.Context, req CommandRequest) Decision
+// Policy evaluates normalized filesystem permission requests.
+type Policy interface {
+	// EvaluateFilesystem returns the permission outcome for one filesystem request.
+	EvaluateFilesystem(ctx context.Context, req FilesystemRequest) Evaluation
 }
