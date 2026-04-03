@@ -1,11 +1,16 @@
 package tool
 
-import "time"
+import (
+	"maps"
+	"time"
+)
 
 // ReadState captures the minimal read snapshot needed to guard later writes.
 type ReadState struct {
 	// ReadAt records when the file content was last observed by a read tool.
 	ReadAt time.Time
+	// ObservedModTime records the file modification time seen by the latest successful read.
+	ObservedModTime time.Time
 	// IsPartial reports whether the recorded read only covered part of the file.
 	IsPartial bool
 }
@@ -24,6 +29,36 @@ func (s ReadStateSnapshot) Lookup(path string) (ReadState, bool) {
 
 	state, ok := s.Files[path]
 	return state, ok
+}
+
+// Clone returns a detached copy of the snapshot so callers can merge or expose state safely.
+func (s ReadStateSnapshot) Clone() ReadStateSnapshot {
+	if len(s.Files) == 0 {
+		return ReadStateSnapshot{}
+	}
+
+	cloned := make(map[string]ReadState, len(s.Files))
+	maps.Copy(cloned, s.Files)
+
+	return ReadStateSnapshot{Files: cloned}
+}
+
+// Merge overlays another snapshot into the receiver, replacing entries for matching paths.
+func (s *ReadStateSnapshot) Merge(other ReadStateSnapshot) {
+	if s == nil || len(other.Files) == 0 {
+		return
+	}
+
+	if s.Files == nil {
+		s.Files = make(map[string]ReadState, len(other.Files))
+	}
+
+	for path, state := range other.Files {
+		if path == "" {
+			continue
+		}
+		s.Files[path] = state
+	}
 }
 
 // UseContext carries the minimal host data shared with a single tool invocation.

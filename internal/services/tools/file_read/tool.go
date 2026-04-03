@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -187,7 +188,8 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	return coretool.Result{
 		Output: renderOutput(output),
 		Meta: map[string]any{
-			"data": output,
+			"data":       output,
+			"read_state": buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
 		},
 	}, nil
 }
@@ -329,4 +331,22 @@ func maxInt(value int, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+// buildReadStateSnapshot converts one successful read into the executor-facing read-state delta.
+func buildReadStateSnapshot(path string, observedModTime time.Time, offset int, limit int, readAt time.Time) coretool.ReadStateSnapshot {
+	snapshot := coretool.ReadStateSnapshot{}
+	if path == "" {
+		return snapshot
+	}
+
+	snapshot.Files = map[string]coretool.ReadState{
+		path: {
+			ReadAt:          readAt,
+			ObservedModTime: observedModTime,
+			IsPartial:       offset > defaultOffset || limit > 0,
+		},
+	}
+
+	return snapshot
 }

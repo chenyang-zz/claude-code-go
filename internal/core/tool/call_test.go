@@ -8,11 +8,13 @@ import (
 // TestReadStateSnapshotLookup verifies that the minimal read snapshot can expose read metadata by path.
 func TestReadStateSnapshotLookup(t *testing.T) {
 	readAt := time.Date(2026, time.April, 3, 10, 0, 0, 0, time.UTC)
+	modTime := time.Date(2026, time.April, 3, 9, 58, 0, 0, time.UTC)
 	snapshot := ReadStateSnapshot{
 		Files: map[string]ReadState{
 			"/tmp/project/main.go": {
-				ReadAt:    readAt,
-				IsPartial: true,
+				ReadAt:          readAt,
+				ObservedModTime: modTime,
+				IsPartial:       true,
 			},
 		},
 	}
@@ -23,6 +25,9 @@ func TestReadStateSnapshotLookup(t *testing.T) {
 	}
 	if !state.ReadAt.Equal(readAt) {
 		t.Fatalf("Lookup() ReadAt = %v, want %v", state.ReadAt, readAt)
+	}
+	if !state.ObservedModTime.Equal(modTime) {
+		t.Fatalf("Lookup() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
 	}
 	if !state.IsPartial {
 		t.Fatal("Lookup() IsPartial = false, want true")
@@ -40,6 +45,9 @@ func TestReadStateSnapshotLookupMissing(t *testing.T) {
 	if !state.ReadAt.IsZero() {
 		t.Fatalf("Lookup() ReadAt = %v, want zero time", state.ReadAt)
 	}
+	if !state.ObservedModTime.IsZero() {
+		t.Fatalf("Lookup() ObservedModTime = %v, want zero time", state.ObservedModTime)
+	}
 	if state.IsPartial {
 		t.Fatal("Lookup() IsPartial = true, want false")
 	}
@@ -48,14 +56,16 @@ func TestReadStateSnapshotLookupMissing(t *testing.T) {
 // TestUseContextLookupReadState verifies that tool invocations can query the shared read snapshot through UseContext.
 func TestUseContextLookupReadState(t *testing.T) {
 	readAt := time.Date(2026, time.April, 3, 11, 0, 0, 0, time.UTC)
+	modTime := time.Date(2026, time.April, 3, 10, 59, 0, 0, time.UTC)
 	context := UseContext{
 		WorkingDir: "/tmp/project",
 		Invoker:    "test",
 		ReadState: ReadStateSnapshot{
 			Files: map[string]ReadState{
 				"/tmp/project/app.go": {
-					ReadAt:    readAt,
-					IsPartial: false,
+					ReadAt:          readAt,
+					ObservedModTime: modTime,
+					IsPartial:       false,
 				},
 			},
 		},
@@ -68,7 +78,44 @@ func TestUseContextLookupReadState(t *testing.T) {
 	if !state.ReadAt.Equal(readAt) {
 		t.Fatalf("LookupReadState() ReadAt = %v, want %v", state.ReadAt, readAt)
 	}
+	if !state.ObservedModTime.Equal(modTime) {
+		t.Fatalf("LookupReadState() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
+	}
 	if state.IsPartial {
 		t.Fatal("LookupReadState() IsPartial = true, want false")
+	}
+}
+
+// TestReadStateSnapshotCloneAndMerge verifies the executor can safely copy and overlay read-state snapshots.
+func TestReadStateSnapshotCloneAndMerge(t *testing.T) {
+	base := ReadStateSnapshot{
+		Files: map[string]ReadState{
+			"/tmp/project/base.go": {
+				ReadAt:          time.Date(2026, time.April, 3, 12, 0, 0, 0, time.UTC),
+				ObservedModTime: time.Date(2026, time.April, 3, 11, 59, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	cloned := base.Clone()
+	cloned.Merge(ReadStateSnapshot{
+		Files: map[string]ReadState{
+			"/tmp/project/other.go": {
+				ReadAt:          time.Date(2026, time.April, 3, 12, 1, 0, 0, time.UTC),
+				ObservedModTime: time.Date(2026, time.April, 3, 12, 0, 30, 0, time.UTC),
+				IsPartial:       true,
+			},
+		},
+	})
+
+	if _, ok := base.Lookup("/tmp/project/other.go"); ok {
+		t.Fatal("base snapshot mutated after Clone()+Merge()")
+	}
+	state, ok := cloned.Lookup("/tmp/project/other.go")
+	if !ok {
+		t.Fatal("Clone()+Merge() missing merged path")
+	}
+	if !state.IsPartial {
+		t.Fatal("Clone()+Merge() IsPartial = false, want true")
 	}
 }

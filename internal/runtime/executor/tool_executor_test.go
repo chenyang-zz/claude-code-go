@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -61,5 +62,114 @@ func TestToolExecutorExecute(t *testing.T) {
 
 	if got := result.Meta["working_dir"]; got != "/tmp/project" {
 		t.Fatalf("Execute() working_dir = %v, want %q", got, "/tmp/project")
+	}
+}
+
+// readTrackingTool is a test double that emits one read-state delta after a synthetic read.
+type readTrackingTool struct{}
+
+// Name returns the stable registration name used by the read-state test.
+func (readTrackingTool) Name() string { return "read" }
+
+// Description returns a short summary for the read-state test tool.
+func (readTrackingTool) Description() string { return "test read tool" }
+
+// IsReadOnly reports that the synthetic read never mutates external state.
+func (readTrackingTool) IsReadOnly() bool { return true }
+
+// IsConcurrencySafe reports that the test read tool is safe to invoke concurrently.
+func (readTrackingTool) IsConcurrencySafe() bool { return true }
+
+// Invoke emits a read-state update to simulate one successful FileReadTool call.
+func (readTrackingTool) Invoke(_ context.Context, _ tool.Call) (tool.Result, error) {
+	return tool.Result{
+		Output: "read-ok",
+		Meta: map[string]any{
+			"read_state": tool.ReadStateSnapshot{
+				Files: map[string]tool.ReadState{
+					"/tmp/project/main.go": {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: time.Unix(90, 0),
+						IsPartial:       false,
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+// writeTrackingTool is a test double that exposes the invocation read state for assertions.
+type writeTrackingTool struct{}
+
+// Name returns the stable registration name used by the read-state test.
+func (writeTrackingTool) Name() string { return "write" }
+
+// Description returns a short summary for the write-state test tool.
+func (writeTrackingTool) Description() string { return "test write tool" }
+
+// IsReadOnly reports that the test focuses on context propagation rather than mutation semantics.
+func (writeTrackingTool) IsReadOnly() bool { return false }
+
+// IsConcurrencySafe reports that the test write tool is safe to invoke concurrently.
+func (writeTrackingTool) IsConcurrencySafe() bool { return true }
+
+// Invoke returns the invocation read state so the executor test can inspect it.
+func (writeTrackingTool) Invoke(_ context.Context, call tool.Call) (tool.Result, error) {
+	return tool.Result{
+		Output: "write-ok",
+		Meta: map[string]any{
+			"read_state_files": len(call.Context.ReadState.Files),
+			"read_state":       call.Context.ReadState,
+		},
+	}, nil
+}
+
+// TestToolExecutorMaintainsReadState verifies that successful read calls update executor state for later tool invocations.
+func TestToolExecutorMaintainsReadState(t *testing.T) {
+	modules, err := wiring.NewModules(readTrackingTool{}, writeTrackingTool{})
+	if err != nil {
+		t.Fatalf("NewModules() error = %v", err)
+	}
+
+	executor := NewToolExecutor(modules.Tools)
+
+	if _, err := executor.Execute(context.Background(), tool.Call{
+		ID:   "call-read",
+		Name: "read",
+		Context: tool.UseContext{
+			WorkingDir: "/tmp/project",
+		},
+	}); err != nil {
+		t.Fatalf("Execute(read) error = %v", err)
+	}
+
+	result, err := executor.Execute(context.Background(), tool.Call{
+		ID:   "call-write",
+		Name: "write",
+		Context: tool.UseContext{
+			WorkingDir: "/tmp/project",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute(write) error = %v", err)
+	}
+
+	snapshot, ok := result.Meta["read_state"].(tool.ReadStateSnapshot)
+	if !ok {
+		t.Fatalf("Execute(write) read_state type = %T", result.Meta["read_state"])
+	}
+
+	state, ok := snapshot.Lookup("/tmp/project/main.go")
+	if !ok {
+		t.Fatal("Execute(write) missing propagated read state for /tmp/project/main.go")
+	}
+	if state.ReadAt != time.Unix(100, 0) {
+		t.Fatalf("Execute(write) ReadAt = %v, want %v", state.ReadAt, time.Unix(100, 0))
+	}
+	if state.ObservedModTime != time.Unix(90, 0) {
+		t.Fatalf("Execute(write) ObservedModTime = %v, want %v", state.ObservedModTime, time.Unix(90, 0))
+	}
+	if state.IsPartial {
+		t.Fatal("Execute(write) IsPartial = true, want false")
 	}
 }

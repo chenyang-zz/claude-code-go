@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -57,6 +58,24 @@ func TestToolInvokeReadsTextFile(t *testing.T) {
 	if data.NumLines != 3 || data.StartLine != 1 || data.TotalLines != 3 {
 		t.Fatalf("Invoke() metadata = %#v", data)
 	}
+
+	readState, ok := result.Meta["read_state"].(coretool.ReadStateSnapshot)
+	if !ok {
+		t.Fatalf("Invoke() read_state type = %T", result.Meta["read_state"])
+	}
+	state, ok := readState.Lookup(filePath)
+	if !ok {
+		t.Fatalf("Invoke() missing read state for %q", filePath)
+	}
+	if state.IsPartial {
+		t.Fatal("Invoke() read state IsPartial = true, want false")
+	}
+	if state.ObservedModTime.IsZero() {
+		t.Fatal("Invoke() read state ObservedModTime is zero")
+	}
+	if state.ReadAt.IsZero() {
+		t.Fatal("Invoke() read state ReadAt is zero")
+	}
 }
 
 // TestToolInvokeSupportsOffsetAndLimit verifies callers can read a targeted line window.
@@ -95,6 +114,36 @@ func TestToolInvokeSupportsOffsetAndLimit(t *testing.T) {
 	data := result.Meta["data"].(Output)
 	if data.Content != "b\nc" || data.NumLines != 2 || data.StartLine != 2 || data.TotalLines != 4 {
 		t.Fatalf("Invoke() metadata = %#v", data)
+	}
+
+	readState := result.Meta["read_state"].(coretool.ReadStateSnapshot)
+	state, ok := readState.Lookup(filePath)
+	if !ok {
+		t.Fatalf("Invoke() missing read state for %q", filePath)
+	}
+	if !state.IsPartial {
+		t.Fatal("Invoke() read state IsPartial = false, want true")
+	}
+}
+
+// TestBuildReadStateSnapshot verifies FileReadTool emits the executor-facing delta with partial-read semantics.
+func TestBuildReadStateSnapshot(t *testing.T) {
+	readAt := time.Unix(120, 0)
+	modTime := time.Unix(90, 0)
+
+	snapshot := buildReadStateSnapshot("/tmp/project/app.go", modTime, 3, 10, readAt)
+	state, ok := snapshot.Lookup("/tmp/project/app.go")
+	if !ok {
+		t.Fatal("buildReadStateSnapshot() missing expected file path")
+	}
+	if state.ReadAt != readAt {
+		t.Fatalf("buildReadStateSnapshot() ReadAt = %v, want %v", state.ReadAt, readAt)
+	}
+	if state.ObservedModTime != modTime {
+		t.Fatalf("buildReadStateSnapshot() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
+	}
+	if !state.IsPartial {
+		t.Fatal("buildReadStateSnapshot() IsPartial = false, want true")
 	}
 }
 
