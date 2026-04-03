@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,7 @@ func TestToolInvokeContentMode(t *testing.T) {
 			"pattern":     "\\btarget\\b",
 			"glob":        "*.go",
 			"output_mode": "content",
+			"-n":          false,
 		},
 		Context: coretool.UseContext{
 			WorkingDir: projectDir,
@@ -115,6 +117,50 @@ func TestToolInvokeContentMode(t *testing.T) {
 	}
 	if result.Output != data.Content {
 		t.Fatalf("Invoke() output = %q, want content output", result.Output)
+	}
+}
+
+// TestToolInvokeContentModeSupportsContextAndLineNumbers verifies content mode supports -A/-B/-C, -n, and case-insensitive search.
+func TestToolInvokeContentModeSupportsContextAndLineNumbers(t *testing.T) {
+	projectDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(projectDir, "main.go"), "package main\nconst alpha = 1\nconst TARGET = true\nconst omega = 2\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":     "target",
+			"output_mode": "content",
+			"-C":          1,
+			"-i":          true,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	data := result.Meta["data"].(Output)
+	wantContent := "main.go-2-const alpha = 1\nmain.go:3:const TARGET = true\nmain.go-4-const omega = 2"
+	if data.Content != wantContent {
+		t.Fatalf("Invoke() content = %q, want %q", data.Content, wantContent)
+	}
+	if data.NumLines != 3 {
+		t.Fatalf("Invoke() numLines = %d, want 3", data.NumLines)
+	}
+	if data.AppliedLimit != nil {
+		t.Fatalf("Invoke() appliedLimit = %v, want nil", *data.AppliedLimit)
 	}
 }
 
@@ -173,6 +219,57 @@ func TestToolInvokeCountMode(t *testing.T) {
 	}
 }
 
+// TestToolInvokeCountModeSupportsPagination verifies count mode supports head_limit and offset.
+func TestToolInvokeCountModeSupportsPagination(t *testing.T) {
+	projectDir := t.TempDir()
+	mustMkdirAll(t, filepath.Join(projectDir, "nested"))
+	mustWriteFile(t, filepath.Join(projectDir, "a.go"), "const target = true\n")
+	mustWriteFile(t, filepath.Join(projectDir, "b.go"), "const target = true\n")
+	mustWriteFile(t, filepath.Join(projectDir, "nested", "c.go"), "const target = true\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":     "target",
+			"glob":        "*.go",
+			"output_mode": "count",
+			"head_limit":  1,
+			"offset":      1,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	data := result.Meta["data"].(Output)
+	if data.NumFiles != 1 || data.NumMatches != 1 {
+		t.Fatalf("Invoke() count summary = (%d files, %d matches), want (1, 1)", data.NumFiles, data.NumMatches)
+	}
+	if data.AppliedLimit == nil || *data.AppliedLimit != 1 {
+		t.Fatalf("Invoke() appliedLimit = %v, want 1", data.AppliedLimit)
+	}
+	if data.AppliedOffset == nil || *data.AppliedOffset != 1 {
+		t.Fatalf("Invoke() appliedOffset = %v, want 1", data.AppliedOffset)
+	}
+	wantOutputSuffix := "\n\nFound 1 total occurrence across 1 file with pagination = limit: 1, offset: 1."
+	if !strings.HasSuffix(result.Output, wantOutputSuffix) {
+		t.Fatalf("Invoke() output = %q, want suffix %q", result.Output, wantOutputSuffix)
+	}
+}
+
 // TestToolInvokeSupportsPathOverride verifies explicit search paths are honored and relativized against the caller cwd.
 func TestToolInvokeSupportsPathOverride(t *testing.T) {
 	projectDir := t.TempDir()
@@ -206,6 +303,56 @@ func TestToolInvokeSupportsPathOverride(t *testing.T) {
 	data := result.Meta["data"].(Output)
 	if len(data.Filenames) != 1 || data.Filenames[0] != filepath.Join("src", "main.ts") {
 		t.Fatalf("Invoke() filenames = %#v", data.Filenames)
+	}
+}
+
+// TestToolInvokeSupportsTypeFilterAndFilePagination verifies files mode supports type filtering, head_limit, and offset.
+func TestToolInvokeSupportsTypeFilterAndFilePagination(t *testing.T) {
+	projectDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(projectDir, "a.go"), "const target = true\n")
+	time.Sleep(10 * time.Millisecond)
+	mustWriteFile(t, filepath.Join(projectDir, "b.go"), "const target = true\n")
+	time.Sleep(10 * time.Millisecond)
+	mustWriteFile(t, filepath.Join(projectDir, "c.ts"), "export const target = true\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":    "target",
+			"type":       "go",
+			"head_limit": 1,
+			"offset":     1,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	data := result.Meta["data"].(Output)
+	if len(data.Filenames) != 1 || data.Filenames[0] != "a.go" {
+		t.Fatalf("Invoke() filenames = %#v, want [\"a.go\"]", data.Filenames)
+	}
+	if data.AppliedLimit != nil {
+		t.Fatalf("Invoke() appliedLimit = %v, want nil when offset page is not further truncated", *data.AppliedLimit)
+	}
+	if data.AppliedOffset == nil || *data.AppliedOffset != 1 {
+		t.Fatalf("Invoke() appliedOffset = %v, want 1", data.AppliedOffset)
+	}
+	if result.Output != "Found 1 file offset: 1\na.go" {
+		t.Fatalf("Invoke() output = %q", result.Output)
 	}
 }
 
