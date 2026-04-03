@@ -176,6 +176,110 @@ func TestToolInvokeSupportsReplaceAll(t *testing.T) {
 	}
 }
 
+// TestToolInvokeMatchesCurlyQuotes verifies quote-only differences do not prevent a replacement.
+func TestToolInvokeMatchesCurlyQuotes(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "say “hello”\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": `say "hello"` + "\n",
+			"new_string": `say "goodbye"` + "\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	updatedContent, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(updatedContent) != "say “goodbye”\n" {
+		t.Fatalf("updated content = %q", string(updatedContent))
+	}
+}
+
+// TestToolInvokePreservesCurlySingleQuotes verifies normalized matches keep single-quote typography in replacements.
+func TestToolInvokePreservesCurlySingleQuotes(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.txt")
+	mustWriteFile(t, filePath, "it’s ‘fine’\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.txt",
+			"old_string": "it's 'fine'\n",
+			"new_string": "it's 'done'\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	updatedContent, readErr := os.ReadFile(filePath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(updatedContent) != "it’s ‘done’\n" {
+		t.Fatalf("updated content = %q", string(updatedContent))
+	}
+}
+
 // TestToolInvokeRejectsEditWithoutReadState verifies existing files must be read before in-place editing.
 func TestToolInvokeRejectsEditWithoutReadState(t *testing.T) {
 	projectDir := t.TempDir()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -159,7 +160,15 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	}
 
 	originalContent := string(originalBytes)
-	matchCount := strings.Count(originalContent, input.OldString)
+	actualOldString, ok := findActualString(originalContent, input.OldString)
+	if !ok {
+		return coretool.Result{
+			Error: fmt.Sprintf("String to replace not found in file.\nString: %s", input.OldString),
+		}, nil
+	}
+
+	actualNewString := preserveQuoteStyle(input.OldString, actualOldString, input.NewString)
+	matchCount := strings.Count(originalContent, actualOldString)
 	if matchCount == 0 {
 		return coretool.Result{
 			Error: fmt.Sprintf("String to replace not found in file.\nString: %s", input.OldString),
@@ -174,10 +183,10 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	updatedContent := originalContent
 	replacementCount := 1
 	if input.ReplaceAll {
-		updatedContent = strings.ReplaceAll(originalContent, input.OldString, input.NewString)
+		updatedContent = strings.ReplaceAll(originalContent, actualOldString, actualNewString)
 		replacementCount = matchCount
 	} else {
-		updatedContent = strings.Replace(originalContent, input.OldString, input.NewString, 1)
+		updatedContent = strings.Replace(originalContent, actualOldString, actualNewString, 1)
 	}
 
 	if err := t.fs.WriteFile(filePath, []byte(updatedContent), info.Mode().Perm()); err != nil {
@@ -250,4 +259,137 @@ func validateExistingFileReadState(context coretool.UseContext, filePath string,
 	}
 
 	return nil
+}
+
+const (
+	leftSingleCurlyQuote  = '‘'
+	rightSingleCurlyQuote = '’'
+	leftDoubleCurlyQuote  = '“'
+	rightDoubleCurlyQuote = '”'
+)
+
+// normalizeQuotes converts curly quotes into their straight-quote equivalents for matching.
+func normalizeQuotes(value string) string {
+	return strings.NewReplacer(
+		string(leftSingleCurlyQuote), "'",
+		string(rightSingleCurlyQuote), "'",
+		string(leftDoubleCurlyQuote), "\"",
+		string(rightDoubleCurlyQuote), "\"",
+	).Replace(value)
+}
+
+// findActualString resolves the caller-provided search string to the exact file substring, allowing quote-only differences.
+func findActualString(fileContent string, search string) (string, bool) {
+	if strings.Contains(fileContent, search) {
+		return search, true
+	}
+
+	normalizedSearch := []rune(normalizeQuotes(search))
+	normalizedFile := []rune(normalizeQuotes(fileContent))
+	searchIndex := indexRunes(normalizedFile, normalizedSearch)
+	if searchIndex == -1 {
+		return "", false
+	}
+
+	actualRunes := []rune(fileContent)
+	searchWidth := len([]rune(search))
+	return string(actualRunes[searchIndex : searchIndex+searchWidth]), true
+}
+
+// preserveQuoteStyle mirrors the file's curly-quote typography when the match was found via quote normalization.
+func preserveQuoteStyle(expectedOld string, actualOld string, newValue string) string {
+	if expectedOld == actualOld {
+		return newValue
+	}
+
+	hasDoubleCurlyQuotes := strings.ContainsRune(actualOld, leftDoubleCurlyQuote) || strings.ContainsRune(actualOld, rightDoubleCurlyQuote)
+	hasSingleCurlyQuotes := strings.ContainsRune(actualOld, leftSingleCurlyQuote) || strings.ContainsRune(actualOld, rightSingleCurlyQuote)
+	if !hasDoubleCurlyQuotes && !hasSingleCurlyQuotes {
+		return newValue
+	}
+
+	result := newValue
+	if hasDoubleCurlyQuotes {
+		result = applyCurlyDoubleQuotes(result)
+	}
+	if hasSingleCurlyQuotes {
+		result = applyCurlySingleQuotes(result)
+	}
+
+	return result
+}
+
+// applyCurlyDoubleQuotes rewrites straight double quotes using a simple opening/closing heuristic.
+func applyCurlyDoubleQuotes(value string) string {
+	return string(mapQuoteRunes([]rune(value), '"', leftDoubleCurlyQuote, rightDoubleCurlyQuote, false))
+}
+
+// applyCurlySingleQuotes rewrites straight single quotes while preserving apostrophes inside words.
+func applyCurlySingleQuotes(value string) string {
+	return string(mapQuoteRunes([]rune(value), '\'', leftSingleCurlyQuote, rightSingleCurlyQuote, true))
+}
+
+// mapQuoteRunes applies curly quotes of one kind based on a minimal opening/closing heuristic.
+func mapQuoteRunes(chars []rune, target rune, opening rune, closing rune, allowApostrophe bool) []rune {
+	result := make([]rune, 0, len(chars))
+	for i, char := range chars {
+		if char != target {
+			result = append(result, char)
+			continue
+		}
+
+		if allowApostrophe {
+			prevIsLetter := i > 0 && unicode.IsLetter(chars[i-1])
+			nextIsLetter := i < len(chars)-1 && unicode.IsLetter(chars[i+1])
+			if prevIsLetter && nextIsLetter {
+				result = append(result, closing)
+				continue
+			}
+		}
+
+		if isOpeningQuoteContext(chars, i) {
+			result = append(result, opening)
+			continue
+		}
+
+		result = append(result, closing)
+	}
+
+	return result
+}
+
+// isOpeningQuoteContext approximates whether a quote at the given index acts as an opening quote.
+func isOpeningQuoteContext(chars []rune, index int) bool {
+	if index == 0 {
+		return true
+	}
+
+	switch chars[index-1] {
+	case ' ', '\t', '\n', '\r', '(', '[', '{', '-', '—', '–':
+		return true
+	default:
+		return false
+	}
+}
+
+// indexRunes returns the first index at which needle appears in haystack, or -1 when absent.
+func indexRunes(haystack []rune, needle []rune) int {
+	if len(needle) == 0 {
+		return 0
+	}
+	if len(needle) > len(haystack) {
+		return -1
+	}
+
+outer:
+	for start := 0; start <= len(haystack)-len(needle); start++ {
+		for offset, char := range needle {
+			if haystack[start+offset] != char {
+				continue outer
+			}
+		}
+		return start
+	}
+
+	return -1
 }
