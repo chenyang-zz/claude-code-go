@@ -123,6 +123,41 @@ func TestFilesystemPolicyEvaluateFilesystemWriteDefaultsToAsk(t *testing.T) {
 	}
 }
 
+func TestFilesystemPolicyCheckReadPermissionForTool(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join(string(filepath.Separator), "workspace")
+
+	policy, err := NewFilesystemPolicy(RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	got := policy.CheckReadPermissionForTool(context.Background(), "file_read", "README.md", workspace)
+	if got.Decision != DecisionAllow {
+		t.Fatalf("CheckReadPermissionForTool() decision = %q, want %q", got.Decision, DecisionAllow)
+	}
+}
+
+func TestFilesystemPolicyCheckWritePermissionForTool(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join(string(filepath.Separator), "workspace")
+
+	policy, err := NewFilesystemPolicy(RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	got := policy.CheckWritePermissionForTool(context.Background(), "file_write", "output.txt", workspace)
+	if got.Decision != DecisionAsk {
+		t.Fatalf("CheckWritePermissionForTool() decision = %q, want %q", got.Decision, DecisionAsk)
+	}
+	if !strings.Contains(got.Message, "Claude requested permissions to write to") {
+		t.Fatalf("CheckWritePermissionForTool() message = %q, want write approval prompt", got.Message)
+	}
+}
+
 func TestNormalizeFilesystemRequestPath(t *testing.T) {
 	t.Parallel()
 

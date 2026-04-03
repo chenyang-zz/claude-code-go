@@ -68,10 +68,7 @@ func (p *FilesystemPolicy) EvaluateFilesystem(ctx context.Context, req Filesyste
 	case AccessRead:
 		return p.evaluateRead(req, normalizedPath, normalizedWorkingDir)
 	case AccessWrite:
-		return Evaluation{
-			Decision: DecisionAsk,
-			Message:  fmt.Sprintf("Claude requested permissions to write to %s, but you haven't granted it yet.", req.Path),
-		}
+		return p.evaluateWrite(req, normalizedPath, normalizedWorkingDir)
 	default:
 		return Evaluation{
 			Decision: DecisionDeny,
@@ -99,6 +96,40 @@ func (p *FilesystemPolicy) evaluateRead(req FilesystemRequest, normalizedPath st
 	return Evaluation{
 		Decision: DecisionAsk,
 		Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
+	}
+}
+
+// CheckReadPermissionForTool evaluates one read-style filesystem request for a tool.
+func (p *FilesystemPolicy) CheckReadPermissionForTool(ctx context.Context, toolName string, path string, workingDir string) Evaluation {
+	return p.EvaluateFilesystem(ctx, FilesystemRequest{
+		ToolName:   toolName,
+		Path:       path,
+		WorkingDir: workingDir,
+		Access:     AccessRead,
+	})
+}
+
+// CheckWritePermissionForTool evaluates one write-style filesystem request for a tool.
+func (p *FilesystemPolicy) CheckWritePermissionForTool(ctx context.Context, toolName string, path string, workingDir string) Evaluation {
+	return p.EvaluateFilesystem(ctx, FilesystemRequest{
+		ToolName:   toolName,
+		Path:       path,
+		WorkingDir: workingDir,
+		Access:     AccessWrite,
+	})
+}
+
+// evaluateWrite applies the minimal batch-01 write policy and currently requests approval for all writes.
+func (p *FilesystemPolicy) evaluateWrite(req FilesystemRequest, normalizedPath string, normalizedWorkingDir string) Evaluation {
+	_ = p
+
+	logger.DebugCF("permission", "filesystem write requires approval", map[string]any{
+		"path":        normalizedPath,
+		"working_dir": normalizedWorkingDir,
+	})
+	return Evaluation{
+		Decision: DecisionAsk,
+		Message:  fmt.Sprintf("Claude requested permissions to write to %s, but you haven't granted it yet.", req.Path),
 	}
 }
 
