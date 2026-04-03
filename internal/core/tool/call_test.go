@@ -14,6 +14,8 @@ func TestReadStateSnapshotLookup(t *testing.T) {
 			"/tmp/project/main.go": {
 				ReadAt:          readAt,
 				ObservedModTime: modTime,
+				ReadOffset:      10,
+				ReadLimit:       20,
 				IsPartial:       true,
 			},
 		},
@@ -28,6 +30,12 @@ func TestReadStateSnapshotLookup(t *testing.T) {
 	}
 	if !state.ObservedModTime.Equal(modTime) {
 		t.Fatalf("Lookup() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
+	}
+	if state.ReadOffset != 10 {
+		t.Fatalf("Lookup() ReadOffset = %d, want %d", state.ReadOffset, 10)
+	}
+	if state.ReadLimit != 20 {
+		t.Fatalf("Lookup() ReadLimit = %d, want %d", state.ReadLimit, 20)
 	}
 	if !state.IsPartial {
 		t.Fatal("Lookup() IsPartial = false, want true")
@@ -65,6 +73,8 @@ func TestUseContextLookupReadState(t *testing.T) {
 				"/tmp/project/app.go": {
 					ReadAt:          readAt,
 					ObservedModTime: modTime,
+					ReadOffset:      1,
+					ReadLimit:       0,
 					IsPartial:       false,
 				},
 			},
@@ -81,6 +91,12 @@ func TestUseContextLookupReadState(t *testing.T) {
 	if !state.ObservedModTime.Equal(modTime) {
 		t.Fatalf("LookupReadState() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
 	}
+	if state.ReadOffset != 1 {
+		t.Fatalf("LookupReadState() ReadOffset = %d, want %d", state.ReadOffset, 1)
+	}
+	if state.ReadLimit != 0 {
+		t.Fatalf("LookupReadState() ReadLimit = %d, want %d", state.ReadLimit, 0)
+	}
 	if state.IsPartial {
 		t.Fatal("LookupReadState() IsPartial = true, want false")
 	}
@@ -93,6 +109,7 @@ func TestReadStateSnapshotCloneAndMerge(t *testing.T) {
 			"/tmp/project/base.go": {
 				ReadAt:          time.Date(2026, time.April, 3, 12, 0, 0, 0, time.UTC),
 				ObservedModTime: time.Date(2026, time.April, 3, 11, 59, 0, 0, time.UTC),
+				ReadOffset:      1,
 			},
 		},
 	}
@@ -103,6 +120,8 @@ func TestReadStateSnapshotCloneAndMerge(t *testing.T) {
 			"/tmp/project/other.go": {
 				ReadAt:          time.Date(2026, time.April, 3, 12, 1, 0, 0, time.UTC),
 				ObservedModTime: time.Date(2026, time.April, 3, 12, 0, 30, 0, time.UTC),
+				ReadOffset:      20,
+				ReadLimit:       5,
 				IsPartial:       true,
 			},
 		},
@@ -117,5 +136,11 @@ func TestReadStateSnapshotCloneAndMerge(t *testing.T) {
 	}
 	if !state.IsPartial {
 		t.Fatal("Clone()+Merge() IsPartial = false, want true")
+	}
+	if state.ReadOffset != 20 {
+		t.Fatalf("Clone()+Merge() ReadOffset = %d, want %d", state.ReadOffset, 20)
+	}
+	if state.ReadLimit != 5 {
+		t.Fatalf("Clone()+Merge() ReadLimit = %d, want %d", state.ReadLimit, 5)
 	}
 }

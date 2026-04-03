@@ -70,6 +70,12 @@ func TestToolInvokeReadsTextFile(t *testing.T) {
 	if state.IsPartial {
 		t.Fatal("Invoke() read state IsPartial = true, want false")
 	}
+	if state.ReadOffset != 1 {
+		t.Fatalf("Invoke() read state ReadOffset = %d, want %d", state.ReadOffset, 1)
+	}
+	if state.ReadLimit != 0 {
+		t.Fatalf("Invoke() read state ReadLimit = %d, want %d", state.ReadLimit, 0)
+	}
 	if state.ObservedModTime.IsZero() {
 		t.Fatal("Invoke() read state ObservedModTime is zero")
 	}
@@ -124,6 +130,12 @@ func TestToolInvokeSupportsOffsetAndLimit(t *testing.T) {
 	if !state.IsPartial {
 		t.Fatal("Invoke() read state IsPartial = false, want true")
 	}
+	if state.ReadOffset != 2 {
+		t.Fatalf("Invoke() read state ReadOffset = %d, want %d", state.ReadOffset, 2)
+	}
+	if state.ReadLimit != 2 {
+		t.Fatalf("Invoke() read state ReadLimit = %d, want %d", state.ReadLimit, 2)
+	}
 }
 
 // TestBuildReadStateSnapshot verifies FileReadTool emits the executor-facing delta with partial-read semantics.
@@ -142,8 +154,181 @@ func TestBuildReadStateSnapshot(t *testing.T) {
 	if state.ObservedModTime != modTime {
 		t.Fatalf("buildReadStateSnapshot() ObservedModTime = %v, want %v", state.ObservedModTime, modTime)
 	}
+	if state.ReadOffset != 3 {
+		t.Fatalf("buildReadStateSnapshot() ReadOffset = %d, want %d", state.ReadOffset, 3)
+	}
+	if state.ReadLimit != 10 {
+		t.Fatalf("buildReadStateSnapshot() ReadLimit = %d, want %d", state.ReadLimit, 10)
+	}
 	if !state.IsPartial {
 		t.Fatal("buildReadStateSnapshot() IsPartial = false, want true")
+	}
+}
+
+// TestToolInvokeReturnsFileUnchanged verifies repeated full reads return a stub when the file has not changed.
+func TestToolInvokeReturnsFileUnchanged(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "main.go")
+	mustWriteFile(t, filePath, "package main\n\nfunc main() {}\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", filePath, err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "main.go",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(120, 0),
+						ObservedModTime: info.ModTime(),
+						ReadOffset:      1,
+						ReadLimit:       0,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+	if result.Output != fileUnchangedStub {
+		t.Fatalf("Invoke() output = %q, want %q", result.Output, fileUnchangedStub)
+	}
+
+	data, ok := result.Meta["data"].(UnchangedOutput)
+	if !ok {
+		t.Fatalf("Invoke() meta data type = %T", result.Meta["data"])
+	}
+	if data.Type != "file_unchanged" {
+		t.Fatalf("Invoke() meta data type field = %q, want %q", data.Type, "file_unchanged")
+	}
+	if data.FilePath != "main.go" {
+		t.Fatalf("Invoke() meta data filePath = %q, want %q", data.FilePath, "main.go")
+	}
+	if _, ok := result.Meta["read_state"]; ok {
+		t.Fatal("Invoke() returned unexpected read_state update for unchanged result")
+	}
+}
+
+// TestToolInvokeFallsBackToFullReadOnRangeMismatch verifies duplicate suppression only applies to the same prior full-read range.
+func TestToolInvokeFallsBackToFullReadOnRangeMismatch(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "main.go")
+	mustWriteFile(t, filePath, "package main\n\nfunc main() {}\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", filePath, err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "main.go",
+			"offset":    2,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(120, 0),
+						ObservedModTime: info.ModTime(),
+						ReadOffset:      1,
+						ReadLimit:       0,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+	if result.Output == fileUnchangedStub {
+		t.Fatal("Invoke() output reused unchanged stub on mismatched range")
+	}
+	if !strings.Contains(result.Output, "     2\t") {
+		t.Fatalf("Invoke() output = %q, want numbered full-read content", result.Output)
+	}
+}
+
+// TestToolInvokeFallsBackToFullReadAfterFileChange verifies duplicate suppression is skipped once the file mtime changes.
+func TestToolInvokeFallsBackToFullReadAfterFileChange(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "main.go")
+	mustWriteFile(t, filePath, "package main\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+	oldModTime := time.Unix(120, 0)
+	if err := os.Chtimes(filePath, oldModTime, oldModTime); err != nil {
+		t.Fatalf("Chtimes(%q) error = %v", filePath, err)
+	}
+	updatedModTime := time.Unix(240, 0)
+	mustWriteFile(t, filePath, "package main\n\nfunc main() {}\n")
+	if err := os.Chtimes(filePath, updatedModTime, updatedModTime); err != nil {
+		t.Fatalf("Chtimes(%q) error = %v", filePath, err)
+	}
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": "main.go",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(300, 0),
+						ObservedModTime: oldModTime,
+						ReadOffset:      1,
+						ReadLimit:       0,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+	if result.Output == fileUnchangedStub {
+		t.Fatal("Invoke() output reused unchanged stub after file change")
+	}
+	if !strings.Contains(result.Output, "func main() {}") {
+		t.Fatalf("Invoke() output = %q, want updated file content", result.Output)
 	}
 }
 

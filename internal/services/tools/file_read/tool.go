@@ -23,6 +23,8 @@ const (
 	defaultMaxFileSizeBytes = 256 * 1024
 	// defaultOffset mirrors the user-facing 1-based default start line.
 	defaultOffset = 1
+	// fileUnchangedStub mirrors the source tool's duplicate-read reminder.
+	fileUnchangedStub = "File unchanged since last read. The content from the earlier Read tool_result in this conversation is still current - refer to that instead of re-reading."
 )
 
 // Tool implements the first-batch text-only FileReadTool.
@@ -57,6 +59,14 @@ type Output struct {
 	StartLine int `json:"startLine"`
 	// TotalLines reports the total number of lines observed in the file.
 	TotalLines int `json:"totalLines"`
+}
+
+// UnchangedOutput is the structured metadata returned when the file content matches an earlier full read.
+type UnchangedOutput struct {
+	// Type identifies the source-aligned file_unchanged result branch.
+	Type string `json:"type"`
+	// FilePath stores the caller-facing path for the unchanged file.
+	FilePath string `json:"filePath"`
 }
 
 // lineReadResult keeps the internal streaming result before caller-facing formatting.
@@ -138,15 +148,6 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if info.IsDir() {
 		return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
 	}
-	if input.Limit == 0 && info.Size() > t.effectiveMaxFileSizeBytes() {
-		return coretool.Result{
-			Error: fmt.Sprintf(
-				"File content (%s) exceeds maximum allowed size (%s). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
-				formatByteSize(info.Size()),
-				formatByteSize(t.effectiveMaxFileSizeBytes()),
-			),
-		}, nil
-	}
 
 	evaluation := t.policy.CheckReadPermissionForTool(ctx, t.Name(), filePath, call.Context.WorkingDir)
 	if err := evaluation.ToError(corepermission.FilesystemRequest{
@@ -164,6 +165,26 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		"limit":       input.Limit,
 		"working_dir": call.Context.WorkingDir,
 	})
+
+	if unchangedResult, ok := buildFileUnchangedResult(call.Context, filePath, offset, input.Limit, info.ModTime()); ok {
+		logger.DebugCF("file_read_tool", "skipping duplicate file read", map[string]any{
+			"file_path":   filePath,
+			"offset":      offset,
+			"limit":       input.Limit,
+			"working_dir": call.Context.WorkingDir,
+		})
+		return unchangedResult, nil
+	}
+
+	if input.Limit == 0 && info.Size() > t.effectiveMaxFileSizeBytes() {
+		return coretool.Result{
+			Error: fmt.Sprintf(
+				"File content (%s) exceeds maximum allowed size (%s). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+				formatByteSize(info.Size()),
+				formatByteSize(t.effectiveMaxFileSizeBytes()),
+			),
+		}, nil
+	}
 
 	readResult, err := t.readTextRange(ctx, filePath, offset, input.Limit)
 	if err != nil {
@@ -192,6 +213,32 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"read_state": buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
 		},
 	}, nil
+}
+
+// buildFileUnchangedResult reuses prior full-read state to suppress duplicate text payloads.
+func buildFileUnchangedResult(context coretool.UseContext, filePath string, offset int, limit int, currentModTime time.Time) (coretool.Result, bool) {
+	state, ok := context.LookupReadState(filePath)
+	if !ok || state.IsPartial || state.ReadOffset == 0 {
+		return coretool.Result{}, false
+	}
+	if state.ReadOffset != offset || state.ReadLimit != limit {
+		return coretool.Result{}, false
+	}
+	if state.ObservedModTime.IsZero() || !state.ObservedModTime.Equal(currentModTime) {
+		return coretool.Result{}, false
+	}
+
+	output := UnchangedOutput{
+		Type:     "file_unchanged",
+		FilePath: platformfs.ToRelativePath(filePath, context.WorkingDir),
+	}
+
+	return coretool.Result{
+		Output: fileUnchangedStub,
+		Meta: map[string]any{
+			"data": output,
+		},
+	}, true
 }
 
 // inputSchema declares the FileReadTool input contract for the first migration pass.
@@ -344,6 +391,8 @@ func buildReadStateSnapshot(path string, observedModTime time.Time, offset int, 
 		path: {
 			ReadAt:          readAt,
 			ObservedModTime: observedModTime,
+			ReadOffset:      offset,
+			ReadLimit:       limit,
 			IsPartial:       offset > defaultOffset || limit > 0,
 		},
 	}

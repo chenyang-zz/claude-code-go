@@ -11,6 +11,10 @@ type ReadState struct {
 	ReadAt time.Time
 	// ObservedModTime records the file modification time seen by the latest successful read.
 	ObservedModTime time.Time
+	// ReadOffset stores the 1-based starting line for the last successful Read tool invocation.
+	ReadOffset int
+	// ReadLimit stores the requested line cap for the last successful Read tool invocation.
+	ReadLimit int
 	// IsPartial reports whether the recorded read only covered part of the file.
 	IsPartial bool
 }
