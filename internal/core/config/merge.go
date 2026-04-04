@@ -7,6 +7,12 @@ func Merge(base, override Config) Config {
 	if override.Provider != "" {
 		base.Provider = override.Provider
 	}
+	if override.APIKey != "" {
+		base.APIKey = override.APIKey
+	}
+	if override.APIBaseURL != "" {
+		base.APIBaseURL = override.APIBaseURL
+	}
 	if override.ApprovalMode != "" {
 		base.ApprovalMode = override.ApprovalMode
 	}

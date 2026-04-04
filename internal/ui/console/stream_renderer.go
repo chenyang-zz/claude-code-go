@@ -1,3 +1,52 @@
 package console
 
-type StreamRenderer struct{}
+import (
+	"fmt"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/event"
+)
+
+// StreamRenderer turns runtime events into console output.
+type StreamRenderer struct {
+	// Printer owns the final console writes.
+	Printer *Printer
+}
+
+// NewStreamRenderer builds a renderer with the provided printer.
+func NewStreamRenderer(printer *Printer) *StreamRenderer {
+	if printer == nil {
+		printer = NewPrinter(nil)
+	}
+
+	return &StreamRenderer{Printer: printer}
+}
+
+// Render consumes one event stream until it closes.
+func (r *StreamRenderer) Render(stream event.Stream) error {
+	for evt := range stream {
+		switch evt.Type {
+		case event.TypeMessageDelta:
+			payload, ok := evt.Payload.(event.MessageDeltaPayload)
+			if !ok {
+				return fmt.Errorf("message delta payload type mismatch")
+			}
+			if err := r.Printer.Print(payload.Text); err != nil {
+				return err
+			}
+		case event.TypeError:
+			payload, ok := evt.Payload.(event.ErrorPayload)
+			if !ok {
+				return fmt.Errorf("error payload type mismatch")
+			}
+			if err := r.Printer.PrintLine(payload.Message); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// RenderLine writes one standalone console line for REPL-owned placeholder output.
+func (r *StreamRenderer) RenderLine(text string) error {
+	return r.Printer.PrintLine(text)
+}

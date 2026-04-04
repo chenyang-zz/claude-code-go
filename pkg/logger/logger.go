@@ -208,7 +208,7 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		fileEvent := getEvent(fileLogger, level)
 
 		if component != "" {
-			event.Str("component", component)
+			fileEvent.Str("component", component)
 		}
 
 		// fileEvent.Str("caller", fmt.Sprintf("%s:%d (%s)", callerFile, callerLine, callerFunc))

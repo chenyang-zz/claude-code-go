@@ -1,3 +1,242 @@
 package anthropic
 
-type Client struct{}
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
+)
+
+const defaultBaseURL = "https://api.anthropic.com"
+
+// Config carries the minimum Anthropic client configuration needed by batch-07.
+type Config struct {
+	// APIKey carries the Anthropic credential.
+	APIKey string
+	// BaseURL optionally overrides the default Anthropic API host.
+	BaseURL string
+	// HTTPClient allows tests to inject a local transport.
+	HTTPClient *http.Client
+}
+
+// Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
+type Client struct {
+	// apiKey stores the request credential.
+	apiKey string
+	// baseURL stores the API host root.
+	baseURL string
+	// httpClient performs HTTP requests.
+	httpClient *http.Client
+}
+
+type messagesRequest struct {
+	Model     string             `json:"model"`
+	MaxTokens int                `json:"max_tokens"`
+	Stream    bool               `json:"stream"`
+	Messages  []anthropicMessage `json:"messages"`
+}
+
+type anthropicMessage struct {
+	Role    string                  `json:"role"`
+	Content []anthropicContentBlock `json:"content"`
+}
+
+type anthropicContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type contentBlockDeltaEnvelope struct {
+	Delta struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"delta"`
+}
+
+type errorEnvelope struct {
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// NewClient builds a minimal Anthropic streaming client.
+func NewClient(cfg Config) *Client {
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	return &Client{
+		apiKey:     cfg.APIKey,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		httpClient: httpClient,
+	}
+}
+
+// Stream opens one Anthropic streaming request and converts SSE payloads into model events.
+func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("missing ANTHROPIC_API_KEY")
+	}
+
+	body, err := json.Marshal(messagesRequest{
+		Model:     req.Model,
+		MaxTokens: 1024,
+		Stream:    true,
+		Messages:  mapMessages(req.Messages),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build anthropic request: %w", err)
+	}
+
+	httpReq.Header.Set("content-type", "application/json")
+	httpReq.Header.Set("accept", "text/event-stream")
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	logger.DebugCF("anthropic_client", "starting anthropic stream", map[string]any{
+		"model":         req.Model,
+		"message_count": len(req.Messages),
+		"base_url":      c.baseURL,
+	})
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("execute anthropic request: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		payload, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("anthropic api error: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+
+	out := make(chan model.Event)
+	go func() {
+		defer close(out)
+		defer resp.Body.Close()
+
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		var eventName string
+		var dataLines []string
+
+		flush := func() {
+			if len(dataLines) == 0 {
+				eventName = ""
+				return
+			}
+
+			c.handleSSEEvent(eventName, strings.Join(dataLines, "\n"), out)
+			eventName = ""
+			dataLines = dataLines[:0]
+		}
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				flush()
+				continue
+			}
+
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			}
+		}
+		flush()
+
+		if err := scanner.Err(); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("read anthropic stream: %v", err),
+			}
+			return
+		}
+
+		out <- model.Event{Type: model.EventTypeDone}
+	}()
+
+	return out, nil
+}
+
+// handleSSEEvent maps one Anthropic SSE event into the shared model stream format.
+func (c *Client) handleSSEEvent(eventName, data string, out chan<- model.Event) {
+	if data == "" || data == "[DONE]" {
+		return
+	}
+
+	switch eventName {
+	case "content_block_delta":
+		var payload contentBlockDeltaEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic text delta: %v", err),
+			}
+			return
+		}
+		if payload.Delta.Type == "text_delta" && payload.Delta.Text != "" {
+			out <- model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: payload.Delta.Text,
+			}
+		}
+	case "error":
+		var payload errorEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic error event: %v", err),
+			}
+			return
+		}
+		out <- model.Event{
+			Type:  model.EventTypeError,
+			Error: payload.Error.Message,
+		}
+	}
+}
+
+// mapMessages converts shared message types into the Anthropic request shape.
+func mapMessages(messages []message.Message) []anthropicMessage {
+	out := make([]anthropicMessage, 0, len(messages))
+	for _, msg := range messages {
+		item := anthropicMessage{
+			Role:    string(msg.Role),
+			Content: make([]anthropicContentBlock, 0, len(msg.Content)),
+		}
+		for _, part := range msg.Content {
+			if part.Type != "text" {
+				continue
+			}
+			item.Content = append(item.Content, anthropicContentBlock{
+				Type: "text",
+				Text: part.Text,
+			})
+		}
+		out = append(out, item)
+	}
+	return out
+}

@@ -1,5 +1,8 @@
 package repl
 
+import "strings"
+
+// IsSlashCommand reports whether the input starts with a slash-prefixed command token.
 func IsSlashCommand(input string) bool {
-	return len(input) > 0 && input[0] == '/'
+	return strings.HasPrefix(strings.TrimSpace(input), "/")
 }
