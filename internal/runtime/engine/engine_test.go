@@ -2,35 +2,69 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 )
 
 type fakeModelClient struct {
-	lastRequest model.Request
-	stream      model.Stream
+	requests []model.Request
+	streams  []model.Stream
 }
 
 func (c *fakeModelClient) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
-	c.lastRequest = req
-	return c.stream, nil
+	c.requests = append(c.requests, req)
+	if len(c.streams) == 0 {
+		return nil, errors.New("unexpected Stream call")
+	}
+
+	stream := c.streams[0]
+	c.streams = c.streams[1:]
+	return stream, nil
+}
+
+type fakeToolExecutor struct {
+	results map[string]tool.Result
+	errors  map[string]error
+	calls   []tool.Call
+}
+
+func (e *fakeToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
+	e.calls = append(e.calls, call)
+	if err, ok := e.errors[call.Name]; ok {
+		return tool.Result{}, err
+	}
+	if result, ok := e.results[call.Name]; ok {
+		return result, nil
+	}
+	return tool.Result{}, nil
+}
+
+func newModelStream(events ...model.Event) model.Stream {
+	stream := make(chan model.Event, len(events))
+	for _, evt := range events {
+		stream <- evt
+	}
+	close(stream)
+	return stream
 }
 
 // TestRuntimeRunBuildsUserMessage verifies plain text input is converted into one user text message.
 func TestRuntimeRunBuildsUserMessage(t *testing.T) {
-	stream := make(chan model.Event, 2)
-	stream <- model.Event{
-		Type: model.EventTypeTextDelta,
-		Text: "hello",
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "hello",
+			}),
+		},
 	}
-	close(stream)
-
-	client := &fakeModelClient{stream: stream}
-	runtime := New(client, "claude-sonnet-4-5")
+	runtime := New(client, "claude-sonnet-4-5", nil)
 
 	out, err := runtime.Run(context.Background(), conversation.RunRequest{
 		SessionID: "cli",
@@ -40,38 +74,40 @@ func TestRuntimeRunBuildsUserMessage(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if len(client.lastRequest.Messages) != 1 {
-		t.Fatalf("Stream() got %d messages, want 1", len(client.lastRequest.Messages))
-	}
-
-	msg := client.lastRequest.Messages[0]
-	if msg.Role != message.RoleUser || len(msg.Content) != 1 || msg.Content[0].Text != "hello world" {
-		t.Fatalf("Stream() request message = %#v, want one user text message", msg)
-	}
-
 	evt := <-out
 	if evt.Type != event.TypeMessageDelta {
 		t.Fatalf("Run() event type = %q, want message.delta", evt.Type)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 1 {
+		t.Fatalf("Stream() call count = %d, want 1", len(client.requests))
+	}
+
+	msg := client.requests[0].Messages[0]
+	if msg.Role != message.RoleUser || len(msg.Content) != 1 || msg.Content[0].Text != "hello world" {
+		t.Fatalf("Stream() request message = %#v, want one user text message", msg)
 	}
 }
 
 // TestRuntimeRunConvertsToolUse verifies provider tool-use events become runtime tool call events.
 func TestRuntimeRunConvertsToolUse(t *testing.T) {
-	stream := make(chan model.Event, 2)
-	stream <- model.Event{
-		Type: model.EventTypeToolUse,
-		ToolUse: &model.ToolUse{
-			ID:   "toolu_1",
-			Name: "Read",
-			Input: map[string]any{
-				"file_path": "main.go",
-			},
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Read",
+					Input: map[string]any{
+						"file_path": "main.go",
+					},
+				},
+			}),
 		},
 	}
-	close(stream)
-
-	client := &fakeModelClient{stream: stream}
-	runtime := New(client, "claude-sonnet-4-5")
+	runtime := New(client, "claude-sonnet-4-5", nil)
 
 	out, err := runtime.Run(context.Background(), conversation.RunRequest{
 		SessionID: "cli",
@@ -96,19 +132,187 @@ func TestRuntimeRunConvertsToolUse(t *testing.T) {
 	if got := payload.Input["file_path"]; got != "main.go" {
 		t.Fatalf("Run() tool payload input = %#v", payload.Input)
 	}
+
+	errorEvent := <-out
+	if errorEvent.Type != event.TypeError {
+		t.Fatalf("Run() second event type = %q, want error for missing executor", errorEvent.Type)
+	}
+}
+
+// TestRuntimeRunToolLoop verifies one tool_use can be executed and fed back into a second model request.
+func TestRuntimeRunToolLoop(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Read",
+					Input: map[string]any{
+						"file_path": "main.go",
+					},
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "done",
+			}),
+		},
+	}
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Output: "file contents"},
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "read the file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var events []event.Event
+	for evt := range out {
+		events = append(events, evt)
+	}
+	if len(events) != 3 {
+		t.Fatalf("Run() event count = %d, want 3", len(events))
+	}
+	if events[0].Type != event.TypeToolCallStarted {
+		t.Fatalf("Run() first event type = %q, want tool.call.started", events[0].Type)
+	}
+	if events[1].Type != event.TypeToolCallFinished {
+		t.Fatalf("Run() second event type = %q, want tool.call.finished", events[1].Type)
+	}
+	if events[2].Type != event.TypeMessageDelta {
+		t.Fatalf("Run() third event type = %q, want message.delta", events[2].Type)
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("Stream() call count = %d, want 2", len(client.requests))
+	}
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages) != 3 {
+		t.Fatalf("second request message count = %d, want 3", len(secondRequest.Messages))
+	}
+
+	assistant := secondRequest.Messages[1]
+	if assistant.Role != message.RoleAssistant || assistant.Content[0].Type != "tool_use" {
+		t.Fatalf("second request assistant message = %#v, want tool_use assistant message", assistant)
+	}
+	toolResult := secondRequest.Messages[2]
+	if toolResult.Role != message.RoleUser || toolResult.Content[0].Type != "tool_result" {
+		t.Fatalf("second request tool result message = %#v, want tool_result user message", toolResult)
+	}
+	if toolResult.Content[0].ToolUseID != "toolu_1" || toolResult.Content[0].Text != "file contents" {
+		t.Fatalf("second request tool result content = %#v", toolResult.Content[0])
+	}
+}
+
+// TestRuntimeRunToolLoopConvertsExecutorError verifies tool execution failures become error tool_result messages instead of aborting the loop.
+func TestRuntimeRunToolLoopConvertsExecutorError(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Edit",
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "handled",
+			}),
+		},
+	}
+	executor := &fakeToolExecutor{
+		errors: map[string]error{
+			"Edit": errors.New("tool executor: tool \"Edit\" not found"),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "edit the file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	toolResult := secondRequest.Messages[2].Content[0]
+	if !toolResult.IsError {
+		t.Fatalf("tool result is_error = false, want true")
+	}
+	if toolResult.Text != "tool executor: tool \"Edit\" not found" {
+		t.Fatalf("tool result text = %q, want executor error", toolResult.Text)
+	}
+}
+
+// TestRuntimeRunStopsAtLoopLimit verifies repeated tool_use responses are bounded by the configured loop cap.
+func TestRuntimeRunStopsAtLoopLimit(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type:    model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read"},
+			}),
+			newModelStream(model.Event{
+				Type:    model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{ID: "toolu_2", Name: "Read"},
+			}),
+		},
+	}
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Output: "file contents"},
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.MaxToolIterations = 1
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "loop",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var last event.Event
+	for evt := range out {
+		last = evt
+	}
+	if last.Type != event.TypeError {
+		t.Fatalf("Run() last event type = %q, want error", last.Type)
+	}
+	payload, ok := last.Payload.(event.ErrorPayload)
+	if !ok {
+		t.Fatalf("Run() last payload type = %T, want event.ErrorPayload", last.Payload)
+	}
+	if payload.Message != "tool loop exceeded max iterations (1)" {
+		t.Fatalf("Run() last error = %q, want loop limit", payload.Message)
+	}
 }
 
 // TestRuntimeRunConvertsProviderErrors verifies provider error stream items become runtime error events.
 func TestRuntimeRunConvertsProviderErrors(t *testing.T) {
-	stream := make(chan model.Event, 2)
-	stream <- model.Event{
-		Type:  model.EventTypeError,
-		Error: "provider failed",
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type:  model.EventTypeError,
+				Error: "provider failed",
+			}),
+		},
 	}
-	close(stream)
-
-	client := &fakeModelClient{stream: stream}
-	runtime := New(client, "claude-sonnet-4-5")
+	runtime := New(client, "claude-sonnet-4-5", nil)
 
 	out, err := runtime.Run(context.Background(), conversation.RunRequest{
 		SessionID: "cli",

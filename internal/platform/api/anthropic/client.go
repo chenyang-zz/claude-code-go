@@ -51,8 +51,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   any            `json:"content,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
 }
 
 type anthropicTool struct {
@@ -335,13 +341,30 @@ func mapMessages(messages []message.Message) []anthropicMessage {
 			Content: make([]anthropicContentBlock, 0, len(msg.Content)),
 		}
 		for _, part := range msg.Content {
-			if part.Type != "text" {
-				continue
+			switch part.Type {
+			case "text":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type: "text",
+					Text: part.Text,
+				})
+			case "tool_use":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type:  "tool_use",
+					ID:    part.ToolUseID,
+					Name:  part.ToolName,
+					Input: part.ToolInput,
+				})
+			case "tool_result":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type:      "tool_result",
+					ToolUseID: part.ToolUseID,
+					Content:   part.Text,
+					IsError:   part.IsError,
+				})
 			}
-			item.Content = append(item.Content, anthropicContentBlock{
-				Type: "text",
-				Text: part.Text,
-			})
+		}
+		if len(item.Content) == 0 {
+			continue
 		}
 		out = append(out, item)
 	}

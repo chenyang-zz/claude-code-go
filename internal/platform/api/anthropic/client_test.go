@@ -77,6 +77,95 @@ func TestClientStreamReadsTextDelta(t *testing.T) {
 	}
 }
 
+// TestClientStreamMapsToolLoopMessages verifies assistant tool_use and user tool_result history are preserved in the Anthropic request body.
+func TestClientStreamMapsToolLoopMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 3 {
+			t.Fatalf("request messages = %#v, want 3 messages", body["messages"])
+		}
+
+		assistant, ok := messages[1].(map[string]any)
+		if !ok {
+			t.Fatalf("assistant message = %#v, want object", messages[1])
+		}
+		assistantContent, ok := assistant["content"].([]any)
+		if !ok || len(assistantContent) != 1 {
+			t.Fatalf("assistant content = %#v, want 1 block", assistant["content"])
+		}
+		toolUse, ok := assistantContent[0].(map[string]any)
+		if !ok {
+			t.Fatalf("assistant tool_use = %#v, want object", assistantContent[0])
+		}
+		if toolUse["type"] != "tool_use" || toolUse["id"] != "toolu_1" || toolUse["name"] != "Read" {
+			t.Fatalf("assistant tool_use block = %#v", toolUse)
+		}
+
+		user, ok := messages[2].(map[string]any)
+		if !ok {
+			t.Fatalf("user message = %#v, want object", messages[2])
+		}
+		userContent, ok := user["content"].([]any)
+		if !ok || len(userContent) != 1 {
+			t.Fatalf("user content = %#v, want 1 block", user["content"])
+		}
+		toolResult, ok := userContent[0].(map[string]any)
+		if !ok {
+			t.Fatalf("user tool_result = %#v, want object", userContent[0])
+		}
+		if toolResult["type"] != "tool_result" || toolResult["tool_use_id"] != "toolu_1" || toolResult["content"] != "file contents" {
+			t.Fatalf("user tool_result block = %#v", toolResult)
+		}
+		if toolResult["is_error"] != true {
+			t.Fatalf("user tool_result is_error = %#v, want true", toolResult["is_error"])
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("read the file"),
+				},
+			},
+			{
+				Role: message.RoleAssistant,
+				Content: []message.ContentPart{
+					message.ToolUsePart("toolu_1", "Read", map[string]any{"file_path": "main.go"}),
+				},
+			},
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.ToolResultPart("toolu_1", "file contents", true),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	for range stream {
+	}
+}
+
 // TestClientStreamReadsToolUse verifies Anthropic tool_use SSE payloads are mapped into shared tool-use events.
 func TestClientStreamReadsToolUse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

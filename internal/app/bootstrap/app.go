@@ -11,6 +11,7 @@ import (
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -74,6 +75,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
 		return nil, err
 	}
 	toolCatalog := engine.DescribeTools(modules.Tools)
+	toolExecutor := executor.NewToolExecutor(modules.Tools)
 
 	switch cfg.Provider {
 	case "", "anthropic":
@@ -82,7 +84,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
 			BaseURL:    cfg.APIBaseURL,
 			HTTPClient: nil,
 		})
-		return engine.New(client, cfg.Model, toolCatalog...), nil
+		return engine.New(client, cfg.Model, toolExecutor, toolCatalog...), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
