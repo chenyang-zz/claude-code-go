@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -522,6 +523,201 @@ func TestToolInvokeRejectsEditAfterFileDrift(t *testing.T) {
 	}
 	if result.Error != modifiedSinceReadError {
 		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, modifiedSinceReadError)
+	}
+}
+
+// TestToolInvokeRejectsNotebookFiles verifies .ipynb targets use the dedicated notebook rejection path.
+func TestToolInvokeRejectsNotebookFiles(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "notes.ipynb")
+	mustWriteFile(t, filePath, "{\"cells\":[]}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "notes.ipynb",
+			"old_string": "[]",
+			"new_string": "[1]",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	want := "File is a Jupyter Notebook. Use the NotebookEdit to edit this file."
+	if result.Error != want {
+		t.Fatalf("Invoke() result.Error = %q, want %q", result.Error, want)
+	}
+}
+
+// TestToolInvokeRejectsOversizedFiles verifies the byte-level size guard trips before reading large files.
+func TestToolInvokeRejectsOversizedFiles(t *testing.T) {
+	projectDir := t.TempDir()
+	filePath := filepath.Join(projectDir, "huge.txt")
+	file, err := os.Create(filePath)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if err := file.Truncate(maxEditFileSize + 1); err != nil {
+		_ = file.Close()
+		t.Fatalf("Truncate() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  "huge.txt",
+			"old_string": "a",
+			"new_string": "b",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "File is too large to edit") {
+		t.Fatalf("Invoke() result.Error = %q, want size-guard error", result.Error)
+	}
+}
+
+// TestToolInvokeRejectsInvalidSettingsEdits verifies valid settings files cannot be edited into invalid JSON.
+func TestToolInvokeRejectsInvalidSettingsEdits(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(settingsDir, "settings.json")
+	mustWriteFile(t, filePath, "{\n  \"model\": \"sonnet\"\n}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  ".claude/settings.json",
+			"old_string": "\"sonnet\"",
+			"new_string": "\"sonnet\",\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "Claude Code settings.json validation failed after edit") {
+		t.Fatalf("Invoke() result.Error = %q, want settings validation error", result.Error)
+	}
+}
+
+// TestToolInvokeAllowsRepairingAlreadyInvalidSettings verifies edits can proceed when the original settings file is already invalid.
+func TestToolInvokeAllowsRepairingAlreadyInvalidSettings(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(settingsDir, "settings.json")
+	mustWriteFile(t, filePath, "{\n  \"model\":\n}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  ".claude/settings.json",
+			"old_string": "\"model\":\n",
+			"new_string": "\"model\": \"sonnet\"\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
 	}
 }
 

@@ -2,7 +2,9 @@ package file_edit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	toolshared "github.com/sheepzhao/claude-code-go/internal/services/tools/shared"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -30,6 +33,10 @@ const (
 	modifiedSinceReadError = "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it."
 	// fileAlreadyExistsForCreateError mirrors the source tool's rejection when an empty-old-string create is attempted against a non-empty file.
 	fileAlreadyExistsForCreateError = "Cannot create new file - file already exists."
+	// notebookEditToolName mirrors the source tool name referenced by the dedicated notebook rejection path.
+	notebookEditToolName = "NotebookEdit"
+	// maxEditFileSize mirrors the source tool's 1 GiB byte-level guard for edit operations.
+	maxEditFileSize = int64(1024 * 1024 * 1024)
 )
 
 // Tool implements the first-batch FileEditTool.
@@ -179,6 +186,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	} else {
 		updatedContent = strings.Replace(originalContent, actualOldString, actualNewString, 1)
 	}
+	if err := validateSettingsFileEdit(filePath, originalContent, updatedContent); err != nil {
+		return coretool.Result{Error: err.Error()}, nil
+	}
 
 	if err := t.fs.WriteFile(filePath, []byte(updatedContent), filePerm); err != nil {
 		return coretool.Result{Error: fmt.Sprintf("file edit tool: write file: %v", err)}, nil
@@ -218,6 +228,12 @@ func (t *Tool) readEditableFile(useContext coretool.UseContext, requestedPath st
 	}
 	if info.IsDir() {
 		return "", 0, fmt.Errorf("Path is a directory, not a file: %s", requestedPath)
+	}
+	if info.Size() > maxEditFileSize {
+		return "", 0, fmt.Errorf("File is too large to edit (%s). Maximum editable file size is %s.", formatFileSize(info.Size()), formatFileSize(maxEditFileSize))
+	}
+	if strings.HasSuffix(strings.ToLower(filePath), ".ipynb") {
+		return "", 0, fmt.Errorf("File is a Jupyter Notebook. Use the %s to edit this file.", notebookEditToolName)
 	}
 	if err := validateExistingFileReadState(useContext, filePath, info.ModTime()); err != nil {
 		return "", 0, err
@@ -472,4 +488,71 @@ outer:
 	}
 
 	return -1
+}
+
+// validateSettingsFileEdit keeps edits from breaking a settings file that was valid before the edit.
+func validateSettingsFileEdit(filePath string, originalContent string, updatedContent string) error {
+	if !isClaudeSettingsPath(filePath) {
+		return nil
+	}
+
+	if err := validateSettingsJSONContent(originalContent); err != nil {
+		return nil
+	}
+	if err := validateSettingsJSONContent(updatedContent); err != nil {
+		return fmt.Errorf("Claude Code settings.json validation failed after edit:\n%s\n\nIMPORTANT: Do not update the env unless explicitly instructed to do so.", err.Error())
+	}
+
+	return nil
+}
+
+// validateSettingsJSONContent performs the minimal migrated settings validation used by FileEditTool.
+func validateSettingsJSONContent(content string) error {
+	var decoded any
+	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
+		return fmt.Errorf("Invalid JSON: %v", err)
+	}
+
+	objectValue, ok := decoded.(map[string]any)
+	if !ok {
+		return fmt.Errorf("Settings validation failed:\n- : Expected object, but received %T", decoded)
+	}
+	if len(objectValue) == 0 {
+		return nil
+	}
+
+	return nil
+}
+
+// isClaudeSettingsPath returns whether the target path should receive settings-specific edit validation.
+func isClaudeSettingsPath(filePath string) bool {
+	normalized := strings.ToLower(filepath.Clean(filePath))
+	claudeSettingsSuffix := strings.ToLower(filepath.Join(".claude", "settings.json"))
+	claudeLocalSettingsSuffix := strings.ToLower(filepath.Join(".claude", "settings.local.json"))
+	if strings.HasSuffix(normalized, claudeSettingsSuffix) || strings.HasSuffix(normalized, claudeLocalSettingsSuffix) {
+		return true
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	globalSettingsPath := strings.ToLower(filepath.Clean(filepath.Join(homeDir, strings.TrimPrefix(platformconfig.GlobalConfigPath, "~/"))))
+	return normalized == globalSettingsPath
+}
+
+// formatFileSize renders byte sizes with a small human-readable unit set for user-facing validation errors.
+func formatFileSize(size int64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	value := float64(size)
+	unitIndex := 0
+	for value >= 1024 && unitIndex < len(units)-1 {
+		value /= 1024
+		unitIndex++
+	}
+	if unitIndex == 0 {
+		return fmt.Sprintf("%d %s", size, units[unitIndex])
+	}
+	rounded := math.Round(value*10) / 10
+	return fmt.Sprintf("%.1f %s", rounded, units[unitIndex])
 }
