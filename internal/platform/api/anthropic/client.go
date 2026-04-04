@@ -42,6 +42,7 @@ type messagesRequest struct {
 	MaxTokens int                `json:"max_tokens"`
 	Stream    bool               `json:"stream"`
 	Messages  []anthropicMessage `json:"messages"`
+	Tools     []anthropicTool    `json:"tools,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -54,11 +55,39 @@ type anthropicContentBlock struct {
 	Text string `json:"text,omitempty"`
 }
 
-type contentBlockDeltaEnvelope struct {
-	Delta struct {
+type anthropicTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+type streamContentBlock struct {
+	blockType string
+	toolID    string
+	toolName  string
+	inputJSON strings.Builder
+}
+
+type contentBlockStartEnvelope struct {
+	Index        int `json:"index"`
+	ContentBlock struct {
 		Type string `json:"type"`
-		Text string `json:"text"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"content_block"`
+}
+
+type contentBlockDeltaEnvelope struct {
+	Index int `json:"index"`
+	Delta struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		PartialJSON string `json:"partial_json"`
 	} `json:"delta"`
+}
+
+type contentBlockStopEnvelope struct {
+	Index int `json:"index"`
 }
 
 type errorEnvelope struct {
@@ -97,6 +126,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		MaxTokens: 1024,
 		Stream:    true,
 		Messages:  mapMessages(req.Messages),
+		Tools:     mapTools(req.Tools),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
@@ -139,6 +169,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 
 		var eventName string
 		var dataLines []string
+		contentBlocks := make(map[int]*streamContentBlock)
 
 		flush := func() {
 			if len(dataLines) == 0 {
@@ -146,7 +177,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 				return
 			}
 
-			c.handleSSEEvent(eventName, strings.Join(dataLines, "\n"), out)
+			c.handleSSEEvent(eventName, strings.Join(dataLines, "\n"), contentBlocks, out)
 			eventName = ""
 			dataLines = dataLines[:0]
 		}
@@ -182,12 +213,28 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 }
 
 // handleSSEEvent maps one Anthropic SSE event into the shared model stream format.
-func (c *Client) handleSSEEvent(eventName, data string, out chan<- model.Event) {
+func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*streamContentBlock, out chan<- model.Event) {
 	if data == "" || data == "[DONE]" {
 		return
 	}
 
 	switch eventName {
+	case "content_block_start":
+		var payload contentBlockStartEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic content block start: %v", err),
+			}
+			return
+		}
+		if payload.ContentBlock.Type == "tool_use" {
+			contentBlocks[payload.Index] = &streamContentBlock{
+				blockType: payload.ContentBlock.Type,
+				toolID:    payload.ContentBlock.ID,
+				toolName:  payload.ContentBlock.Name,
+			}
+		}
 	case "content_block_delta":
 		var payload contentBlockDeltaEnvelope
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -203,6 +250,50 @@ func (c *Client) handleSSEEvent(eventName, data string, out chan<- model.Event) 
 				Text: payload.Delta.Text,
 			}
 		}
+		if payload.Delta.Type == "input_json_delta" {
+			block, ok := contentBlocks[payload.Index]
+			if !ok || block.blockType != "tool_use" {
+				out <- model.Event{
+					Type:  model.EventTypeError,
+					Error: "received tool input delta for unknown content block",
+				}
+				return
+			}
+			block.inputJSON.WriteString(payload.Delta.PartialJSON)
+		}
+	case "content_block_stop":
+		var payload contentBlockStopEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic content block stop: %v", err),
+			}
+			return
+		}
+
+		block, ok := contentBlocks[payload.Index]
+		if !ok || block.blockType != "tool_use" {
+			return
+		}
+		defer delete(contentBlocks, payload.Index)
+
+		input, err := parseToolUseInput(block.inputJSON.String())
+		if err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic tool use input: %v", err),
+			}
+			return
+		}
+
+		out <- model.Event{
+			Type: model.EventTypeToolUse,
+			ToolUse: &model.ToolUse{
+				ID:    block.toolID,
+				Name:  block.toolName,
+				Input: input,
+			},
+		}
 	case "error":
 		var payload errorEnvelope
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {
@@ -217,6 +308,22 @@ func (c *Client) handleSSEEvent(eventName, data string, out chan<- model.Event) 
 			Error: payload.Error.Message,
 		}
 	}
+}
+
+// parseToolUseInput decodes the final accumulated tool-use JSON payload.
+func parseToolUseInput(raw string) (map[string]any, error) {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}, nil
+	}
+
+	var input map[string]any
+	if err := json.Unmarshal([]byte(raw), &input); err != nil {
+		return nil, err
+	}
+	if input == nil {
+		return map[string]any{}, nil
+	}
+	return input, nil
 }
 
 // mapMessages converts shared message types into the Anthropic request shape.
@@ -237,6 +344,26 @@ func mapMessages(messages []message.Message) []anthropicMessage {
 			})
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+// mapTools converts shared tool declarations into the Anthropic request shape.
+func mapTools(tools []model.ToolDefinition) []anthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	out := make([]anthropicTool, 0, len(tools))
+	for _, toolDef := range tools {
+		if strings.TrimSpace(toolDef.Name) == "" {
+			continue
+		}
+		out = append(out, anthropicTool{
+			Name:        toolDef.Name,
+			Description: toolDef.Description,
+			InputSchema: toolDef.InputSchema,
+		})
 	}
 	return out
 }

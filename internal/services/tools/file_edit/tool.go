@@ -94,6 +94,11 @@ func (t *Tool) Description() string {
 	return "Edit an existing text file by replacing one exact string with another."
 }
 
+// InputSchema returns the FileEditTool input contract exposed to model providers.
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return inputSchema()
+}
+
 // IsReadOnly reports that file editing mutates external state.
 func (t *Tool) IsReadOnly() bool {
 	return false

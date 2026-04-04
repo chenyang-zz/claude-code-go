@@ -8,6 +8,8 @@ type Tool interface {
 	Name() string
 	// Description returns a short human-readable summary for the tool.
 	Description() string
+	// InputSchema returns the declared input contract exposed to provider tool schemas.
+	InputSchema() InputSchema
 	// IsReadOnly reports whether the tool avoids mutating external state.
 	IsReadOnly() bool
 	// IsConcurrencySafe reports whether multiple invocations can run in parallel safely.

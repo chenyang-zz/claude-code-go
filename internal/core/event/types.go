@@ -5,7 +5,9 @@ type MessageDeltaPayload struct {
 }
 
 type ToolCallPayload struct {
-	Name string
+	ID    string
+	Name  string
+	Input map[string]any
 }
 
 type ErrorPayload struct {

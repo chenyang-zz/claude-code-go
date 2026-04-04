@@ -80,6 +80,11 @@ func (t *Tool) Description() string {
 	return "Fast file pattern matching tool that returns matching file paths sorted by modification time."
 }
 
+// InputSchema returns the GlobTool input contract exposed to model providers.
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return inputSchema()
+}
+
 // IsReadOnly reports that glob search never mutates external state.
 func (t *Tool) IsReadOnly() bool {
 	return true
@@ -117,9 +122,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	skipDirectoryPrecheck := strings.TrimSpace(input.Path) != "" && (looksLikeUNCPath(input.Path) || looksLikeUNCPath(searchRoot))
 	if skipDirectoryPrecheck {
 		logger.DebugCF("glob_tool", "skipping directory precheck for UNC-style path", map[string]any{
-			"input_path":   input.Path,
-			"search_root":  searchRoot,
-			"working_dir":  call.Context.WorkingDir,
+			"input_path":  input.Path,
+			"search_root": searchRoot,
+			"working_dir": call.Context.WorkingDir,
 		})
 	} else {
 		info, err := t.fs.Stat(searchRoot)

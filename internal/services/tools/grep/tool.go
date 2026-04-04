@@ -169,6 +169,11 @@ func (t *Tool) Description() string {
 	return "Fast content search tool backed by ripgrep that returns matching file paths, content lines, or match counts."
 }
 
+// InputSchema returns the GrepTool input contract exposed to model providers.
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return inputSchema()
+}
+
 // IsReadOnly reports that grep search never mutates external state.
 func (t *Tool) IsReadOnly() bool {
 	return true

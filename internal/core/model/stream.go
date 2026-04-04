@@ -6,6 +6,8 @@ type EventType string
 const (
 	// EventTypeTextDelta carries one assistant text chunk.
 	EventTypeTextDelta EventType = "text_delta"
+	// EventTypeToolUse carries one assistant tool-use block after its JSON input is complete.
+	EventTypeToolUse EventType = "tool_use"
 	// EventTypeError carries a provider-facing failure converted into stream form.
 	EventTypeError EventType = "error"
 	// EventTypeDone marks the end of a provider stream.

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
+	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
@@ -61,6 +64,17 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
 func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
+	filesystem := platformfs.NewLocalFS()
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		return nil, err
+	}
+	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy)
+	if err != nil {
+		return nil, err
+	}
+	toolCatalog := engine.DescribeTools(modules.Tools)
+
 	switch cfg.Provider {
 	case "", "anthropic":
 		client := anthropic.NewClient(anthropic.Config{
@@ -68,7 +82,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
 			BaseURL:    cfg.APIBaseURL,
 			HTTPClient: nil,
 		})
-		return engine.New(client, cfg.Model), nil
+		return engine.New(client, cfg.Model, toolCatalog...), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}

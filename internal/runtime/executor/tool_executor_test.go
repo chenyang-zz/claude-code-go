@@ -18,6 +18,9 @@ func (stubTool) Name() string { return "stub" }
 // Description returns a short description for the test tool.
 func (stubTool) Description() string { return "test stub tool" }
 
+// InputSchema returns the synthetic schema used by the executor test.
+func (stubTool) InputSchema() tool.InputSchema { return tool.InputSchema{} }
+
 // IsReadOnly reports that the stub does not mutate state.
 func (stubTool) IsReadOnly() bool { return true }
 
@@ -74,6 +77,9 @@ func (readTrackingTool) Name() string { return "read" }
 // Description returns a short summary for the read-state test tool.
 func (readTrackingTool) Description() string { return "test read tool" }
 
+// InputSchema returns the synthetic schema used by the read-state test.
+func (readTrackingTool) InputSchema() tool.InputSchema { return tool.InputSchema{} }
+
 // IsReadOnly reports that the synthetic read never mutates external state.
 func (readTrackingTool) IsReadOnly() bool { return true }
 
@@ -106,6 +112,9 @@ func (writeTrackingTool) Name() string { return "write" }
 
 // Description returns a short summary for the write-state test tool.
 func (writeTrackingTool) Description() string { return "test write tool" }
+
+// InputSchema returns the synthetic schema used by the read/write-state test.
+func (writeTrackingTool) InputSchema() tool.InputSchema { return tool.InputSchema{} }
 
 // IsReadOnly reports that the test focuses on context propagation rather than mutation semantics.
 func (writeTrackingTool) IsReadOnly() bool { return false }

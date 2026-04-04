@@ -98,6 +98,11 @@ func (t *Tool) Description() string {
 	return "Read a text file from the local filesystem with optional offset and limit parameters."
 }
 
+// InputSchema returns the FileReadTool input contract exposed to model providers.
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return inputSchema()
+}
+
 // IsReadOnly reports that file reading never mutates external state.
 func (t *Tool) IsReadOnly() bool {
 	return true

@@ -47,6 +47,45 @@ type InputSchema struct {
 	Properties map[string]FieldSchema
 }
 
+// JSONSchema converts the minimal tool schema into an Anthropic-compatible JSON schema subset.
+func (s InputSchema) JSONSchema() map[string]any {
+	properties := make(map[string]any, len(s.Properties))
+	required := make([]string, 0, len(s.Properties))
+
+	for name, field := range s.Properties {
+		properties[name] = field.jsonSchema()
+		if field.Required {
+			required = append(required, name)
+		}
+	}
+
+	sort.Strings(required)
+
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+
+	return schema
+}
+
+// jsonSchema converts one field schema into its JSON-schema-like representation.
+func (f FieldSchema) jsonSchema() map[string]any {
+	schema := map[string]any{
+		"type": string(f.Type),
+	}
+	if f.Description != "" {
+		schema["description"] = f.Description
+	}
+	if f.Type == ValueKindArray && f.Items != nil {
+		schema["items"] = f.Items.jsonSchema()
+	}
+	return schema
+}
+
 // DecodeInput validates the raw input map against the provided schema and decodes it into T.
 func DecodeInput[T any](schema InputSchema, input map[string]any) (T, error) {
 	var target T

@@ -55,6 +55,49 @@ func TestRuntimeRunBuildsUserMessage(t *testing.T) {
 	}
 }
 
+// TestRuntimeRunConvertsToolUse verifies provider tool-use events become runtime tool call events.
+func TestRuntimeRunConvertsToolUse(t *testing.T) {
+	stream := make(chan model.Event, 2)
+	stream <- model.Event{
+		Type: model.EventTypeToolUse,
+		ToolUse: &model.ToolUse{
+			ID:   "toolu_1",
+			Name: "Read",
+			Input: map[string]any{
+				"file_path": "main.go",
+			},
+		},
+	}
+	close(stream)
+
+	client := &fakeModelClient{stream: stream}
+	runtime := New(client, "claude-sonnet-4-5")
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello world",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	evt := <-out
+	if evt.Type != event.TypeToolCallStarted {
+		t.Fatalf("Run() event type = %q, want tool.call.started", evt.Type)
+	}
+
+	payload, ok := evt.Payload.(event.ToolCallPayload)
+	if !ok {
+		t.Fatalf("Run() payload type = %T, want event.ToolCallPayload", evt.Payload)
+	}
+	if payload.ID != "toolu_1" || payload.Name != "Read" {
+		t.Fatalf("Run() tool payload = %#v", payload)
+	}
+	if got := payload.Input["file_path"]; got != "main.go" {
+		t.Fatalf("Run() tool payload input = %#v", payload.Input)
+	}
+}
+
 // TestRuntimeRunConvertsProviderErrors verifies provider error stream items become runtime error events.
 func TestRuntimeRunConvertsProviderErrors(t *testing.T) {
 	stream := make(chan model.Event, 2)

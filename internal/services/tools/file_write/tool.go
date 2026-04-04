@@ -76,6 +76,11 @@ func (t *Tool) Description() string {
 	return "Write a file to the local filesystem by creating or replacing its full contents."
 }
 
+// InputSchema returns the FileWriteTool input contract exposed to model providers.
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return inputSchema()
+}
+
 // IsReadOnly reports that file writing mutates external state.
 func (t *Tool) IsReadOnly() bool {
 	return false
