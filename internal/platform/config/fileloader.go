@@ -23,8 +23,11 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model    string `json:"model"`
-	Provider string `json:"provider"`
+	Model       string `json:"model"`
+	Provider    string `json:"provider"`
+	Permissions struct {
+		DefaultMode string `json:"defaultMode"`
+	} `json:"permissions"`
 }
 
 // NewFileLoader builds a minimal loader with explicit lookup roots.
@@ -70,10 +73,11 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	}
 
 	envCfg := coreconfig.Config{
-		Model:      l.LookupEnv("CLAUDE_CODE_MODEL"),
-		Provider:   l.LookupEnv("CLAUDE_CODE_PROVIDER"),
-		APIKey:     l.LookupEnv("ANTHROPIC_API_KEY"),
-		APIBaseURL: l.LookupEnv("ANTHROPIC_BASE_URL"),
+		Model:        l.LookupEnv("CLAUDE_CODE_MODEL"),
+		Provider:     l.LookupEnv("CLAUDE_CODE_PROVIDER"),
+		APIKey:       l.LookupEnv("ANTHROPIC_API_KEY"),
+		APIBaseURL:   l.LookupEnv("ANTHROPIC_BASE_URL"),
+		ApprovalMode: l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
 	}
 	cfg = coreconfig.Merge(cfg, envCfg)
 
@@ -115,7 +119,8 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 	}
 
 	return coreconfig.Config{
-		Model:    parsed.Model,
-		Provider: parsed.Provider,
+		Model:        parsed.Model,
+		Provider:     parsed.Provider,
+		ApprovalMode: parsed.Permissions.DefaultMode,
 	}, nil
 }

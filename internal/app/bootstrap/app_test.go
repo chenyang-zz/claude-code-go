@@ -7,6 +7,7 @@ import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 )
 
@@ -55,5 +56,25 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	}
 	if app.Config.Provider != "anthropic" || app.Runner == nil {
 		t.Fatalf("NewAppWithDependencies() = %#v, want anthropic config and runner", app)
+	}
+}
+
+// TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
+func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
+	eng, err := DefaultEngineFactory(coreconfig.Config{
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-5",
+		ApprovalMode: approval.ModeBypassPermissions,
+	})
+	if err != nil {
+		t.Fatalf("DefaultEngineFactory() error = %v", err)
+	}
+
+	runtime, ok := eng.(*engine.Runtime)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+	}
+	if runtime.ApprovalService == nil {
+		t.Fatal("DefaultEngineFactory() approval service = nil, want injected service")
 	}
 }

@@ -23,7 +23,7 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"defaultMode":"plan"}}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(project settings) error = %v", err)
 	}
 
@@ -31,6 +31,8 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 		switch key {
 		case "CLAUDE_CODE_MODEL":
 			return "env-model"
+		case "CLAUDE_CODE_APPROVAL_MODE":
+			return "bypassPermissions"
 		case "ANTHROPIC_API_KEY":
 			return "env-key"
 		default:
@@ -43,7 +45,7 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Provider != "anthropic" || cfg.Model != "env-model" || cfg.APIKey != "env-key" {
-		t.Fatalf("Load() = %#v, want provider anthropic, model env-model, api key env-key", cfg)
+	if cfg.Provider != "anthropic" || cfg.Model != "env-model" || cfg.APIKey != "env-key" || cfg.ApprovalMode != "bypassPermissions" {
+		t.Fatalf("Load() = %#v, want provider anthropic, model env-model, api key env-key, approval mode bypassPermissions", cfg)
 	}
 }

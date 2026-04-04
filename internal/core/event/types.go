@@ -20,6 +20,15 @@ type ToolResultPayload struct {
 	IsError bool
 }
 
+// ApprovalPayload describes one runtime approval request emitted before a guarded tool operation can continue.
+type ApprovalPayload struct {
+	CallID   string
+	ToolName string
+	Path     string
+	Action   string
+	Message  string
+}
+
 // ErrorPayload carries one runtime or provider error message.
 type ErrorPayload struct {
 	Message string

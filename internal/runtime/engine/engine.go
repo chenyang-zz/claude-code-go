@@ -11,7 +11,9 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -35,6 +37,8 @@ type Runtime struct {
 	ToolCatalog []model.ToolDefinition
 	// Executor runs normalized tool invocations when the model emits tool_use blocks.
 	Executor ToolExecutor
+	// ApprovalService resolves runtime approval prompts for guarded tool operations.
+	ApprovalService approval.Service
 	// MaxToolIterations caps the number of tool-result feedback loops per runtime turn.
 	MaxToolIterations int
 }
@@ -194,12 +198,13 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 	resultMessage := message.Message{Role: message.RoleUser}
 
 	for _, toolUse := range toolUses {
-		result, invokeErr := e.Executor.Execute(ctx, coretool.Call{
+		call := coretool.Call{
 			ID:     toolUse.ID,
 			Name:   toolUse.Name,
 			Input:  toolUse.Input,
 			Source: "model",
-		})
+		}
+		result, invokeErr := e.executeToolUse(ctx, call, out)
 
 		content, isError := renderToolResult(result, invokeErr)
 		resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(toolUse.ID, content, isError))
@@ -216,6 +221,56 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 	}
 
 	return resultMessage
+}
+
+// executeToolUse resolves one tool call and branches into the approval flow when the tool is blocked by a permission ask.
+func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out chan<- event.Event) (coretool.Result, error) {
+	result, invokeErr := e.Executor.Execute(ctx, call)
+	if invokeErr == nil {
+		return result, nil
+	}
+
+	var permissionErr *corepermission.PermissionError
+	if !errors.As(invokeErr, &permissionErr) || permissionErr.Decision != corepermission.DecisionAsk || e.ApprovalService == nil {
+		return result, invokeErr
+	}
+
+	out <- event.Event{
+		Type:      event.TypeApprovalRequired,
+		Timestamp: time.Now(),
+		Payload: event.ApprovalPayload{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Path:     permissionErr.Path,
+			Action:   string(permissionErr.Access),
+			Message:  permissionErr.Message,
+		},
+	}
+
+	decision, err := e.ApprovalService.Decide(ctx, approval.Request{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Path:     permissionErr.Path,
+		Action:   string(permissionErr.Access),
+		Message:  permissionErr.Message,
+	})
+	if err != nil {
+		return coretool.Result{}, err
+	}
+	if !decision.Approved {
+		if strings.TrimSpace(decision.Reason) == "" {
+			decision.Reason = fmt.Sprintf("Permission to %s %s was not granted.", permissionErr.Access, permissionErr.Path)
+		}
+		return coretool.Result{Error: decision.Reason}, nil
+	}
+
+	retryCtx := corepermission.WithFilesystemGrant(ctx, corepermission.FilesystemRequest{
+		ToolName:   call.Name,
+		Path:       permissionErr.Path,
+		WorkingDir: call.Context.WorkingDir,
+		Access:     permissionErr.Access,
+	})
+	return e.Executor.Execute(retryCtx, call)
 }
 
 // renderToolResult normalizes executor success and failure paths into the minimal tool_result payload understood by the model.

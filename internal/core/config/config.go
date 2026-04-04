@@ -19,7 +19,8 @@ type Config struct {
 // DefaultConfig returns the minimum configuration required by the single-turn text runtime.
 func DefaultConfig() Config {
 	return Config{
-		Model:    "claude-sonnet-4-5",
-		Provider: "anthropic",
+		Model:        "claude-sonnet-4-5",
+		Provider:     "anthropic",
+		ApprovalMode: "default",
 	}
 }

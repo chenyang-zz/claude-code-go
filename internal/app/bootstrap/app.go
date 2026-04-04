@@ -10,6 +10,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
@@ -84,7 +85,12 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
 			BaseURL:    cfg.APIBaseURL,
 			HTTPClient: nil,
 		})
-		return engine.New(client, cfg.Model, toolExecutor, toolCatalog...), nil
+		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.ApprovalService = approval.NewPromptingService(
+			cfg.ApprovalMode,
+			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
+		)
+		return runtime, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}

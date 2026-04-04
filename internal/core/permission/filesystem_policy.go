@@ -28,8 +28,6 @@ func NewFilesystemPolicy(rules RuleSet) (*FilesystemPolicy, error) {
 
 // EvaluateFilesystem evaluates one filesystem access request against the current minimal policy.
 func (p *FilesystemPolicy) EvaluateFilesystem(ctx context.Context, req FilesystemRequest) Evaluation {
-	_ = ctx
-
 	logger.DebugCF("permission", "evaluating filesystem permission", map[string]any{
 		"tool_name":   req.ToolName,
 		"path":        req.Path,
@@ -45,6 +43,15 @@ func (p *FilesystemPolicy) EvaluateFilesystem(ctx context.Context, req Filesyste
 			Decision: DecisionDeny,
 			Message:  fmt.Sprintf("permission: invalid filesystem request: %v", err),
 		}
+	}
+
+	if hasFilesystemGrant(ctx, req) {
+		logger.DebugCF("permission", "filesystem permission allowed by runtime grant", map[string]any{
+			"tool_name": req.ToolName,
+			"path":      req.Path,
+			"access":    string(req.Access),
+		})
+		return Evaluation{Decision: DecisionAllow}
 	}
 
 	normalizedPath, normalizedWorkingDir, err := normalizeFilesystemRequestPath(req.Path, req.WorkingDir)
@@ -154,13 +161,16 @@ func (p *FilesystemPolicy) CheckReadPermissionForGlob(ctx context.Context, toolN
 		WorkingDir: workingDir,
 		Access:     AccessRead,
 	}
-	_ = ctx
 
 	if err := req.Validate(); err != nil {
 		return Evaluation{
 			Decision: DecisionDeny,
 			Message:  fmt.Sprintf("permission: invalid filesystem request: %v", err),
 		}
+	}
+
+	if hasFilesystemGrant(ctx, req) {
+		return Evaluation{Decision: DecisionAllow}
 	}
 
 	normalizedPath, normalizedWorkingDir, err := normalizeFilesystemRequestPath(req.Path, req.WorkingDir)
@@ -377,11 +387,11 @@ func matchingGlobRuleForInput(normalizedPath string, normalizedWorkingDir string
 		matched, err := matchGlobRule(normalizedPath, normalizedWorkingDir, pattern, *rule)
 		if err != nil {
 			logger.DebugCF("permission", "glob filesystem rule match failed", map[string]any{
-				"path":          normalizedPath,
-				"pattern":       pattern,
-				"rule_pattern":  rule.Pattern,
-				"base_dir":      rule.BaseDir,
-				"error":         err.Error(),
+				"path":         normalizedPath,
+				"pattern":      pattern,
+				"rule_pattern": rule.Pattern,
+				"base_dir":     rule.BaseDir,
+				"error":        err.Error(),
 			})
 			continue
 		}

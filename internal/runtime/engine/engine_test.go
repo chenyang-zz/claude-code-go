@@ -9,7 +9,9 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 )
 
 type fakeModelClient struct {
@@ -32,10 +34,14 @@ type fakeToolExecutor struct {
 	results map[string]tool.Result
 	errors  map[string]error
 	calls   []tool.Call
+	run     func(ctx context.Context, call tool.Call) (tool.Result, error)
 }
 
 func (e *fakeToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
 	e.calls = append(e.calls, call)
+	if e.run != nil {
+		return e.run(ctx, call)
+	}
 	if err, ok := e.errors[call.Name]; ok {
 		return tool.Result{}, err
 	}
@@ -43,6 +49,17 @@ func (e *fakeToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Re
 		return result, nil
 	}
 	return tool.Result{}, nil
+}
+
+type fakeApprovalService struct {
+	response approval.Response
+	requests []approval.Request
+}
+
+func (s *fakeApprovalService) Decide(ctx context.Context, req approval.Request) (approval.Response, error) {
+	_ = ctx
+	s.requests = append(s.requests, req)
+	return s.response, nil
 }
 
 func newModelStream(events ...model.Event) model.Stream {
@@ -332,5 +349,136 @@ func TestRuntimeRunConvertsProviderErrors(t *testing.T) {
 	}
 	if payload.Message != "provider failed" {
 		t.Fatalf("Run() error payload = %#v, want provider failed", payload)
+	}
+}
+
+// TestRuntimeRunApprovalRetry verifies permission ask errors enter the approval flow and retry the tool after approval.
+func TestRuntimeRunApprovalRetry(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Read",
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "approved",
+			}),
+		},
+	}
+	attempts := 0
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			attempts++
+			if attempts == 1 {
+				return tool.Result{}, (&corepermission.Evaluation{
+					Decision: corepermission.DecisionAsk,
+					Message:  "Claude requested permissions to read from /tmp/demo.txt, but you haven't granted it yet.",
+				}).ToError(corepermission.FilesystemRequest{
+					ToolName:   call.Name,
+					Path:       "/tmp/demo.txt",
+					WorkingDir: call.Context.WorkingDir,
+					Access:     corepermission.AccessRead,
+				})
+			}
+			return tool.Result{Output: "file contents"}, nil
+		},
+	}
+	approvalService := &fakeApprovalService{
+		response: approval.Response{Approved: true},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.ApprovalService = approvalService
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "read the file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var events []event.Event
+	for evt := range out {
+		events = append(events, evt)
+	}
+	if len(events) != 4 {
+		t.Fatalf("Run() event count = %d, want 4", len(events))
+	}
+	if events[1].Type != event.TypeApprovalRequired {
+		t.Fatalf("Run() second event type = %q, want approval.required", events[1].Type)
+	}
+	if attempts != 2 {
+		t.Fatalf("Execute() attempts = %d, want 2", attempts)
+	}
+	if len(approvalService.requests) != 1 || approvalService.requests[0].Path != "/tmp/demo.txt" {
+		t.Fatalf("approval requests = %#v, want one request for /tmp/demo.txt", approvalService.requests)
+	}
+
+	secondRequest := client.requests[1]
+	toolResult := secondRequest.Messages[2].Content[0]
+	if toolResult.Text != "file contents" || toolResult.IsError {
+		t.Fatalf("tool result content = %#v, want approved tool output", toolResult)
+	}
+}
+
+// TestRuntimeRunApprovalDenial verifies denied approval decisions become error tool_result blocks without retry success.
+func TestRuntimeRunApprovalDenial(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Write",
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "denied",
+			}),
+		},
+	}
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{}, (&corepermission.Evaluation{
+				Decision: corepermission.DecisionAsk,
+				Message:  "Claude requested permissions to write to /tmp/demo.txt, but you haven't granted it yet.",
+			}).ToError(corepermission.FilesystemRequest{
+				ToolName:   call.Name,
+				Path:       "/tmp/demo.txt",
+				WorkingDir: call.Context.WorkingDir,
+				Access:     corepermission.AccessWrite,
+			})
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.ApprovalService = &fakeApprovalService{
+		response: approval.Response{
+			Approved: false,
+			Reason:   "Permission to write /tmp/demo.txt was not granted.",
+		},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "write the file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	toolResult := secondRequest.Messages[2].Content[0]
+	if !toolResult.IsError {
+		t.Fatalf("tool result is_error = false, want true")
+	}
+	if toolResult.Text != "Permission to write /tmp/demo.txt was not granted." {
+		t.Fatalf("tool result text = %q, want approval denial", toolResult.Text)
 	}
 }
