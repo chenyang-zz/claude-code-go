@@ -80,6 +80,8 @@ type Input struct {
 	HeadLimit *int `json:"head_limit,omitempty"`
 	// Offset skips the first N rows before applying HeadLimit.
 	Offset int `json:"offset,omitempty"`
+	// Multiline enables ripgrep multiline mode so patterns can span line boundaries.
+	Multiline bool `json:"multiline,omitempty"`
 }
 
 // Output is the structured search result returned in tool metadata.
@@ -102,6 +104,8 @@ type Output struct {
 	AppliedLimit *int `json:"appliedLimit,omitempty"`
 	// AppliedOffset reports the number of rows skipped before rendering this page.
 	AppliedOffset *int `json:"appliedOffset,omitempty"`
+	// PaginationSummary renders a user-facing description of the current page within the full result set.
+	PaginationSummary string `json:"paginationSummary,omitempty"`
 }
 
 // matchCandidate stores one ripgrep hit together with its modification time for stable sorting.
@@ -140,6 +144,8 @@ type searchRequest struct {
 	headLimit *int
 	// offset skips projected rows before headLimit is applied.
 	offset int
+	// multiline enables ripgrep multiline mode.
+	multiline bool
 	// start stores the invocation start time for duration accounting.
 	start time.Time
 }
@@ -226,6 +232,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		fileType:        strings.TrimSpace(input.Type),
 		headLimit:       input.HeadLimit,
 		offset:          clampNonNegative(input.Offset),
+		multiline:       input.Multiline,
 		start:           start,
 	}
 
@@ -242,6 +249,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		"file_type":        request.fileType,
 		"head_limit":       derefInt(input.HeadLimit),
 		"offset":           request.offset,
+		"multiline":        request.multiline,
 		"working_dir":      call.Context.WorkingDir,
 	})
 
@@ -328,6 +336,10 @@ func inputSchema() coretool.InputSchema {
 				Type:        coretool.ValueKindInteger,
 				Description: "Optional number of rows to skip before head_limit is applied.",
 			},
+			"multiline": {
+				Type:        coretool.ValueKindBoolean,
+				Description: "Optional toggle for ripgrep multiline mode (-U --multiline-dotall).",
+			},
 		},
 	}
 }
@@ -343,12 +355,13 @@ func (t *Tool) runSearch(ctx context.Context, request searchRequest) (Output, er
 		pagedLines, appliedLimit, appliedOffset := applyHeadLimit(lines, request.headLimit, request.offset)
 		relativeLines := relativizeRipgrepLines(pagedLines, request.workingDir)
 		return Output{
-			Mode:          outputModeContent,
-			DurationMs:    time.Since(request.start).Milliseconds(),
-			Content:       strings.Join(relativeLines, "\n"),
-			NumLines:      len(relativeLines),
-			AppliedLimit:  appliedLimit,
-			AppliedOffset: appliedOffset,
+			Mode:              outputModeContent,
+			DurationMs:        time.Since(request.start).Milliseconds(),
+			Content:           strings.Join(relativeLines, "\n"),
+			NumLines:          len(relativeLines),
+			AppliedLimit:      appliedLimit,
+			AppliedOffset:     appliedOffset,
+			PaginationSummary: buildPaginationSummary(len(lines), len(relativeLines), appliedLimit, appliedOffset, "results"),
 		}, nil
 	case outputModeCount:
 		lines, err := t.runRipgrep(ctx, request)
@@ -359,13 +372,14 @@ func (t *Tool) runSearch(ctx context.Context, request searchRequest) (Output, er
 		relativeLines := relativizeRipgrepLines(pagedLines, request.workingDir)
 		numFiles, numMatches := summarizeCountLines(relativeLines)
 		return Output{
-			Mode:          outputModeCount,
-			DurationMs:    time.Since(request.start).Milliseconds(),
-			NumFiles:      numFiles,
-			Content:       strings.Join(relativeLines, "\n"),
-			NumMatches:    numMatches,
-			AppliedLimit:  appliedLimit,
-			AppliedOffset: appliedOffset,
+			Mode:              outputModeCount,
+			DurationMs:        time.Since(request.start).Milliseconds(),
+			NumFiles:          numFiles,
+			Content:           strings.Join(relativeLines, "\n"),
+			NumMatches:        numMatches,
+			AppliedLimit:      appliedLimit,
+			AppliedOffset:     appliedOffset,
+			PaginationSummary: buildPaginationSummary(len(lines), len(relativeLines), appliedLimit, appliedOffset, "count rows"),
 		}, nil
 	default:
 		paths, err := t.runRipgrep(ctx, request)
@@ -387,12 +401,13 @@ func (t *Tool) runSearch(ctx context.Context, request searchRequest) (Output, er
 		}
 
 		return Output{
-			Mode:          outputModeFilesWithMatches,
-			DurationMs:    time.Since(request.start).Milliseconds(),
-			NumFiles:      len(filenames),
-			Filenames:     filenames,
-			AppliedLimit:  appliedLimit,
-			AppliedOffset: appliedOffset,
+			Mode:              outputModeFilesWithMatches,
+			DurationMs:        time.Since(request.start).Milliseconds(),
+			NumFiles:          len(filenames),
+			Filenames:         filenames,
+			AppliedLimit:      appliedLimit,
+			AppliedOffset:     appliedOffset,
+			PaginationSummary: buildPaginationSummary(len(matches), len(filenames), appliedLimit, appliedOffset, "files"),
 		}, nil
 	}
 }
@@ -409,6 +424,9 @@ func (t *Tool) runRipgrep(ctx context.Context, request searchRequest) ([]string,
 	}
 
 	args := []string{"--hidden", "--max-columns", "500"}
+	if request.multiline {
+		args = append(args, "-U", "--multiline-dotall")
+	}
 	if request.caseInsensitive {
 		args = append(args, "-i")
 	}
@@ -713,11 +731,10 @@ func renderOutput(output Output) string {
 		if strings.TrimSpace(output.Content) == "" {
 			return "No matches found"
 		}
-		limitInfo := formatLimitInfo(output.AppliedLimit, output.AppliedOffset)
-		if limitInfo == "" {
+		if output.PaginationSummary == "" {
 			return output.Content
 		}
-		return output.Content + "\n\n[Showing results with pagination = " + limitInfo + "]"
+		return output.Content + "\n\n[" + output.PaginationSummary + "]"
 	case outputModeCount:
 		if strings.TrimSpace(output.Content) == "" {
 			return "No matches found"
@@ -731,20 +748,22 @@ func renderOutput(output Output) string {
 			pluralize(output.NumFiles, "file", "files"),
 			formatPaginationSuffix(limitInfo),
 		)
+		if output.PaginationSummary != "" {
+			summary += "\n" + output.PaginationSummary + "."
+		}
 		return output.Content + summary
 	default:
 		if output.NumFiles == 0 {
 			return "No files found"
 		}
-		limitInfo := formatLimitInfo(output.AppliedLimit, output.AppliedOffset)
-		if limitInfo == "" {
+		if output.PaginationSummary == "" {
 			return strings.Join(output.Filenames, "\n")
 		}
 		return fmt.Sprintf(
-			"Found %d %s %s\n%s",
+			"Found %d %s\n[%s]\n%s",
 			output.NumFiles,
 			pluralize(output.NumFiles, "file", "files"),
-			limitInfo,
+			output.PaginationSummary,
 			strings.Join(output.Filenames, "\n"),
 		)
 	}
@@ -756,6 +775,27 @@ func formatPaginationSuffix(limitInfo string) string {
 		return ""
 	}
 	return " with pagination = " + limitInfo
+}
+
+// buildPaginationSummary converts limit/offset metadata into a caller-facing "showing X-Y of Z" sentence.
+func buildPaginationSummary(total int, returned int, appliedLimit *int, appliedOffset *int, noun string) string {
+	if total == 0 || returned == 0 {
+		return ""
+	}
+	if appliedLimit == nil && appliedOffset == nil {
+		return ""
+	}
+
+	start := 1
+	if appliedOffset != nil && *appliedOffset > 0 {
+		start += *appliedOffset
+	}
+	end := start + returned - 1
+	limitInfo := formatLimitInfo(appliedLimit, appliedOffset)
+	if limitInfo == "" {
+		return fmt.Sprintf("Showing %s %d-%d of %d", noun, start, end, total)
+	}
+	return fmt.Sprintf("Showing %s %d-%d of %d with pagination = %s", noun, start, end, total, limitInfo)
 }
 
 // inputPathOrWorkingDir keeps handled validation errors aligned with the user-provided path.

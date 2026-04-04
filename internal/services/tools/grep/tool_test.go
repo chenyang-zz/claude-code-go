@@ -264,9 +264,12 @@ func TestToolInvokeCountModeSupportsPagination(t *testing.T) {
 	if data.AppliedOffset == nil || *data.AppliedOffset != 1 {
 		t.Fatalf("Invoke() appliedOffset = %v, want 1", data.AppliedOffset)
 	}
-	wantOutputSuffix := "\n\nFound 1 total occurrence across 1 file with pagination = limit: 1, offset: 1."
+	wantOutputSuffix := "\n\nFound 1 total occurrence across 1 file with pagination = limit: 1, offset: 1.\nShowing count rows 2-2 of 3 with pagination = limit: 1, offset: 1."
 	if !strings.HasSuffix(result.Output, wantOutputSuffix) {
 		t.Fatalf("Invoke() output = %q, want suffix %q", result.Output, wantOutputSuffix)
+	}
+	if data.PaginationSummary != "Showing count rows 2-2 of 3 with pagination = limit: 1, offset: 1" {
+		t.Fatalf("Invoke() pagination summary = %q", data.PaginationSummary)
 	}
 }
 
@@ -351,8 +354,44 @@ func TestToolInvokeSupportsTypeFilterAndFilePagination(t *testing.T) {
 	if data.AppliedOffset == nil || *data.AppliedOffset != 1 {
 		t.Fatalf("Invoke() appliedOffset = %v, want 1", data.AppliedOffset)
 	}
-	if result.Output != "Found 1 file offset: 1\na.go" {
+	if result.Output != "Found 1 file\n[Showing files 2-2 of 2 with pagination = offset: 1]\na.go" {
 		t.Fatalf("Invoke() output = %q", result.Output)
+	}
+	if data.PaginationSummary != "Showing files 2-2 of 2 with pagination = offset: 1" {
+		t.Fatalf("Invoke() pagination summary = %q", data.PaginationSummary)
+	}
+}
+
+// TestToolInvokeSupportsMultilineMode verifies explicit multiline mode appends the ripgrep flags needed for cross-line matches.
+func TestToolInvokeSupportsMultilineMode(t *testing.T) {
+	projectDir := t.TempDir()
+	mustWriteFile(t, filepath.Join(projectDir, "main.go"), "package main\nconst alpha = 1\nconst omega = 2\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"pattern":   "alpha.*omega",
+			"multiline": true,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+	if result.Output != "main.go" {
+		t.Fatalf("Invoke() output = %q, want %q", result.Output, "main.go")
 	}
 }
 
