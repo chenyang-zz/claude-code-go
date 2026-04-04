@@ -146,6 +146,64 @@ func (p *FilesystemPolicy) CheckReadPermissionForTool(ctx context.Context, toolN
 	})
 }
 
+// CheckReadPermissionForGlob evaluates one glob-style read request using both the search root and the requested glob pattern.
+func (p *FilesystemPolicy) CheckReadPermissionForGlob(ctx context.Context, toolName string, searchRoot string, workingDir string, pattern string) Evaluation {
+	req := FilesystemRequest{
+		ToolName:   toolName,
+		Path:       searchRoot,
+		WorkingDir: workingDir,
+		Access:     AccessRead,
+	}
+	_ = ctx
+
+	if err := req.Validate(); err != nil {
+		return Evaluation{
+			Decision: DecisionDeny,
+			Message:  fmt.Sprintf("permission: invalid filesystem request: %v", err),
+		}
+	}
+
+	normalizedPath, normalizedWorkingDir, err := normalizeFilesystemRequestPath(req.Path, req.WorkingDir)
+	if err != nil {
+		return Evaluation{
+			Decision: DecisionDeny,
+			Message:  fmt.Sprintf("permission: normalize filesystem path: %v", err),
+		}
+	}
+
+	if matchedRule := matchingGlobRuleForInput(normalizedPath, normalizedWorkingDir, pattern, p.Rules.Read, DecisionDeny); matchedRule != nil {
+		return Evaluation{
+			Decision: DecisionDeny,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Permission to read %s has been denied.", req.Path),
+		}
+	}
+
+	if matchedRule := matchingGlobRuleForInput(normalizedPath, normalizedWorkingDir, pattern, p.Rules.Read, DecisionAsk); matchedRule != nil {
+		return Evaluation{
+			Decision: DecisionAsk,
+			Rule:     matchedRule,
+			Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
+		}
+	}
+
+	if pathWithinRoot(normalizedWorkingDir, normalizedPath) {
+		return Evaluation{Decision: DecisionAllow}
+	}
+
+	if matchedRule := matchingGlobRuleForInput(normalizedPath, normalizedWorkingDir, pattern, p.Rules.Read, DecisionAllow); matchedRule != nil {
+		return Evaluation{
+			Decision: DecisionAllow,
+			Rule:     matchedRule,
+		}
+	}
+
+	return Evaluation{
+		Decision: DecisionAsk,
+		Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
+	}
+}
+
 // CheckWritePermissionForTool evaluates one write-style filesystem request for a tool.
 func (p *FilesystemPolicy) CheckWritePermissionForTool(ctx context.Context, toolName string, path string, workingDir string) Evaluation {
 	return p.EvaluateFilesystem(ctx, FilesystemRequest{
@@ -308,6 +366,33 @@ func matchingRuleForInput(normalizedPath string, normalizedWorkingDir string, ru
 	return nil
 }
 
+// matchingGlobRuleForInput returns the first rule of the requested decision that matches one glob query.
+func matchingGlobRuleForInput(normalizedPath string, normalizedWorkingDir string, pattern string, rules []Rule, decision Decision) *Rule {
+	for index := range rules {
+		rule := &rules[index]
+		if rule.Decision != decision {
+			continue
+		}
+
+		matched, err := matchGlobRule(normalizedPath, normalizedWorkingDir, pattern, *rule)
+		if err != nil {
+			logger.DebugCF("permission", "glob filesystem rule match failed", map[string]any{
+				"path":          normalizedPath,
+				"pattern":       pattern,
+				"rule_pattern":  rule.Pattern,
+				"base_dir":      rule.BaseDir,
+				"error":         err.Error(),
+			})
+			continue
+		}
+		if matched {
+			return rule
+		}
+	}
+
+	return nil
+}
+
 // matchRule evaluates the batch-01 subset of matchingRuleForInput semantics using rule-relative glob matching.
 func matchRule(normalizedPath string, normalizedWorkingDir string, rule Rule) (bool, error) {
 	ruleRoot := normalizedWorkingDir
@@ -329,6 +414,39 @@ func matchRule(normalizedPath string, normalizedWorkingDir string, rule Rule) (b
 	}
 
 	return matchPermissionPattern(filepath.ToSlash(relativePath), filepath.ToSlash(strings.TrimSpace(rule.Pattern))), nil
+}
+
+// matchGlobRule evaluates whether one glob query should match a filesystem rule before traversal starts.
+func matchGlobRule(normalizedPath string, normalizedWorkingDir string, pattern string, rule Rule) (bool, error) {
+	ruleRoot := normalizedWorkingDir
+	if strings.TrimSpace(rule.BaseDir) != "" {
+		expandedBaseDir, err := expandPermissionPath(rule.BaseDir, normalizedWorkingDir)
+		if err != nil {
+			return false, err
+		}
+		ruleRoot = expandedBaseDir
+	}
+
+	if !pathWithinRoot(ruleRoot, normalizedPath) {
+		return false, nil
+	}
+
+	relativeRoot, err := filepath.Rel(ruleRoot, normalizedPath)
+	if err != nil {
+		return false, err
+	}
+
+	normalizedPattern := filepath.ToSlash(strings.TrimSpace(pattern))
+	if normalizedPattern == "" {
+		return false, nil
+	}
+
+	candidatePattern := normalizedPattern
+	if relativeRoot != "." && relativeRoot != "" {
+		candidatePattern = path.Join(filepath.ToSlash(relativeRoot), normalizedPattern)
+	}
+
+	return matchPermissionPattern(candidatePattern, filepath.ToSlash(strings.TrimSpace(rule.Pattern))), nil
 }
 
 // matchPermissionPattern matches a normalized relative path against the minimal gitignore-like pattern subset needed by batch-01.

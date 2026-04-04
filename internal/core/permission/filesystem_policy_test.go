@@ -269,6 +269,66 @@ func TestFilesystemPolicyCheckReadPermissionForTool(t *testing.T) {
 	}
 }
 
+func TestFilesystemPolicyCheckReadPermissionForGlob(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join(string(filepath.Separator), "workspace")
+	externalRoot := filepath.Join(string(filepath.Separator), "external", "vendor")
+
+	policy, err := NewFilesystemPolicy(RuleSet{
+		Read: []Rule{
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionAllow,
+				BaseDir:  externalRoot,
+				Pattern:  "**/*.md",
+			},
+			{
+				Source:   RuleSourceSession,
+				Decision: DecisionDeny,
+				BaseDir:  externalRoot,
+				Pattern:  "private/**",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	allowed := policy.CheckReadPermissionForGlob(
+		context.Background(),
+		"glob",
+		externalRoot,
+		workspace,
+		"**/*.md",
+	)
+	if allowed.Decision != DecisionAllow {
+		t.Fatalf("CheckReadPermissionForGlob() allow decision = %q, want %q", allowed.Decision, DecisionAllow)
+	}
+
+	denied := policy.CheckReadPermissionForGlob(
+		context.Background(),
+		"glob",
+		externalRoot,
+		workspace,
+		"private/*.txt",
+	)
+	if denied.Decision != DecisionDeny {
+		t.Fatalf("CheckReadPermissionForGlob() deny decision = %q, want %q", denied.Decision, DecisionDeny)
+	}
+
+	asked := policy.CheckReadPermissionForGlob(
+		context.Background(),
+		"glob",
+		externalRoot,
+		workspace,
+		"**/*.txt",
+	)
+	if asked.Decision != DecisionAsk {
+		t.Fatalf("CheckReadPermissionForGlob() ask decision = %q, want %q", asked.Decision, DecisionAsk)
+	}
+}
+
 func TestFilesystemPolicyCheckWritePermissionForTool(t *testing.T) {
 	t.Parallel()
 
