@@ -19,6 +19,8 @@ const (
 	Name = "Glob"
 	// defaultMaxResults caps the number of matches returned to callers.
 	defaultMaxResults = 100
+	// fileNotFoundCwdNote mirrors the source marker used in missing-directory validation errors.
+	fileNotFoundCwdNote = "Note: your current working directory is"
 )
 
 // Tool implements GlobTool on top of the Go host architecture.
@@ -112,12 +114,26 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: fmt.Sprintf("glob tool: expand path: %v", err)}, nil
 	}
 
-	info, err := t.fs.Stat(searchRoot)
-	if err != nil {
-		return coretool.Result{Error: fmt.Sprintf("Directory does not exist: %s", inputPathOrWorkingDir(input.Path, searchRoot))}, nil
-	}
-	if !info.IsDir() {
-		return coretool.Result{Error: fmt.Sprintf("Path is not a directory: %s", input.Path)}, nil
+	skipDirectoryPrecheck := strings.TrimSpace(input.Path) != "" && (looksLikeUNCPath(input.Path) || looksLikeUNCPath(searchRoot))
+	if skipDirectoryPrecheck {
+		logger.DebugCF("glob_tool", "skipping directory precheck for UNC-style path", map[string]any{
+			"input_path":   input.Path,
+			"search_root":  searchRoot,
+			"working_dir":  call.Context.WorkingDir,
+		})
+	} else {
+		info, err := t.fs.Stat(searchRoot)
+		if err != nil {
+			if platformfs.IsNotExist(err) {
+				return coretool.Result{
+					Error: buildMissingDirectoryMessage(t.fs, inputPathOrWorkingDir(input.Path, searchRoot), searchRoot, call.Context.WorkingDir),
+				}, nil
+			}
+			return coretool.Result{Error: fmt.Sprintf("glob tool: inspect search root: %v", err)}, nil
+		}
+		if !info.IsDir() {
+			return coretool.Result{Error: fmt.Sprintf("Path is not a directory: %s", input.Path)}, nil
+		}
 	}
 
 	permissionReq := corepermission.FilesystemRequest{
@@ -126,7 +142,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		WorkingDir: call.Context.WorkingDir,
 		Access:     corepermission.AccessRead,
 	}
-	evaluation := t.policy.CheckReadPermissionForTool(ctx, t.Name(), searchRoot, call.Context.WorkingDir)
+	evaluation := t.policy.CheckReadPermissionForGlob(ctx, t.Name(), searchRoot, call.Context.WorkingDir, input.Pattern)
 	if err := evaluation.ToError(permissionReq); err != nil {
 		return coretool.Result{}, err
 	}
@@ -296,6 +312,67 @@ func inputPathOrWorkingDir(inputPath string, resolved string) string {
 		return inputPath
 	}
 	return resolved
+}
+
+// buildMissingDirectoryMessage renders the source-aligned missing-directory error with cwd note and optional suggestion.
+func buildMissingDirectoryMessage(filesystem platformfs.FileSystem, displayPath string, resolvedPath string, workingDir string) string {
+	message := fmt.Sprintf("Directory does not exist: %s. %s %s.", displayPath, fileNotFoundCwdNote, workingDir)
+	suggestion := suggestPathUnderWorkingDir(filesystem, workingDir, resolvedPath)
+	if suggestion == "" {
+		return message
+	}
+	return fmt.Sprintf("%s Did you mean %s?", message, suggestion)
+}
+
+// suggestPathUnderWorkingDir detects the common "dropped repo directory" path error and suggests the in-workspace variant when it exists.
+func suggestPathUnderWorkingDir(filesystem platformfs.FileSystem, workingDir string, requestedPath string) string {
+	displayWorkingDir := filepath.Clean(workingDir)
+	cleanWorkingDir := filepath.Clean(workingDir)
+	if resolvedWorkingDir, err := filesystem.EvalSymlinks(cleanWorkingDir); err == nil {
+		cleanWorkingDir = resolvedWorkingDir
+	}
+	cleanRequestedPath := filepath.Clean(requestedPath)
+	cwdParent := filepath.Dir(cleanWorkingDir)
+
+	resolvedPath := cleanRequestedPath
+	if resolvedDir, err := filesystem.EvalSymlinks(filepath.Dir(cleanRequestedPath)); err == nil {
+		resolvedPath = filepath.Join(resolvedDir, filepath.Base(cleanRequestedPath))
+	}
+
+	if !pathWithinOrEqual(cwdParent, resolvedPath) || pathWithinOrEqual(cleanWorkingDir, resolvedPath) {
+		return ""
+	}
+
+	relFromParent, err := filepath.Rel(cwdParent, resolvedPath)
+	if err != nil {
+		return ""
+	}
+
+	correctedResolvedPath := filepath.Join(cleanWorkingDir, relFromParent)
+	if _, err := filesystem.Stat(correctedResolvedPath); err != nil {
+		return ""
+	}
+
+	return filepath.Join(displayWorkingDir, relFromParent)
+}
+
+// pathWithinOrEqual reports whether target is the same as root or nested under it.
+func pathWithinOrEqual(root string, target string) bool {
+	relPath, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	if relPath == "." {
+		return true
+	}
+	parentPrefix := ".." + string(filepath.Separator)
+	return relPath != ".." && !strings.HasPrefix(relPath, parentPrefix)
+}
+
+// looksLikeUNCPath detects the UNC-style prefixes the source short-circuits before probing the filesystem.
+func looksLikeUNCPath(path string) bool {
+	trimmed := strings.TrimSpace(path)
+	return strings.HasPrefix(trimmed, `\\`) || strings.HasPrefix(trimmed, "//")
 }
 
 // matchesGlobPattern implements the glob subset needed for `*.go` and `src/**/*.ts` style searches.
