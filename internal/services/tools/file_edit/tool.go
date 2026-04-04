@@ -2,7 +2,6 @@ package file_edit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -496,29 +495,17 @@ func validateSettingsFileEdit(filePath string, originalContent string, updatedCo
 		return nil
 	}
 
-	if err := validateSettingsJSONContent(originalContent); err != nil {
+	beforeValidation := platformconfig.ValidateSettingsContent(originalContent)
+	if !beforeValidation.IsValid {
 		return nil
 	}
-	if err := validateSettingsJSONContent(updatedContent); err != nil {
-		return fmt.Errorf("Claude Code settings.json validation failed after edit:\n%s\n\nIMPORTANT: Do not update the env unless explicitly instructed to do so.", err.Error())
-	}
-
-	return nil
-}
-
-// validateSettingsJSONContent performs the minimal migrated settings validation used by FileEditTool.
-func validateSettingsJSONContent(content string) error {
-	var decoded any
-	if err := json.Unmarshal([]byte(content), &decoded); err != nil {
-		return fmt.Errorf("Invalid JSON: %v", err)
-	}
-
-	objectValue, ok := decoded.(map[string]any)
-	if !ok {
-		return fmt.Errorf("Settings validation failed:\n- : Expected object, but received %T", decoded)
-	}
-	if len(objectValue) == 0 {
-		return nil
+	afterValidation := platformconfig.ValidateSettingsContent(updatedContent)
+	if !afterValidation.IsValid {
+		return fmt.Errorf(
+			"Claude Code settings.json validation failed after edit:\n%s\n\nFull schema:\n%s\nIMPORTANT: Do not update the env unless explicitly instructed to do so.",
+			afterValidation.Error,
+			afterValidation.FullSchema,
+		)
 	}
 
 	return nil

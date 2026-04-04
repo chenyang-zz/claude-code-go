@@ -16,7 +16,6 @@ claude-code-go/
 ├── docs/
 │   ├── architecture.md
 │   ├── engine.md
-│   ├── migration-plan.md
 │   └── tools.md
 ├── internal/
 │   ├── app/
