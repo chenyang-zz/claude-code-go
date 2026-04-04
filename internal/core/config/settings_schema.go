@@ -3,12 +3,31 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 )
 
 const (
 	// SettingsSchemaURL is the schema store URL used by Claude Code settings files.
 	SettingsSchemaURL = "https://json.schemastore.org/claude-code-settings.json"
+)
+
+var (
+	// externalPermissionModes stores the currently migrated external permission-mode enum values.
+	externalPermissionModes = []string{
+		"acceptEdits",
+		"bypassPermissions",
+		"default",
+		"dontAsk",
+		"plan",
+	}
+
+	// defaultShellValues stores the currently migrated shell enum values.
+	defaultShellValues = []string{
+		"bash",
+		"powershell",
+	}
 )
 
 // ValidationIssue describes one caller-facing settings validation failure.
@@ -36,14 +55,55 @@ func SettingsSchemaDocument() map[string]any {
 				"type":        "string",
 				"description": "Override the default model used by Claude Code",
 			},
+			"apiKeyHelper": map[string]any{
+				"type":        "string",
+				"description": "Path to a script that outputs authentication values",
+			},
+			"awsCredentialExport": map[string]any{
+				"type":        "string",
+				"description": "Path to a script that exports AWS credentials",
+			},
+			"awsAuthRefresh": map[string]any{
+				"type":        "string",
+				"description": "Path to a script that refreshes AWS authentication",
+			},
+			"gcpAuthRefresh": map[string]any{
+				"type":        "string",
+				"description": "Command used to refresh GCP authentication",
+			},
+			"respectGitignore": map[string]any{
+				"type":        "boolean",
+				"description": "Whether file discovery should respect .gitignore files",
+			},
+			"cleanupPeriodDays": map[string]any{
+				"type":        "integer",
+				"minimum":     0,
+				"description": "Number of days to retain chat transcripts",
+			},
+			"includeCoAuthoredBy": map[string]any{
+				"type":        "boolean",
+				"description": "Whether Claude attribution should be included in commits and PRs",
+			},
+			"includeGitInstructions": map[string]any{
+				"type":        "boolean",
+				"description": "Whether built-in git workflow instructions should be included",
+			},
+			"defaultShell": map[string]any{
+				"type":        "string",
+				"enum":        defaultShellValues,
+				"description": "Default shell for input-box ! commands",
+			},
 			"permissions": map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"description":          "Tool usage permissions configuration",
 				"properties": map[string]any{
-					"allow": settingsRuleArraySchema("Allowed permission rules"),
-					"deny":  settingsRuleArraySchema("Denied permission rules"),
-					"ask":   settingsRuleArraySchema("Prompted permission rules"),
+					"allow":                        settingsRuleArraySchema("Allowed permission rules"),
+					"deny":                         settingsRuleArraySchema("Denied permission rules"),
+					"ask":                          settingsRuleArraySchema("Prompted permission rules"),
+					"defaultMode":                  settingsEnumSchema("Default permission mode", externalPermissionModes),
+					"disableBypassPermissionsMode": settingsDisableLiteralSchema("Disable the ability to bypass permission prompts"),
+					"additionalDirectories":        settingsStringArraySchema("Additional directories to include in permission scope"),
 				},
 			},
 		},
@@ -86,6 +146,22 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			if issue, ok := validateStringField("model", objectValue[key]); ok {
 				issues = append(issues, issue)
 			}
+		case "apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh":
+			if issue, ok := validateStringField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "respectGitignore", "includeCoAuthoredBy", "includeGitInstructions":
+			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "cleanupPeriodDays":
+			if issue, ok := validateNonNegativeIntegerField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "defaultShell":
+			if issue, ok := validateEnumField(key, objectValue[key], defaultShellValues); ok {
+				issues = append(issues, issue)
+			}
 		case "permissions":
 			issues = append(issues, validatePermissionsField(objectValue[key])...)
 		default:
@@ -99,14 +175,37 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 	return issues
 }
 
-// settingsRuleArraySchema builds the shared JSON schema for allow/deny/ask rule arrays.
-func settingsRuleArraySchema(description string) map[string]any {
+// settingsStringArraySchema builds the shared JSON schema for string-array fields.
+func settingsStringArraySchema(description string) map[string]any {
 	return map[string]any{
 		"type":        "array",
 		"description": description,
 		"items": map[string]any{
 			"type": "string",
 		},
+	}
+}
+
+// settingsRuleArraySchema builds the shared JSON schema for allow/deny/ask rule arrays.
+func settingsRuleArraySchema(description string) map[string]any {
+	return settingsStringArraySchema(description)
+}
+
+// settingsEnumSchema builds a string enum schema for the JSON schema document.
+func settingsEnumSchema(description string, values []string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"enum":        values,
+		"description": description,
+	}
+}
+
+// settingsDisableLiteralSchema builds the schema for settings fields that only accept the literal "disable".
+func settingsDisableLiteralSchema(description string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"const":       "disable",
+		"description": description,
 	}
 }
 
@@ -139,6 +238,79 @@ func validateStringField(path string, value any) (ValidationIssue, bool) {
 	}, true
 }
 
+// validateBooleanField verifies a top-level boolean field.
+func validateBooleanField(path string, value any) (ValidationIssue, bool) {
+	if _, ok := value.(bool); ok {
+		return ValidationIssue{}, false
+	}
+	return ValidationIssue{
+		Path:    path,
+		Message: fmt.Sprintf("Expected boolean, but received %s", jsonTypeName(value)),
+	}, true
+}
+
+// validateEnumField verifies a string enum field against a fixed allowlist.
+func validateEnumField(path string, value any, allowed []string) (ValidationIssue, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return ValidationIssue{
+			Path:    path,
+			Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(value)),
+		}, true
+	}
+	for _, candidate := range allowed {
+		if text == candidate {
+			return ValidationIssue{}, false
+		}
+	}
+	return ValidationIssue{
+		Path:    path,
+		Message: fmt.Sprintf("Invalid value. Expected one of: %s", joinQuotedValues(allowed)),
+	}, true
+}
+
+// validateDisableLiteralField verifies fields that only allow the literal string "disable".
+func validateDisableLiteralField(path string, value any) (ValidationIssue, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return ValidationIssue{
+			Path:    path,
+			Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(value)),
+		}, true
+	}
+	if text == "disable" {
+		return ValidationIssue{}, false
+	}
+	return ValidationIssue{
+		Path:    path,
+		Message: `Invalid value. Expected one of: "disable"`,
+	}, true
+}
+
+// validateNonNegativeIntegerField verifies a non-negative integer field.
+func validateNonNegativeIntegerField(path string, value any) (ValidationIssue, bool) {
+	number, ok := value.(float64)
+	if !ok {
+		return ValidationIssue{
+			Path:    path,
+			Message: fmt.Sprintf("Expected number, but received %s", jsonTypeName(value)),
+		}, true
+	}
+	if math.Trunc(number) != number {
+		return ValidationIssue{
+			Path:    path,
+			Message: "Expected integer, but received number",
+		}, true
+	}
+	if number < 0 {
+		return ValidationIssue{
+			Path:    path,
+			Message: "Number must be greater than or equal to 0",
+		}, true
+	}
+	return ValidationIssue{}, false
+}
+
 // validatePermissionsField verifies the minimal permissions object supported by the current migration pass.
 func validatePermissionsField(value any) []ValidationIssue {
 	objectValue, ok := value.(map[string]any)
@@ -160,6 +332,16 @@ func validatePermissionsField(value any) []ValidationIssue {
 		switch key {
 		case "allow", "deny", "ask":
 			issues = append(issues, validateStringArrayField("permissions."+key, objectValue[key])...)
+		case "defaultMode":
+			if issue, ok := validateEnumField("permissions.defaultMode", objectValue[key], externalPermissionModes); ok {
+				issues = append(issues, issue)
+			}
+		case "disableBypassPermissionsMode":
+			if issue, ok := validateDisableLiteralField("permissions.disableBypassPermissionsMode", objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "additionalDirectories":
+			issues = append(issues, validateStringArrayField("permissions.additionalDirectories", objectValue[key])...)
 		default:
 			issues = append(issues, ValidationIssue{
 				Path:    "permissions." + key,
@@ -212,4 +394,13 @@ func jsonTypeName(value any) string {
 	default:
 		return fmt.Sprintf("%T", value)
 	}
+}
+
+// joinQuotedValues renders a stable comma-separated enum list using quoted string values.
+func joinQuotedValues(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, fmt.Sprintf("%q", value))
+	}
+	return strings.Join(quoted, ", ")
 }

@@ -37,3 +37,28 @@ func TestValidateSettingsContentRejectsWrongPermissionShape(t *testing.T) {
 		t.Fatalf("ValidateSettingsContent() error = %q, want nested path message", result.Error)
 	}
 }
+
+// TestValidateSettingsContentAcceptsExpandedFields verifies the platform validator accepts the batch-06 settings subset.
+func TestValidateSettingsContentAcceptsExpandedFields(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"apiKeyHelper\": \"/tmp/auth.sh\",\n  \"respectGitignore\": true,\n  \"cleanupPeriodDays\": 7,\n  \"defaultShell\": \"bash\",\n  \"permissions\": {\n    \"defaultMode\": \"plan\",\n    \"disableBypassPermissionsMode\": \"disable\",\n    \"additionalDirectories\": [\"packages/app\"]\n  }\n}\n")
+	if !result.IsValid {
+		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
+	}
+	if !strings.Contains(result.FullSchema, "\"defaultShell\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want defaultShell schema", result.FullSchema)
+	}
+}
+
+// TestValidateSettingsContentRejectsExpandedFieldErrors verifies enum and integer constraint errors keep stable caller-facing messages.
+func TestValidateSettingsContentRejectsExpandedFieldErrors(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"cleanupPeriodDays\": -1,\n  \"permissions\": {\n    \"defaultMode\": \"auto\"\n  }\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	if !strings.Contains(result.Error, "- cleanupPeriodDays: Number must be greater than or equal to 0") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want cleanupPeriodDays constraint error", result.Error)
+	}
+	if !strings.Contains(result.Error, "- permissions.defaultMode: Invalid value. Expected one of: \"acceptEdits\", \"bypassPermissions\", \"default\", \"dontAsk\", \"plan\"") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want defaultMode enum error", result.Error)
+	}
+}

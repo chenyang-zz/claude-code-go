@@ -772,6 +772,57 @@ func TestToolInvokeRejectsSettingsTypeMismatch(t *testing.T) {
 	}
 }
 
+// TestToolInvokeRejectsInvalidExpandedSettingsFields verifies FileEditTool reuses expanded batch-06 settings validation.
+func TestToolInvokeRejectsInvalidExpandedSettingsFields(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(settingsDir, "settings.json")
+	mustWriteFile(t, filePath, "{\n  \"defaultShell\": \"bash\"\n}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  ".claude/settings.json",
+			"old_string": "\"bash\"",
+			"new_string": "\"zsh\"",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "- defaultShell: Invalid value. Expected one of: \"bash\", \"powershell\"") {
+		t.Fatalf("Invoke() result.Error = %q, want defaultShell enum error", result.Error)
+	}
+	if !strings.Contains(result.Error, "Full schema:") {
+		t.Fatalf("Invoke() result.Error = %q, want fullSchema output", result.Error)
+	}
+}
+
 // TestToolInvokeRejectsWriteWithoutPermission verifies the migrated tool reuses the minimal write-permission gate.
 func TestToolInvokeRejectsWriteWithoutPermission(t *testing.T) {
 	projectDir := t.TempDir()
