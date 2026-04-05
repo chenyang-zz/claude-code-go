@@ -299,7 +299,7 @@ func TestRunnerRunResumeWithoutArgsListsRecentSessions(t *testing.T) {
 	eng := &recordingEngine{}
 	repo := &recordingSessionRepository{
 		listRecent: []coresession.Summary{
-			{ID: "session-3", ProjectPath: "/repo", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
 			{ID: "session-2", ProjectPath: "/repo", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
 		},
 	}
@@ -312,7 +312,7 @@ func TestRunnerRunResumeWithoutArgsListsRecentSessions(t *testing.T) {
 		t.Fatalf("Run(/resume) error = %v", err)
 	}
 
-	want := "Recent conversations:\n- session-3\n- session-2\nUse /resume <session-id> <prompt> to continue one.\n"
+	want := "Recent conversations:\n- 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\n- 2026-04-05 11:00 UTC | Previous conversation [repo] | session-2\nUse /resume <session-id> <prompt> to continue one.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/resume) output = %q, want %q", got, want)
 	}

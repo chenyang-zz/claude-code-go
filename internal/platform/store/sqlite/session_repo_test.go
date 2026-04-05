@@ -160,11 +160,13 @@ func TestSessionRepositoryListRecentByProject(t *testing.T) {
 		{
 			ID:          "session-1",
 			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("first prompt")}}},
 			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
 		},
 		{
 			ID:          "session-2",
 			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("latest prompt")}}},
 			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
 		},
 		{
@@ -188,6 +190,42 @@ func TestSessionRepositoryListRecentByProject(t *testing.T) {
 	}
 	if got[0].ID != "session-2" || got[1].ID != "session-1" {
 		t.Fatalf("ListRecent() ids = %#v, want session-2 then session-1", []string{got[0].ID, got[1].ID})
+	}
+	if got[0].Preview != "latest prompt" || got[1].Preview != "first prompt" {
+		t.Fatalf("ListRecent() previews = %#v, want latest prompt then first prompt", []string{got[0].Preview, got[1].Preview})
+	}
+}
+
+// TestSessionRepositoryListRecentFallsBackToMessagesJSON verifies old rows without summary_text still expose a derived preview.
+func TestSessionRepositoryListRecentFallsBackToMessagesJSON(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	session := coresession.Session{
+		ID:          "session-legacy",
+		ProjectPath: "/repo-a",
+		Messages: []message.Message{
+			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("legacy prompt")}},
+		},
+		UpdatedAt: time.Date(2026, 4, 4, 16, 0, 0, 0, time.UTC),
+	}
+	if err := repo.Save(context.Background(), session); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE sessions SET summary_text = '' WHERE id = ?`, session.ID); err != nil {
+		t.Fatalf("clear summary_text error = %v", err)
+	}
+
+	got, err := repo.ListRecent(context.Background(), coresession.Lookup{ProjectPath: "/repo-a", Limit: 1})
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListRecent() len = %d, want 1", len(got))
+	}
+	if got[0].Preview != "legacy prompt" {
+		t.Fatalf("ListRecent() preview = %q, want legacy prompt", got[0].Preview)
 	}
 }
 

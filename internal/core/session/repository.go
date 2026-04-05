@@ -15,6 +15,8 @@ type Summary struct {
 	ID string
 	// ProjectPath records the workspace the session belongs to.
 	ProjectPath string
+	// Preview carries the minimum human-readable session summary shown by `/resume`.
+	Preview string
 	// UpdatedAt records when the session snapshot was last overwritten.
 	UpdatedAt time.Time
 }

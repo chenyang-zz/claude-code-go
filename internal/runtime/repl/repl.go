@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -180,7 +181,7 @@ func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
 
 	lines := []string{"Recent conversations:"}
 	for _, summary := range summaries {
-		lines = append(lines, fmt.Sprintf("- %s", summary.ID))
+		lines = append(lines, formatRecentSessionLine(summary))
 	}
 	lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
 	return r.Renderer.RenderLine(strings.Join(lines, "\n"))
@@ -234,6 +235,26 @@ func parseResumeBody(body string) (string, string, error) {
 		return "", "", fmt.Errorf(resumeUsageMessage)
 	}
 	return sessionID, prompt, nil
+}
+
+// formatRecentSessionLine renders one recent-session candidate using a stable text-only layout.
+func formatRecentSessionLine(summary coresession.Summary) string {
+	preview := strings.TrimSpace(summary.Preview)
+	if preview == "" {
+		preview = "Previous conversation"
+	}
+
+	updatedAt := "unknown time"
+	if !summary.UpdatedAt.IsZero() {
+		updatedAt = summary.UpdatedAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+
+	projectHint := ""
+	if summary.ProjectPath != "" {
+		projectHint = fmt.Sprintf(" [%s]", filepath.Base(summary.ProjectPath))
+	}
+
+	return fmt.Sprintf("- %s | %s%s | %s", updatedAt, preview, projectHint, summary.ID)
 }
 
 // restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.

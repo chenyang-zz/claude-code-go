@@ -34,17 +34,20 @@ func (r *SessionRepository) Save(ctx context.Context, session coresession.Sessio
 	if err != nil {
 		return fmt.Errorf("marshal session messages: %w", err)
 	}
+	summaryText := coresession.DerivePreview(session.Messages)
 
 	_, err = r.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, project_path, updated_at, messages_json)
-VALUES (?, ?, ?, ?)
+		`INSERT INTO sessions (id, project_path, summary_text, updated_at, messages_json)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	project_path = excluded.project_path,
+	summary_text = excluded.summary_text,
 	updated_at = excluded.updated_at,
 	messages_json = excluded.messages_json`,
 		session.ID,
 		session.ProjectPath,
+		summaryText,
 		session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		string(messagesJSON),
 	)
@@ -55,6 +58,7 @@ ON CONFLICT(id) DO UPDATE SET
 	logger.DebugCF("sqlite_session_repo", "saved session snapshot", map[string]any{
 		"session_id":    session.ID,
 		"message_count": len(session.Messages),
+		"summary_set":   summaryText != "",
 		"path":          r.DB.Path,
 	})
 	return nil
@@ -173,7 +177,7 @@ func (r *SessionRepository) ListRecent(ctx context.Context, lookup coresession.L
 
 	rows, err := r.DB.SQL.QueryContext(
 		ctx,
-		`SELECT id, project_path, updated_at
+		`SELECT id, project_path, summary_text, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC, id DESC
@@ -189,13 +193,19 @@ LIMIT ?`,
 	var summaries []coresession.Summary
 	for rows.Next() {
 		var summary coresession.Summary
+		var summaryText string
 		var updatedAtText string
-		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &updatedAtText); err != nil {
+		var messagesJSON string
+		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &summaryText, &updatedAtText, &messagesJSON); err != nil {
 			return nil, fmt.Errorf("scan recent session for %s: %w", lookup.ProjectPath, err)
 		}
 		summary.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtText)
 		if err != nil {
 			return nil, fmt.Errorf("parse recent session %s updated_at: %w", summary.ID, err)
+		}
+		summary.Preview, err = resolveSummaryPreview(summaryText, messagesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("resolve recent session %s preview: %w", summary.ID, err)
 		}
 		summaries = append(summaries, summary)
 	}
@@ -210,4 +220,20 @@ LIMIT ?`,
 		"path":         r.DB.Path,
 	})
 	return summaries, nil
+}
+
+// resolveSummaryPreview keeps old rows readable by falling back to messages_json when summary_text is empty.
+func resolveSummaryPreview(summaryText string, messagesJSON string) (string, error) {
+	if summaryText != "" {
+		return summaryText, nil
+	}
+	if messagesJSON == "" {
+		return "", nil
+	}
+
+	var messages []message.Message
+	if err := json.Unmarshal([]byte(messagesJSON), &messages); err != nil {
+		return "", fmt.Errorf("decode session messages for preview: %w", err)
+	}
+	return coresession.DerivePreview(messages), nil
 }
