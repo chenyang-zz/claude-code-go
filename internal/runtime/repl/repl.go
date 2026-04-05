@@ -44,7 +44,11 @@ func NewRunner(eng engine.Engine, renderer *console.StreamRenderer) *Runner {
 const (
 	resumeUsageMessage         = "Resume command requires a session id and prompt: use /resume <session-id> <prompt>."
 	resumeNotConfiguredMessage = "Resume command is not available because session storage is not configured."
+	continueNotConfigured      = "Continue command is not available because session storage is not configured."
+	continueNotFoundMessage    = "No conversation found to continue."
 )
+
+var errContinueHandled = errors.New("continue flow already handled")
 
 // Run parses the CLI args and dispatches either a supported slash command or one text turn.
 func (r *Runner) Run(ctx context.Context, args []string) error {
@@ -60,20 +64,23 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 
 	if parsed.IsSlashCommand {
 		if parsed.Command == "resume" {
-			return r.runResumeCommand(ctx, parsed.Body)
+			return r.runResumeCommand(ctx, parsed.Body, parsed.ForkSession)
 		}
 		return r.Renderer.RenderLine(fmt.Sprintf("Slash command /%s is not supported yet.", parsed.Command))
 	}
 
-	history, err := r.restoreHistory(ctx)
+	history, err := r.restoreHistory(ctx, parsed.ContinueLatest, parsed.ForkSession)
 	if err != nil {
+		if errors.Is(err, errContinueHandled) {
+			return nil
+		}
 		return err
 	}
 	return r.runPrompt(ctx, history, parsed.Body)
 }
 
 // runResumeCommand restores one persisted session and immediately continues it with the provided prompt tail.
-func (r *Runner) runResumeCommand(ctx context.Context, body string) error {
+func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession bool) error {
 	sessionID, prompt, err := parseResumeBody(body)
 	if err != nil {
 		return r.Renderer.RenderLine(err.Error())
@@ -90,12 +97,20 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string) error {
 		return err
 	}
 
-	r.SessionID = sessionID
+	if forkSession {
+		snapshot, err = r.forkSnapshot(ctx, snapshot)
+		if err != nil {
+			return err
+		}
+	}
+
+	r.SessionID = snapshot.Session.ID
 	if snapshot.Session.ProjectPath != "" {
 		r.ProjectPath = snapshot.Session.ProjectPath
 	}
 	logger.DebugCF("repl", "resumed session from slash command", map[string]any{
-		"session_id":    sessionID,
+		"session_id":    r.SessionID,
+		"fork_session":  forkSession,
 		"project_path":  r.ProjectPath,
 		"message_count": len(snapshot.Session.Messages),
 	})
@@ -152,10 +167,29 @@ func parseResumeBody(body string) (string, string, error) {
 	return sessionID, prompt, nil
 }
 
-// restoreHistory loads the current session history when a session manager is configured.
-func (r *Runner) restoreHistory(ctx context.Context) (conversation.History, error) {
+// restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.
+func (r *Runner) restoreHistory(ctx context.Context, explicitContinue bool, forkSession bool) (conversation.History, error) {
 	if r == nil || r.SessionManager == nil {
+		if explicitContinue {
+			if err := r.Renderer.RenderLine(continueNotConfigured); err != nil {
+				return conversation.History{}, err
+			}
+			return conversation.History{}, errContinueHandled
+		}
 		return conversation.History{}, nil
+	}
+
+	if explicitContinue {
+		snapshot, handled, err := r.restoreContinueHistory(ctx, forkSession)
+		if err != nil {
+			return conversation.History{}, err
+		}
+		if handled {
+			if len(snapshot.Messages) == 0 && r.SessionID == "" {
+				return conversation.History{}, errContinueHandled
+			}
+			return snapshot, nil
+		}
 	}
 
 	if r.SessionID == "" && r.ProjectPath != "" {
@@ -190,6 +224,50 @@ func (r *Runner) restoreHistory(ctx context.Context) (conversation.History, erro
 		"resumed":       snapshot.Resumed,
 	})
 	return conversation.History{Messages: snapshot.Session.Messages}, nil
+}
+
+func (r *Runner) restoreContinueHistory(ctx context.Context, forkSession bool) (conversation.History, bool, error) {
+	snapshot, err := r.SessionManager.ResumeLatest(ctx, r.ProjectPath)
+	if err != nil {
+		if errors.Is(err, coresession.ErrSessionNotFound) {
+			if err := r.Renderer.RenderLine(continueNotFoundMessage); err != nil {
+				return conversation.History{}, true, err
+			}
+			return conversation.History{}, true, nil
+		}
+		return conversation.History{}, false, err
+	}
+
+	if forkSession {
+		snapshot, err = r.forkSnapshot(ctx, snapshot)
+		if err != nil {
+			return conversation.History{}, false, err
+		}
+	}
+
+	r.SessionID = snapshot.Session.ID
+	if snapshot.Session.ProjectPath != "" {
+		r.ProjectPath = snapshot.Session.ProjectPath
+	}
+	logger.DebugCF("repl", "restored explicit continue session history for turn", map[string]any{
+		"session_id":    r.SessionID,
+		"project_path":  r.ProjectPath,
+		"message_count": len(snapshot.Session.Messages),
+		"fork_session":  forkSession,
+	})
+	return conversation.History{Messages: snapshot.Session.Messages}, true, nil
+}
+
+func (r *Runner) forkSnapshot(ctx context.Context, snapshot coresession.Snapshot) (coresession.Snapshot, error) {
+	if r == nil || r.SessionManager == nil {
+		return coresession.Snapshot{}, fmt.Errorf("missing session manager")
+	}
+	targetID := uuid.NewString()
+	forked, err := r.SessionManager.Fork(ctx, snapshot.Session, targetID)
+	if err != nil {
+		return coresession.Snapshot{}, err
+	}
+	return forked, nil
 }
 
 // renderAndCaptureHistory renders visible runtime events and captures the final history snapshot emitted by the engine.

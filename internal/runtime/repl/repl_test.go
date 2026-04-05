@@ -44,10 +44,13 @@ func (r *recordingSessionRepository) Load(ctx context.Context, id string) (cores
 	if r.loadErr != nil {
 		return coresession.Session{}, r.loadErr
 	}
-	if r.loadResult.ID == "" && r.latestResult.ID == id {
+	if r.latestResult.ID == id {
 		return r.latestResult.Clone(), nil
 	}
-	return r.loadResult.Clone(), nil
+	if r.loadResult.ID == id {
+		return r.loadResult.Clone(), nil
+	}
+	return coresession.Session{}, coresession.ErrSessionNotFound
 }
 
 func (r *recordingSessionRepository) LoadLatest(ctx context.Context, lookup coresession.Lookup) (coresession.Session, error) {
@@ -78,6 +81,35 @@ func TestParseArgsParsesSlashCommand(t *testing.T) {
 
 	if !parsed.IsSlashCommand || parsed.Command != "help" || parsed.Body != "topic" {
 		t.Fatalf("ParseArgs() = %#v, want slash command help with body topic", parsed)
+	}
+}
+
+// TestParseArgsParsesContinueFlags verifies the minimum continue/fork flags are peeled off before prompt parsing.
+func TestParseArgsParsesContinueFlags(t *testing.T) {
+	parsed, err := ParseArgs([]string{"--fork-session", "--continue", "follow", "up"})
+	if err != nil {
+		t.Fatalf("ParseArgs() error = %v", err)
+	}
+
+	if !parsed.ContinueLatest {
+		t.Fatal("ParseArgs() ContinueLatest = false, want true")
+	}
+	if !parsed.ForkSession {
+		t.Fatal("ParseArgs() ForkSession = false, want true")
+	}
+	if parsed.Body != "follow up" {
+		t.Fatalf("ParseArgs() body = %q, want %q", parsed.Body, "follow up")
+	}
+}
+
+// TestParseArgsRejectsForkWithoutExplicitRecovery verifies fork mode is only accepted for continue/resume recovery flows.
+func TestParseArgsRejectsForkWithoutExplicitRecovery(t *testing.T) {
+	_, err := ParseArgs([]string{"--fork-session", "follow", "up"})
+	if err == nil {
+		t.Fatal("ParseArgs() error = nil, want fork usage error")
+	}
+	if err.Error() != forkUsageMessage {
+		t.Fatalf("ParseArgs() error = %q, want %q", err.Error(), forkUsageMessage)
 	}
 }
 
@@ -427,5 +459,162 @@ func TestRunnerRunStartsFreshProjectScopedSession(t *testing.T) {
 	}
 	if repo.saved[0].ProjectPath != "/repo" {
 		t.Fatalf("autosave saved project path = %q, want /repo", repo.saved[0].ProjectPath)
+	}
+}
+
+// TestRunnerRunContinueRequiresExistingSession verifies explicit --continue reports a stable error instead of creating a new session.
+func TestRunnerRunContinueRequiresExistingSession(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	manager := runtimesession.NewManager(&recordingSessionRepository{latestErr: coresession.ErrSessionNotFound})
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+
+	if err := runner.Run(context.Background(), []string{"--continue", "follow-up"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID != "" || len(eng.lastRequest.Messages) != 0 {
+		t.Fatalf("engine should not be called for missing continue session, got request %#v", eng.lastRequest)
+	}
+	if got := buf.String(); got != continueNotFoundMessage+"\n" {
+		t.Fatalf("Run() output = %q, want continue missing-session error", got)
+	}
+}
+
+// TestRunnerRunContinueForksLatestSession verifies explicit continue can fork the latest session into a new target id.
+func TestRunnerRunContinueForksLatestSession(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "forked reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("follow-up")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("forked reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		latestResult: coresession.Session{
+			ID:          "session-latest",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+	autosave := runtimesession.NewAutoSave(manager)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+	runner.AutoSave = autosave
+
+	if err := runner.Run(context.Background(), []string{"--fork-session", "--continue", "follow-up"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID == "" {
+		t.Fatal("Run() request.SessionID = empty, want forked session id")
+	}
+	if eng.lastRequest.SessionID == "session-latest" {
+		t.Fatalf("Run() request.SessionID = %q, want new forked session id", eng.lastRequest.SessionID)
+	}
+	if len(repo.saved) != 2 {
+		t.Fatalf("saved count = %d, want 2 (fork + autosave)", len(repo.saved))
+	}
+	if repo.saved[0].ID != eng.lastRequest.SessionID {
+		t.Fatalf("fork saved session id = %q, want %q", repo.saved[0].ID, eng.lastRequest.SessionID)
+	}
+	if repo.saved[1].ID != eng.lastRequest.SessionID {
+		t.Fatalf("autosave saved session id = %q, want %q", repo.saved[1].ID, eng.lastRequest.SessionID)
+	}
+	if repo.saved[1].ProjectPath != "/repo" {
+		t.Fatalf("autosave saved project path = %q, want /repo", repo.saved[1].ProjectPath)
+	}
+}
+
+// TestRunnerRunResumeForksSession verifies /resume can clone history into a new session before continuing.
+func TestRunnerRunResumeForksSession(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "forked resume reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("new prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("forked resume reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		loadResult: coresession.Session{
+			ID:          "session-2",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+	autosave := runtimesession.NewAutoSave(manager)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.SessionManager = manager
+	runner.AutoSave = autosave
+
+	if err := runner.Run(context.Background(), []string{"--fork-session", "/resume", "session-2", "new", "prompt"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID == "" {
+		t.Fatal("Run() request.SessionID = empty, want forked session id")
+	}
+	if eng.lastRequest.SessionID == "session-2" {
+		t.Fatalf("Run() request.SessionID = %q, want new forked session id", eng.lastRequest.SessionID)
+	}
+	if len(repo.saved) != 2 {
+		t.Fatalf("saved count = %d, want 2 (fork + autosave)", len(repo.saved))
+	}
+	if repo.saved[0].ID != eng.lastRequest.SessionID {
+		t.Fatalf("fork saved session id = %q, want %q", repo.saved[0].ID, eng.lastRequest.SessionID)
+	}
+	if repo.saved[1].ID != eng.lastRequest.SessionID {
+		t.Fatalf("autosave saved session id = %q, want %q", repo.saved[1].ID, eng.lastRequest.SessionID)
 	}
 }
