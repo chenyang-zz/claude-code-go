@@ -71,6 +71,10 @@ func SettingsSchemaDocument() map[string]any {
 				"type":        "string",
 				"description": "Command used to refresh GCP authentication",
 			},
+			"sessionDbPath": map[string]any{
+				"type":        "string",
+				"description": "Override the SQLite path used by the Go host session store",
+			},
 			"respectGitignore": map[string]any{
 				"type":        "boolean",
 				"description": "Whether file discovery should respect .gitignore files",
@@ -146,7 +150,7 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			if issue, ok := validateStringField("model", objectValue[key]); ok {
 				issues = append(issues, issue)
 			}
-		case "apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh":
+		case "apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh", "sessionDbPath":
 			if issue, ok := validateStringField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
 			}

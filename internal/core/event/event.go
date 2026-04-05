@@ -9,6 +9,7 @@ const (
 	TypeToolCallStarted  Type = "tool.call.started"
 	TypeToolCallFinished Type = "tool.call.finished"
 	TypeApprovalRequired Type = "approval.required"
+	TypeConversationDone Type = "conversation.done"
 	TypeError            Type = "error"
 )
 

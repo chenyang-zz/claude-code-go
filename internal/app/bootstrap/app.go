@@ -10,10 +10,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
+	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -52,15 +54,28 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	}
 
 	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
+	runner := repl.NewRunner(eng, renderer)
+
+	if cfg.SessionDBPath != "" {
+		db, err := platformsqlite.Open(context.Background(), cfg.SessionDBPath)
+		if err != nil {
+			return nil, err
+		}
+		repository := platformsqlite.NewSessionRepository(db)
+		manager := runtimesession.NewManager(repository)
+		runner.SessionManager = manager
+		runner.AutoSave = runtimesession.NewAutoSave(manager)
+	}
 
 	logger.DebugCF("bootstrap", "constructed application", map[string]any{
-		"provider": cfg.Provider,
-		"model":    cfg.Model,
+		"provider":            cfg.Provider,
+		"model":               cfg.Model,
+		"has_session_db_path": cfg.SessionDBPath != "",
 	})
 
 	return &App{
 		Config: cfg,
-		Runner: repl.NewRunner(eng, renderer),
+		Runner: runner,
 	}, nil
 }
 

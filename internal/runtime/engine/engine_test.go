@@ -195,8 +195,8 @@ func TestRuntimeRunToolLoop(t *testing.T) {
 	for evt := range out {
 		events = append(events, evt)
 	}
-	if len(events) != 3 {
-		t.Fatalf("Run() event count = %d, want 3", len(events))
+	if len(events) != 4 {
+		t.Fatalf("Run() event count = %d, want 4", len(events))
 	}
 	if events[0].Type != event.TypeToolCallStarted {
 		t.Fatalf("Run() first event type = %q, want tool.call.started", events[0].Type)
@@ -206,6 +206,9 @@ func TestRuntimeRunToolLoop(t *testing.T) {
 	}
 	if events[2].Type != event.TypeMessageDelta {
 		t.Fatalf("Run() third event type = %q, want message.delta", events[2].Type)
+	}
+	if events[3].Type != event.TypeConversationDone {
+		t.Fatalf("Run() fourth event type = %q, want conversation.done", events[3].Type)
 	}
 
 	if len(client.requests) != 2 {
@@ -226,6 +229,54 @@ func TestRuntimeRunToolLoop(t *testing.T) {
 	}
 	if toolResult.Content[0].ToolUseID != "toolu_1" || toolResult.Content[0].Text != "file contents" {
 		t.Fatalf("second request tool result content = %#v", toolResult.Content[0])
+	}
+}
+
+// TestRuntimeRunEmitsFinalHistory verifies successful runs emit the normalized conversation history for autosave consumers.
+func TestRuntimeRunEmitsFinalHistory(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "hello",
+			}),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "session-1",
+		Input:     "hi",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var donePayload event.ConversationDonePayload
+	foundDone := false
+	for evt := range out {
+		if evt.Type != event.TypeConversationDone {
+			continue
+		}
+		payload, ok := evt.Payload.(event.ConversationDonePayload)
+		if !ok {
+			t.Fatalf("Run() done payload type = %T, want event.ConversationDonePayload", evt.Payload)
+		}
+		donePayload = payload
+		foundDone = true
+	}
+
+	if !foundDone {
+		t.Fatal("Run() missing conversation.done event")
+	}
+	if len(donePayload.History.Messages) != 2 {
+		t.Fatalf("done history message count = %d, want 2", len(donePayload.History.Messages))
+	}
+	if donePayload.History.Messages[0].Role != message.RoleUser {
+		t.Fatalf("done history first role = %q, want user", donePayload.History.Messages[0].Role)
+	}
+	if donePayload.History.Messages[1].Role != message.RoleAssistant {
+		t.Fatalf("done history second role = %q, want assistant", donePayload.History.Messages[1].Role)
 	}
 }
 
@@ -405,11 +456,14 @@ func TestRuntimeRunApprovalRetry(t *testing.T) {
 	for evt := range out {
 		events = append(events, evt)
 	}
-	if len(events) != 4 {
-		t.Fatalf("Run() event count = %d, want 4", len(events))
+	if len(events) != 5 {
+		t.Fatalf("Run() event count = %d, want 5", len(events))
 	}
 	if events[1].Type != event.TypeApprovalRequired {
 		t.Fatalf("Run() second event type = %q, want approval.required", events[1].Type)
+	}
+	if events[4].Type != event.TypeConversationDone {
+		t.Fatalf("Run() fifth event type = %q, want conversation.done", events[4].Type)
 	}
 	if attempts != 2 {
 		t.Fatalf("Execute() attempts = %d, want 2", attempts)

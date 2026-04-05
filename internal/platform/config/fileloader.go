@@ -23,9 +23,10 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model       string `json:"model"`
-	Provider    string `json:"provider"`
-	Permissions struct {
+	Model         string `json:"model"`
+	Provider      string `json:"provider"`
+	SessionDBPath string `json:"sessionDbPath"`
+	Permissions   struct {
 		DefaultMode string `json:"defaultMode"`
 	} `json:"permissions"`
 }
@@ -63,6 +64,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	_ = ctx
 
 	cfg := coreconfig.DefaultConfig()
+	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	for _, path := range l.settingsPaths() {
 		fileCfg, err := l.loadSettingsFile(path)
@@ -73,19 +75,21 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	}
 
 	envCfg := coreconfig.Config{
-		Model:        l.LookupEnv("CLAUDE_CODE_MODEL"),
-		Provider:     l.LookupEnv("CLAUDE_CODE_PROVIDER"),
-		APIKey:       l.LookupEnv("ANTHROPIC_API_KEY"),
-		APIBaseURL:   l.LookupEnv("ANTHROPIC_BASE_URL"),
-		ApprovalMode: l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
+		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
+		Provider:      l.LookupEnv("CLAUDE_CODE_PROVIDER"),
+		APIKey:        l.LookupEnv("ANTHROPIC_API_KEY"),
+		APIBaseURL:    l.LookupEnv("ANTHROPIC_BASE_URL"),
+		ApprovalMode:  l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
+		SessionDBPath: l.LookupEnv("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
 	cfg = coreconfig.Merge(cfg, envCfg)
 
 	logger.DebugCF("runtime_config", "loaded runtime config", map[string]any{
-		"provider":     cfg.Provider,
-		"model":        cfg.Model,
-		"has_api_key":  cfg.APIKey != "",
-		"api_base_url": cfg.APIBaseURL,
+		"provider":            cfg.Provider,
+		"model":               cfg.Model,
+		"has_api_key":         cfg.APIKey != "",
+		"api_base_url":        cfg.APIBaseURL,
+		"has_session_db_path": cfg.SessionDBPath != "",
 	})
 
 	return cfg, nil
@@ -103,7 +107,7 @@ func (l *FileLoader) settingsPaths() []string {
 	return paths
 }
 
-// loadSettingsFile extracts the minimal runtime fields consumed by batch-07.
+// loadSettingsFile extracts the minimal runtime fields currently consumed by the Go host.
 func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -119,8 +123,17 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 	}
 
 	return coreconfig.Config{
-		Model:        parsed.Model,
-		Provider:     parsed.Provider,
-		ApprovalMode: parsed.Permissions.DefaultMode,
+		Model:         parsed.Model,
+		Provider:      parsed.Provider,
+		ApprovalMode:  parsed.Permissions.DefaultMode,
+		SessionDBPath: parsed.SessionDBPath,
 	}, nil
+}
+
+// defaultSessionDBPath resolves the Go host's default SQLite location when a home directory is available.
+func (l *FileLoader) defaultSessionDBPath() string {
+	if l == nil || l.HomeDir == "" {
+		return ""
+	}
+	return filepath.Join(l.HomeDir, DefaultSessionDBRelativePath)
 }

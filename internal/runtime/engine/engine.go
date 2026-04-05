@@ -134,6 +134,13 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 			history.Append(assistantMessage)
 		}
 		if len(pendingToolUses) == 0 {
+			out <- event.Event{
+				Type:      event.TypeConversationDone,
+				Timestamp: time.Now(),
+				Payload: event.ConversationDonePayload{
+					History: history.Clone(),
+				},
+			}
 			return nil
 		}
 		if e.Executor == nil {

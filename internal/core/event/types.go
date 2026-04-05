@@ -1,5 +1,7 @@
 package event
 
+import "github.com/sheepzhao/claude-code-go/internal/core/conversation"
+
 // MessageDeltaPayload carries one assistant text chunk rendered to the caller.
 type MessageDeltaPayload struct {
 	Text string
@@ -32,4 +34,9 @@ type ApprovalPayload struct {
 // ErrorPayload carries one runtime or provider error message.
 type ErrorPayload struct {
 	Message string
+}
+
+// ConversationDonePayload carries the final normalized history produced by one runtime turn.
+type ConversationDonePayload struct {
+	History conversation.History
 }

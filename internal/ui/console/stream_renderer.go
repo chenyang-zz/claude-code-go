@@ -24,23 +24,31 @@ func NewStreamRenderer(printer *Printer) *StreamRenderer {
 // Render consumes one event stream until it closes.
 func (r *StreamRenderer) Render(stream event.Stream) error {
 	for evt := range stream {
-		switch evt.Type {
-		case event.TypeMessageDelta:
-			payload, ok := evt.Payload.(event.MessageDeltaPayload)
-			if !ok {
-				return fmt.Errorf("message delta payload type mismatch")
-			}
-			if err := r.Printer.Print(payload.Text); err != nil {
-				return err
-			}
-		case event.TypeError:
-			payload, ok := evt.Payload.(event.ErrorPayload)
-			if !ok {
-				return fmt.Errorf("error payload type mismatch")
-			}
-			if err := r.Printer.PrintLine(payload.Message); err != nil {
-				return err
-			}
+		if err := r.RenderEvent(evt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RenderEvent writes one already-decoded runtime event to the console when it has visible output.
+func (r *StreamRenderer) RenderEvent(evt event.Event) error {
+	switch evt.Type {
+	case event.TypeMessageDelta:
+		payload, ok := evt.Payload.(event.MessageDeltaPayload)
+		if !ok {
+			return fmt.Errorf("message delta payload type mismatch")
+		}
+		if err := r.Printer.Print(payload.Text); err != nil {
+			return err
+		}
+	case event.TypeError:
+		payload, ok := evt.Payload.(event.ErrorPayload)
+		if !ok {
+			return fmt.Errorf("error payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(payload.Message); err != nil {
+			return err
 		}
 	}
 	return nil

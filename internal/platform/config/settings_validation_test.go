@@ -40,12 +40,12 @@ func TestValidateSettingsContentRejectsWrongPermissionShape(t *testing.T) {
 
 // TestValidateSettingsContentAcceptsExpandedFields verifies the platform validator accepts the batch-06 settings subset.
 func TestValidateSettingsContentAcceptsExpandedFields(t *testing.T) {
-	result := ValidateSettingsContent("{\n  \"apiKeyHelper\": \"/tmp/auth.sh\",\n  \"respectGitignore\": true,\n  \"cleanupPeriodDays\": 7,\n  \"defaultShell\": \"bash\",\n  \"permissions\": {\n    \"defaultMode\": \"plan\",\n    \"disableBypassPermissionsMode\": \"disable\",\n    \"additionalDirectories\": [\"packages/app\"]\n  }\n}\n")
+	result := ValidateSettingsContent("{\n  \"apiKeyHelper\": \"/tmp/auth.sh\",\n  \"sessionDbPath\": \"/tmp/session.db\",\n  \"respectGitignore\": true,\n  \"cleanupPeriodDays\": 7,\n  \"defaultShell\": \"bash\",\n  \"permissions\": {\n    \"defaultMode\": \"plan\",\n    \"disableBypassPermissionsMode\": \"disable\",\n    \"additionalDirectories\": [\"packages/app\"]\n  }\n}\n")
 	if !result.IsValid {
 		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
 	}
-	if !strings.Contains(result.FullSchema, "\"defaultShell\"") {
-		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want defaultShell schema", result.FullSchema)
+	if !strings.Contains(result.FullSchema, "\"defaultShell\"") || !strings.Contains(result.FullSchema, "\"sessionDbPath\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want defaultShell and sessionDbPath schema", result.FullSchema)
 	}
 }
 

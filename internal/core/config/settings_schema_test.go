@@ -13,6 +13,7 @@ func TestSettingsSchemaStringIncludesExpandedFields(t *testing.T) {
 	}
 	for _, needle := range []string{
 		`"apiKeyHelper"`,
+		`"sessionDbPath"`,
 		`"cleanupPeriodDays"`,
 		`"defaultShell"`,
 		`"defaultMode"`,
@@ -28,6 +29,7 @@ func TestSettingsSchemaStringIncludesExpandedFields(t *testing.T) {
 func TestValidateSettingsDocumentAcceptsExpandedSubset(t *testing.T) {
 	issues := ValidateSettingsDocument(map[string]any{
 		"apiKeyHelper":           "/tmp/auth.sh",
+		"sessionDbPath":          "/tmp/session.db",
 		"respectGitignore":       true,
 		"cleanupPeriodDays":      float64(30),
 		"includeCoAuthoredBy":    false,
