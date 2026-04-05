@@ -18,6 +18,8 @@ type stubRepository struct {
 	latestErr    error
 	listRecent   []coresession.Summary
 	listErr      error
+	searchResult []coresession.Summary
+	searchErr    error
 	saved        []coresession.Session
 }
 
@@ -53,6 +55,17 @@ func (r *stubRepository) ListRecent(ctx context.Context, lookup coresession.Look
 	}
 	cloned := make([]coresession.Summary, len(r.listRecent))
 	copy(cloned, r.listRecent)
+	return cloned, nil
+}
+
+func (r *stubRepository) Search(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	_ = ctx
+	_ = lookup
+	if r.searchErr != nil {
+		return nil, r.searchErr
+	}
+	cloned := make([]coresession.Summary, len(r.searchResult))
+	copy(cloned, r.searchResult)
 	return cloned, nil
 }
 
@@ -152,6 +165,28 @@ func TestManagerListRecentReturnsSummaries(t *testing.T) {
 	}
 	if summaries[0].ID != "session-2" || summaries[1].ID != "session-1" {
 		t.Fatalf("ListRecent() ids = %#v, want session-2 then session-1", []string{summaries[0].ID, summaries[1].ID})
+	}
+}
+
+// TestManagerSearchReturnsSummaries verifies project-scoped search queries are bridged through the manager.
+func TestManagerSearchReturnsSummaries(t *testing.T) {
+	repo := &stubRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-2", ProjectPath: "/repo", Preview: "deploy issue"},
+			{ID: "session-1", ProjectPath: "/repo", Preview: "deploy fix"},
+		},
+	}
+	manager := NewManager(repo)
+
+	summaries, err := manager.Search(context.Background(), "/repo", "deploy", 10)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("Search() len = %d, want 2", len(summaries))
+	}
+	if summaries[0].ID != "session-2" || summaries[1].ID != "session-1" {
+		t.Fatalf("Search() ids = %#v, want session-2 then session-1", []string{summaries[0].ID, summaries[1].ID})
 	}
 }
 

@@ -29,6 +29,8 @@ type recordingSessionRepository struct {
 	latestErr    error
 	listRecent   []coresession.Summary
 	listErr      error
+	searchResult []coresession.Summary
+	searchErr    error
 	saved        []coresession.Session
 }
 
@@ -94,6 +96,24 @@ func (r *recordingSessionRepository) ListRecent(ctx context.Context, lookup core
 		if summary.ProjectPath == lookup.ProjectPath {
 			filtered = append(filtered, summary)
 		}
+		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
+func (r *recordingSessionRepository) Search(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	_ = ctx
+	if r.searchErr != nil {
+		return nil, r.searchErr
+	}
+	var filtered []coresession.Summary
+	for _, summary := range r.searchResult {
+		if summary.ProjectPath != lookup.ProjectPath {
+			continue
+		}
+		filtered = append(filtered, summary)
 		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
 			break
 		}
@@ -273,7 +293,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -335,6 +355,57 @@ func TestRunnerRunResumeWithoutArgsListsRecentSessions(t *testing.T) {
 	want := "Recent conversations:\n- 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\n- 2026-04-05 11:00 UTC | Previous conversation [repo] | session-2\nUse /resume <session-id> <prompt> to continue one.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/resume) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunResumeSearchResolvesUniqueMatch verifies `/resume <search-term>` can switch the active session without requiring a prompt.
+func TestRunnerRunResumeSearchResolvesUniqueMatch(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume deploy) error = %v", err)
+	}
+
+	if runner.SessionID != "session-3" {
+		t.Fatalf("Run(/resume deploy) session id = %q, want session-3", runner.SessionID)
+	}
+	if got := buf.String(); got != "Resumed conversation session-3.\n" {
+		t.Fatalf("Run(/resume deploy) output = %q, want resumed confirmation", got)
+	}
+}
+
+// TestRunnerRunResumeSearchShowsDisambiguation verifies multiple text matches are rendered as a stable text-only candidate list.
+func TestRunnerRunResumeSearchShowsDisambiguation(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-2", ProjectPath: "/repo", Preview: "deploy checklist", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume deploy) error = %v", err)
+	}
+
+	want := "Found 2 conversations matching deploy.\nMatching conversations:\n- 2026-04-05 12:00 UTC | deploy failure [repo] | session-3\n- 2026-04-05 11:00 UTC | deploy checklist [repo] | session-2\nUse /resume <session-id> <prompt> to continue one of them.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume deploy) output = %q, want search disambiguation list", got)
 	}
 }
 
@@ -755,8 +826,8 @@ func TestRunnerRunResumeSessionNotFound(t *testing.T) {
 	}
 }
 
-// TestRunnerRunResumeRequiresPrompt verifies /resume rejects missing follow-up prompt text with a stable usage hint.
-func TestRunnerRunResumeRequiresPrompt(t *testing.T) {
+// TestRunnerRunResumeSearchRequiresStorage verifies search-style `/resume <term>` still reports the stable storage prerequisite.
+func TestRunnerRunResumeSearchRequiresStorage(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
@@ -769,8 +840,8 @@ func TestRunnerRunResumeRequiresPrompt(t *testing.T) {
 	if eng.lastRequest.SessionID != "" || len(eng.lastRequest.Messages) != 0 {
 		t.Fatalf("engine should not be called for invalid resume input, got request %#v", eng.lastRequest)
 	}
-	if got := buf.String(); got != resumeUsageMessage+"\n" {
-		t.Fatalf("Run() output = %q, want resume usage hint", got)
+	if got := buf.String(); got != resumeNotConfiguredMessage+"\n" {
+		t.Fatalf("Run() output = %q, want resume storage error", got)
 	}
 }
 

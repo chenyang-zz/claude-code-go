@@ -27,8 +27,8 @@ func (c resumeCommandAdapter) Metadata() command.Metadata {
 	return command.Metadata{
 		Name:        "resume",
 		Aliases:     []string{"continue"},
-		Description: "Resume a saved session and continue it with a new prompt",
-		Usage:       "/resume <session-id> <prompt>",
+		Description: "Resume a saved session by search or continue it with a new prompt",
+		Usage:       "/resume <search-term> | /resume <session-id> <prompt>",
 	}
 }
 

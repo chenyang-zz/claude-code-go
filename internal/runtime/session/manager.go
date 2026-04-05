@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -134,6 +135,38 @@ func (m *Manager) ListRecent(ctx context.Context, projectPath string, limit int)
 	}
 	logger.DebugCF("session_manager", "listed recent persisted sessions", map[string]any{
 		"project_path": projectPath,
+		"limit":        limit,
+		"count":        len(summaries),
+	})
+	return summaries, nil
+}
+
+// Search returns project-scoped session summaries matching one free-text query.
+func (m *Manager) Search(ctx context.Context, projectPath string, query string, limit int) ([]coresession.Summary, error) {
+	if projectPath == "" {
+		return nil, fmt.Errorf("missing project path")
+	}
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("missing query")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if m.Repository == nil {
+		return nil, nil
+	}
+
+	summaries, err := m.Repository.Search(ctx, coresession.Lookup{
+		ProjectPath: projectPath,
+		Limit:       limit,
+		Query:       query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugCF("session_manager", "searched persisted sessions", map[string]any{
+		"project_path": projectPath,
+		"query":        query,
 		"limit":        limit,
 		"count":        len(summaries),
 	})

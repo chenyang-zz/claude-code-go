@@ -229,6 +229,82 @@ func TestSessionRepositoryListRecentFallsBackToMessagesJSON(t *testing.T) {
 	}
 }
 
+// TestSessionRepositorySearchByProject verifies project-scoped session search matches summary preview and session id.
+func TestSessionRepositorySearchByProject(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-deploy-2",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy pipeline fix")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-1",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy checklist")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-deploy-other",
+			ProjectPath: "/repo-b",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy outside scope")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 16, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.Search(context.Background(), coresession.Lookup{ProjectPath: "/repo-a", Query: "deploy", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Search() len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-deploy-2" || got[1].ID != "session-1" {
+		t.Fatalf("Search() ids = %#v, want session-deploy-2 then session-1", []string{got[0].ID, got[1].ID})
+	}
+}
+
+// TestSessionRepositorySearchFallsBackToMessagesJSON verifies old rows without summary_text remain searchable.
+func TestSessionRepositorySearchFallsBackToMessagesJSON(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	session := coresession.Session{
+		ID:          "session-legacy-search",
+		ProjectPath: "/repo-a",
+		Messages: []message.Message{
+			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("legacy deploy plan")}},
+		},
+		UpdatedAt: time.Date(2026, 4, 4, 17, 0, 0, 0, time.UTC),
+	}
+	if err := repo.Save(context.Background(), session); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE sessions SET summary_text = '' WHERE id = ?`, session.ID); err != nil {
+		t.Fatalf("clear summary_text error = %v", err)
+	}
+
+	got, err := repo.Search(context.Background(), coresession.Lookup{ProjectPath: "/repo-a", Query: "deploy", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Search() len = %d, want 1", len(got))
+	}
+	if got[0].ID != session.ID {
+		t.Fatalf("Search() id = %q, want %q", got[0].ID, session.ID)
+	}
+}
+
 // TestSessionRepositoryLoadMissingSession verifies unknown session ids map to the shared not-found error.
 func TestSessionRepositoryLoadMissingSession(t *testing.T) {
 	db := openTestDB(t)

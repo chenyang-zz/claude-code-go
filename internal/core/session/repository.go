@@ -27,6 +27,8 @@ type Lookup struct {
 	ProjectPath string
 	// Limit bounds recent-session queries.
 	Limit int
+	// Query carries the minimum free-text search term used by `/resume <search-term>`.
+	Query string
 }
 
 // Repository stores and restores normalized session snapshots.
@@ -39,4 +41,6 @@ type Repository interface {
 	LoadLatest(ctx context.Context, lookup Lookup) (Session, error)
 	// ListRecent returns recent session summaries within one lookup scope.
 	ListRecent(ctx context.Context, lookup Lookup) ([]Summary, error)
+	// Search returns project-scoped session summaries matching one free-text query.
+	Search(ctx context.Context, lookup Lookup) ([]Summary, error)
 }

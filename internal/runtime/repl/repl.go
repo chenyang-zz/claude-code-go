@@ -49,6 +49,7 @@ const (
 	resumeUsageMessage         = "Resume command requires a session id and prompt: use /resume <session-id> <prompt>."
 	resumeNotConfiguredMessage = "Resume command is not available because session storage is not configured."
 	resumeNoSessionsMessage    = "No conversations found to resume."
+	resumeMultipleMatchesUsage = "Use /resume <session-id> <prompt> to continue one of them."
 	continueNotConfigured      = "Continue command is not available because session storage is not configured."
 	continueNotFoundMessage    = "No conversation found to continue."
 )
@@ -126,15 +127,20 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession 
 	if strings.TrimSpace(body) == "" {
 		return r.renderRecentResumeSessions(ctx)
 	}
-
-	sessionID, prompt, err := parseResumeBody(body)
-	if err != nil {
-		return r.Renderer.RenderLine(err.Error())
-	}
 	if r == nil || r.SessionManager == nil {
 		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
 	}
 
+	if sessionID, prompt, ok, err := r.tryParseExplicitResume(ctx, body); err != nil {
+		return err
+	} else if ok {
+		return r.resumeSessionWithPrompt(ctx, sessionID, prompt, forkSession)
+	}
+
+	return r.searchAndResumeSession(ctx, body)
+}
+
+func (r *Runner) resumeSessionWithPrompt(ctx context.Context, sessionID string, prompt string, forkSession bool) error {
 	snapshot, err := r.SessionManager.Resume(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, coresession.ErrSessionNotFound) {
@@ -161,6 +167,46 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession 
 		"message_count": len(snapshot.Session.Messages),
 	})
 	return r.runPrompt(ctx, conversation.History{Messages: snapshot.Session.Messages}, prompt)
+}
+
+func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error {
+	query := strings.TrimSpace(body)
+	if query == "" {
+		return r.Renderer.RenderLine(resumeUsageMessage)
+	}
+
+	summaries, err := r.SessionManager.Search(ctx, r.ProjectPath, query, 10)
+	if err != nil {
+		if strings.Contains(err.Error(), "missing project path") {
+			return r.Renderer.RenderLine(resumeNoSessionsMessage)
+		}
+		return err
+	}
+	if len(summaries) == 0 {
+		return r.Renderer.RenderLine(fmt.Sprintf("Session %s was not found.", query))
+	}
+	if len(summaries) > 1 {
+		lines := []string{
+			fmt.Sprintf("Found %d conversations matching %s.", len(summaries), query),
+			"Matching conversations:",
+		}
+		for _, summary := range summaries {
+			lines = append(lines, formatRecentSessionLine(summary))
+		}
+		lines = append(lines, resumeMultipleMatchesUsage)
+		return r.Renderer.RenderLine(strings.Join(lines, "\n"))
+	}
+
+	r.SessionID = summaries[0].ID
+	if summaries[0].ProjectPath != "" {
+		r.ProjectPath = summaries[0].ProjectPath
+	}
+	logger.DebugCF("repl", "selected session from resume search", map[string]any{
+		"session_id":   r.SessionID,
+		"project_path": r.ProjectPath,
+		"query":        query,
+	})
+	return r.Renderer.RenderLine(fmt.Sprintf("Resumed conversation %s.", r.SessionID))
 }
 
 func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
@@ -235,6 +281,37 @@ func parseResumeBody(body string) (string, string, error) {
 		return "", "", fmt.Errorf(resumeUsageMessage)
 	}
 	return sessionID, prompt, nil
+}
+
+// tryParseExplicitResume preserves the existing `/resume <session-id> <prompt>` flow when the first token resolves to one saved session.
+func (r *Runner) tryParseExplicitResume(ctx context.Context, body string) (string, string, bool, error) {
+	sessionID, prompt, err := parseResumeBody(body)
+	if err != nil {
+		return "", "", false, nil
+	}
+	if !isLikelySessionID(sessionID) {
+		return "", "", false, nil
+	}
+
+	if _, err := r.SessionManager.Resume(ctx, sessionID); err != nil {
+		if errors.Is(err, coresession.ErrSessionNotFound) {
+			return sessionID, prompt, true, nil
+		}
+		return "", "", false, err
+	}
+	return sessionID, prompt, true, nil
+}
+
+// isLikelySessionID keeps multi-word natural-language search terms out of the explicit `/resume <session-id> <prompt>` path.
+func isLikelySessionID(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if _, err := uuid.Parse(trimmed); err == nil {
+		return true
+	}
+	return strings.Contains(trimmed, "-")
 }
 
 // formatRecentSessionLine renders one recent-session candidate using a stable text-only layout.
