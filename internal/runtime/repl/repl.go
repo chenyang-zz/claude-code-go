@@ -2,12 +2,15 @@ package repl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
@@ -37,7 +40,12 @@ func NewRunner(eng engine.Engine, renderer *console.StreamRenderer) *Runner {
 	}
 }
 
-// Run parses the CLI args and dispatches either a slash placeholder or one text turn.
+const (
+	resumeUsageMessage         = "Resume command requires a session id and prompt: use /resume <session-id> <prompt>."
+	resumeNotConfiguredMessage = "Resume command is not available because session storage is not configured."
+)
+
+// Run parses the CLI args and dispatches either a supported slash command or one text turn.
 func (r *Runner) Run(ctx context.Context, args []string) error {
 	parsed, err := ParseArgs(args)
 	if err != nil {
@@ -50,6 +58,9 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 	})
 
 	if parsed.IsSlashCommand {
+		if parsed.Command == "resume" {
+			return r.runResumeCommand(ctx, parsed.Body)
+		}
 		return r.Renderer.RenderLine(fmt.Sprintf("Slash command /%s is not supported yet.", parsed.Command))
 	}
 
@@ -57,12 +68,42 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	return r.runPrompt(ctx, history, parsed.Body)
+}
 
+// runResumeCommand restores one persisted session and immediately continues it with the provided prompt tail.
+func (r *Runner) runResumeCommand(ctx context.Context, body string) error {
+	sessionID, prompt, err := parseResumeBody(body)
+	if err != nil {
+		return r.Renderer.RenderLine(err.Error())
+	}
+	if r == nil || r.SessionManager == nil {
+		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
+	}
+
+	snapshot, err := r.SessionManager.Resume(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, coresession.ErrSessionNotFound) {
+			return r.Renderer.RenderLine(fmt.Sprintf("Session %s was not found.", sessionID))
+		}
+		return err
+	}
+
+	r.SessionID = sessionID
+	logger.DebugCF("repl", "resumed session from slash command", map[string]any{
+		"session_id":    sessionID,
+		"message_count": len(snapshot.Session.Messages),
+	})
+	return r.runPrompt(ctx, conversation.History{Messages: snapshot.Session.Messages}, prompt)
+}
+
+// runPrompt appends one user prompt onto the supplied history, executes the engine and persists the final history.
+func (r *Runner) runPrompt(ctx context.Context, history conversation.History, prompt string) error {
 	requestHistory := history.Clone()
 	requestHistory.Append(message.Message{
 		Role: message.RoleUser,
 		Content: []message.ContentPart{
-			message.TextPart(parsed.Body),
+			message.TextPart(prompt),
 		},
 	})
 
@@ -84,6 +125,26 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// parseResumeBody splits the /resume tail into one session identifier and one follow-up prompt.
+func parseResumeBody(body string) (string, string, error) {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return "", "", fmt.Errorf(resumeUsageMessage)
+	}
+
+	parts := strings.SplitN(trimmed, " ", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf(resumeUsageMessage)
+	}
+
+	sessionID := strings.TrimSpace(parts[0])
+	prompt := strings.TrimSpace(parts[1])
+	if sessionID == "" || prompt == "" {
+		return "", "", fmt.Errorf(resumeUsageMessage)
+	}
+	return sessionID, prompt, nil
 }
 
 // restoreHistory loads the current session history when a session manager is configured.
