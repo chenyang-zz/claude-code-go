@@ -59,7 +59,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
 
-	commandRegistry, err := newCommandRegistry(runner)
+	commandRegistry, err := newCommandRegistry(cfg, runner)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(runner *repl.Runner) (command.Registry, error) {
+func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	if err := registry.Register(servicecommands.HelpCommand{Registry: registry}); err != nil {
 		return nil, err
@@ -98,6 +98,12 @@ func newCommandRegistry(runner *repl.Runner) (command.Registry, error) {
 		return nil, err
 	}
 	if err := registry.Register(repl.NewResumeCommandAdapter(runner)); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ConfigCommand{Config: cfg}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.DoctorCommand{Config: cfg}); err != nil {
 		return nil, err
 	}
 	return registry, nil

@@ -258,15 +258,38 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(NewResumeCommandAdapter(runner)); err != nil {
 		t.Fatalf("Register(resume) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.ConfigCommand{}); err != nil {
+		t.Fatalf("Register(config) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.DoctorCommand{}); err != nil {
+		t.Fatalf("Register(doctor) error = %v", err)
+	}
 	runner.Commands = registry
 
 	if err := runner.Run(context.Background(), []string{"/help"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunSettingsAliasDispatchesConfig verifies /settings resolves through the shared registry alias table.
+func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.ConfigCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/settings"}); err != nil {
+		t.Fatalf("Run(/settings) error = %v", err)
+	}
+
+	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/settings) output = %q, want %q", got, want)
 	}
 }
 

@@ -74,6 +74,12 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("resume"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /resume adapter")
 	}
+	if _, ok := app.Runner.Commands.Get("config"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /config command")
+	}
+	if _, ok := app.Runner.Commands.Get("doctor"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /doctor command")
+	}
 }
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
@@ -98,14 +104,14 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(nil)
+	registry, err := newCommandRegistry(coreconfig.Config{}, nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 3 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 3", len(cmds))
+	if len(cmds) != 5 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 5", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -128,5 +134,20 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		Usage:       "/resume <session-id> <prompt>",
 	}) {
 		t.Fatalf("newCommandRegistry() third metadata = %#v, want resume metadata", got)
+	}
+	if got := cmds[3].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "config",
+		Aliases:     []string{"settings"},
+		Description: "Show the current runtime configuration",
+		Usage:       "/config",
+	}) {
+		t.Fatalf("newCommandRegistry() fourth metadata = %#v, want config metadata", got)
+	}
+	if got := cmds[4].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "doctor",
+		Description: "Diagnose the current Claude Code Go host setup",
+		Usage:       "/doctor",
+	}) {
+		t.Fatalf("newCommandRegistry() fifth metadata = %#v, want doctor metadata", got)
 	}
 }
