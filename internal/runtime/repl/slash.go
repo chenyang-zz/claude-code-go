@@ -26,6 +26,7 @@ func NewResumeCommandAdapter(runner *Runner) command.Command {
 func (c resumeCommandAdapter) Metadata() command.Metadata {
 	return command.Metadata{
 		Name:        "resume",
+		Aliases:     []string{"continue"},
 		Description: "Resume a saved session and continue it with a new prompt",
 		Usage:       "/resume <session-id> <prompt>",
 	}

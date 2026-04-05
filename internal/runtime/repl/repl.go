@@ -47,6 +47,7 @@ func NewRunner(eng engine.Engine, renderer *console.StreamRenderer) *Runner {
 const (
 	resumeUsageMessage         = "Resume command requires a session id and prompt: use /resume <session-id> <prompt>."
 	resumeNotConfiguredMessage = "Resume command is not available because session storage is not configured."
+	resumeNoSessionsMessage    = "No conversations found to resume."
 	continueNotConfigured      = "Continue command is not available because session storage is not configured."
 	continueNotFoundMessage    = "No conversation found to continue."
 )
@@ -121,6 +122,10 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 
 // runResumeCommand restores one persisted session and immediately continues it with the provided prompt tail.
 func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession bool) error {
+	if strings.TrimSpace(body) == "" {
+		return r.renderRecentResumeSessions(ctx)
+	}
+
 	sessionID, prompt, err := parseResumeBody(body)
 	if err != nil {
 		return r.Renderer.RenderLine(err.Error())
@@ -155,6 +160,30 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession 
 		"message_count": len(snapshot.Session.Messages),
 	})
 	return r.runPrompt(ctx, conversation.History{Messages: snapshot.Session.Messages}, prompt)
+}
+
+func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
+	if r == nil || r.SessionManager == nil {
+		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
+	}
+
+	summaries, err := r.SessionManager.ListRecent(ctx, r.ProjectPath, 5)
+	if err != nil {
+		if strings.Contains(err.Error(), "missing project path") {
+			return r.Renderer.RenderLine(resumeNoSessionsMessage)
+		}
+		return err
+	}
+	if len(summaries) == 0 {
+		return r.Renderer.RenderLine(resumeNoSessionsMessage)
+	}
+
+	lines := []string{"Recent conversations:"}
+	for _, summary := range summaries {
+		lines = append(lines, fmt.Sprintf("- %s", summary.ID))
+	}
+	lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
+	return r.Renderer.RenderLine(strings.Join(lines, "\n"))
 }
 
 // runPrompt appends one user prompt onto the supplied history, executes the engine and persists the final history.

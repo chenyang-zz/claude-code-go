@@ -113,6 +113,33 @@ func (m *Manager) ResumeLatest(ctx context.Context, projectPath string) (coreses
 	}, nil
 }
 
+// ListRecent returns recent session summaries for one project scope.
+func (m *Manager) ListRecent(ctx context.Context, projectPath string, limit int) ([]coresession.Summary, error) {
+	if projectPath == "" {
+		return nil, fmt.Errorf("missing project path")
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if m.Repository == nil {
+		return nil, nil
+	}
+
+	summaries, err := m.Repository.ListRecent(ctx, coresession.Lookup{
+		ProjectPath: projectPath,
+		Limit:       limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugCF("session_manager", "listed recent persisted sessions", map[string]any{
+		"project_path": projectPath,
+		"limit":        limit,
+		"count":        len(summaries),
+	})
+	return summaries, nil
+}
+
 // ReplaceMessages overwrites the stored session history with the supplied normalized messages.
 func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []message.Message) (coresession.Snapshot, error) {
 	return m.ReplaceMessagesInProject(ctx, id, "", messages)

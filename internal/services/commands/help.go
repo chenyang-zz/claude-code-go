@@ -35,6 +35,13 @@ func (c HelpCommand) Execute(ctx context.Context, args command.Args) (command.Re
 	for _, registered := range c.Registry.List() {
 		meta := registered.Metadata()
 		lines = append(lines, fmt.Sprintf("/%s - %s", meta.Name, meta.Description))
+		if len(meta.Aliases) > 0 {
+			aliases := make([]string, 0, len(meta.Aliases))
+			for _, alias := range meta.Aliases {
+				aliases = append(aliases, "/"+command.NormalizeName(alias))
+			}
+			lines = append(lines, fmt.Sprintf("  Aliases: %s", strings.Join(aliases, ", ")))
+		}
 		if meta.Usage != "" && meta.Usage != "/"+meta.Name {
 			lines = append(lines, fmt.Sprintf("  Usage: %s", meta.Usage))
 		}

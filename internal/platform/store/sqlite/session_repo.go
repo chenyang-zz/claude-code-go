@@ -158,3 +158,56 @@ LIMIT 1`,
 		UpdatedAt:   updatedAt,
 	}, nil
 }
+
+// ListRecent restores recent session summaries within one project scope.
+func (r *SessionRepository) ListRecent(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	if r == nil || r.DB == nil || r.DB.SQL == nil {
+		return nil, fmt.Errorf("sqlite session repository is not initialized")
+	}
+	if lookup.ProjectPath == "" {
+		return nil, fmt.Errorf("missing project path")
+	}
+	if lookup.Limit <= 0 {
+		return nil, fmt.Errorf("missing limit")
+	}
+
+	rows, err := r.DB.SQL.QueryContext(
+		ctx,
+		`SELECT id, project_path, updated_at
+FROM sessions
+WHERE project_path = ?
+ORDER BY updated_at DESC, id DESC
+LIMIT ?`,
+		lookup.ProjectPath,
+		lookup.Limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list recent sessions for %s: %w", lookup.ProjectPath, err)
+	}
+	defer rows.Close()
+
+	var summaries []coresession.Summary
+	for rows.Next() {
+		var summary coresession.Summary
+		var updatedAtText string
+		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &updatedAtText); err != nil {
+			return nil, fmt.Errorf("scan recent session for %s: %w", lookup.ProjectPath, err)
+		}
+		summary.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtText)
+		if err != nil {
+			return nil, fmt.Errorf("parse recent session %s updated_at: %w", summary.ID, err)
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent sessions for %s: %w", lookup.ProjectPath, err)
+	}
+
+	logger.DebugCF("sqlite_session_repo", "listed recent session summaries", map[string]any{
+		"project_path": lookup.ProjectPath,
+		"limit":        lookup.Limit,
+		"count":        len(summaries),
+		"path":         r.DB.Path,
+	})
+	return summaries, nil
+}

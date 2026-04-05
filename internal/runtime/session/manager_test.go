@@ -16,6 +16,8 @@ type stubRepository struct {
 	loadErr      error
 	latestResult coresession.Session
 	latestErr    error
+	listRecent   []coresession.Summary
+	listErr      error
 	saved        []coresession.Session
 }
 
@@ -41,6 +43,17 @@ func (r *stubRepository) LoadLatest(ctx context.Context, lookup coresession.Look
 		return coresession.Session{}, r.latestErr
 	}
 	return r.latestResult.Clone(), nil
+}
+
+func (r *stubRepository) ListRecent(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	_ = ctx
+	_ = lookup
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	cloned := make([]coresession.Summary, len(r.listRecent))
+	copy(cloned, r.listRecent)
+	return cloned, nil
 }
 
 // TestManagerStartCreatesNewSession verifies the manager initializes an empty session when nothing is persisted yet.
@@ -117,6 +130,28 @@ func TestManagerResumeLatestLoadsExistingSession(t *testing.T) {
 	}
 	if snapshot.Session.ID != "session-latest" {
 		t.Fatalf("ResumeLatest() session id = %q, want session-latest", snapshot.Session.ID)
+	}
+}
+
+// TestManagerListRecentReturnsSummaries verifies project-scoped recent-session summaries are bridged through the manager.
+func TestManagerListRecentReturnsSummaries(t *testing.T) {
+	repo := &stubRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-2", ProjectPath: "/repo", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+			{ID: "session-1", ProjectPath: "/repo", UpdatedAt: time.Date(2026, 4, 5, 10, 0, 0, 0, time.UTC)},
+		},
+	}
+	manager := NewManager(repo)
+
+	summaries, err := manager.ListRecent(context.Background(), "/repo", 2)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("ListRecent() len = %d, want 2", len(summaries))
+	}
+	if summaries[0].ID != "session-2" || summaries[1].ID != "session-1" {
+		t.Fatalf("ListRecent() ids = %#v, want session-2 then session-1", []string{summaries[0].ID, summaries[1].ID})
 	}
 }
 

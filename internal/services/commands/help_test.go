@@ -36,6 +36,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "resume",
+		Aliases:     []string{"continue"},
 		Description: "Resume a saved session and continue it with a new prompt",
 		Usage:       "/resume <session-id> <prompt>",
 	}}); err != nil {
@@ -47,7 +48,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Usage: /resume <session-id> <prompt>\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

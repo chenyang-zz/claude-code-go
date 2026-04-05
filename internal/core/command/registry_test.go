@@ -24,7 +24,7 @@ func TestInMemoryRegistryRegisterAndLookup(t *testing.T) {
 	registry := NewInMemoryRegistry()
 
 	first := stubCommand{meta: Metadata{Name: "help", Description: "show help"}}
-	second := stubCommand{meta: Metadata{Name: "resume", Description: "resume session"}}
+	second := stubCommand{meta: Metadata{Name: "resume", Aliases: []string{"continue"}, Description: "resume session"}}
 
 	if err := registry.Register(first); err != nil {
 		t.Fatalf("Register(first) error = %v", err)
@@ -39,6 +39,13 @@ func TestInMemoryRegistryRegisterAndLookup(t *testing.T) {
 	}
 	if got.Metadata().Name != "help" {
 		t.Fatalf("Get(/HELP) name = %q, want help", got.Metadata().Name)
+	}
+	got, ok = registry.Get("/continue")
+	if !ok {
+		t.Fatal("Get(/continue) ok = false, want true")
+	}
+	if got.Metadata().Name != "resume" {
+		t.Fatalf("Get(/continue) name = %q, want resume", got.Metadata().Name)
 	}
 
 	list := registry.List()
@@ -62,5 +69,8 @@ func TestInMemoryRegistryRejectsInvalidCommands(t *testing.T) {
 	}
 	if err := registry.Register(stubCommand{meta: Metadata{Name: "/help"}}); err == nil {
 		t.Fatal("Register(duplicate help) error = nil, want error")
+	}
+	if err := registry.Register(stubCommand{meta: Metadata{Name: "resume", Aliases: []string{"help"}}}); err == nil {
+		t.Fatal("Register(alias collides with existing command) error = nil, want error")
 	}
 }

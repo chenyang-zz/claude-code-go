@@ -151,6 +151,46 @@ func TestSessionRepositoryLoadLatestByProject(t *testing.T) {
 	}
 }
 
+// TestSessionRepositoryListRecentByProject verifies recent-session summaries are returned in descending update order.
+func TestSessionRepositoryListRecentByProject(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-1",
+			ProjectPath: "/repo-a",
+			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-2",
+			ProjectPath: "/repo-a",
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-3",
+			ProjectPath: "/repo-b",
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.ListRecent(context.Background(), coresession.Lookup{ProjectPath: "/repo-a", Limit: 2})
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListRecent() len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-2" || got[1].ID != "session-1" {
+		t.Fatalf("ListRecent() ids = %#v, want session-2 then session-1", []string{got[0].ID, got[1].ID})
+	}
+}
+
 // TestSessionRepositoryLoadMissingSession verifies unknown session ids map to the shared not-found error.
 func TestSessionRepositoryLoadMissingSession(t *testing.T) {
 	db := openTestDB(t)

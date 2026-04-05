@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -106,22 +107,23 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	if len(cmds) != 3 {
 		t.Fatalf("newCommandRegistry() list len = %d, want 3", len(cmds))
 	}
-	if got := cmds[0].Metadata(); got != (command.Metadata{
+	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
 		Description: "Show help and available commands",
 		Usage:       "/help",
 	}) {
 		t.Fatalf("newCommandRegistry() first metadata = %#v, want help metadata", got)
 	}
-	if got := cmds[1].Metadata(); got != (command.Metadata{
+	if got := cmds[1].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "clear",
 		Description: "Clear conversation history and start a new session",
 		Usage:       "/clear",
 	}) {
 		t.Fatalf("newCommandRegistry() second metadata = %#v, want clear metadata", got)
 	}
-	if got := cmds[2].Metadata(); got != (command.Metadata{
+	if got := cmds[2].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "resume",
+		Aliases:     []string{"continue"},
 		Description: "Resume a saved session and continue it with a new prompt",
 		Usage:       "/resume <session-id> <prompt>",
 	}) {

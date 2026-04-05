@@ -6,6 +6,8 @@ import "context"
 type Metadata struct {
 	// Name is the canonical slash command name without the leading slash.
 	Name string
+	// Aliases exposes additional slash names that should resolve to the same command.
+	Aliases []string
 	// Description summarizes the command's visible behavior.
 	Description string
 	// Usage documents the minimum stable invocation form.

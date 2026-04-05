@@ -28,7 +28,7 @@ func NewInMemoryRegistry() *InMemoryRegistry {
 	}
 }
 
-// Register adds one command to the registry and rejects duplicate or empty names.
+// Register adds one command to the registry and rejects duplicate or empty names and aliases.
 func (r *InMemoryRegistry) Register(cmd Command) error {
 	if r == nil {
 		return fmt.Errorf("command registry is nil")
@@ -41,11 +41,26 @@ func (r *InMemoryRegistry) Register(cmd Command) error {
 	if name == "" {
 		return fmt.Errorf("command name is empty")
 	}
-	if _, exists := r.commands[name]; exists {
-		return fmt.Errorf("command %q already registered", name)
+
+	identifiers := append([]string{name}, cmd.Metadata().Aliases...)
+	seen := make(map[string]struct{}, len(identifiers))
+	for _, identifier := range identifiers {
+		normalized := NormalizeName(identifier)
+		if normalized == "" {
+			return fmt.Errorf("command alias is empty")
+		}
+		if _, exists := seen[normalized]; exists {
+			return fmt.Errorf("command %q duplicates its own alias", normalized)
+		}
+		if _, exists := r.commands[normalized]; exists {
+			return fmt.Errorf("command %q already registered", normalized)
+		}
+		seen[normalized] = struct{}{}
 	}
 
-	r.commands[name] = cmd
+	for identifier := range seen {
+		r.commands[identifier] = cmd
+	}
 	r.order = append(r.order, name)
 	return nil
 }
