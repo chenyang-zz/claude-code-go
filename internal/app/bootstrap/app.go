@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
+	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
@@ -16,6 +17,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -57,6 +59,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
 
+	commandRegistry, err := newCommandRegistry(runner)
+	if err != nil {
+		return nil, err
+	}
+	runner.Commands = commandRegistry
+
 	if cfg.SessionDBPath != "" {
 		db, err := platformsqlite.Open(context.Background(), cfg.SessionDBPath)
 		if err != nil {
@@ -78,6 +86,21 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		Config: cfg,
 		Runner: runner,
 	}, nil
+}
+
+// newCommandRegistry wires the minimum slash commands available in the current migration stage.
+func newCommandRegistry(runner *repl.Runner) (command.Registry, error) {
+	registry := command.NewInMemoryRegistry()
+	if err := registry.Register(servicecommands.HelpCommand{Registry: registry}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ClearCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(repl.NewResumeCommandAdapter(runner)); err != nil {
+		return nil, err
+	}
+	return registry, nil
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.

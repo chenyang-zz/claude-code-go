@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
@@ -60,6 +61,18 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if app.Runner.ProjectPath != "" {
 		t.Fatalf("NewAppWithDependencies() runner project path = %q, want empty when loader does not supply one", app.Runner.ProjectPath)
 	}
+	if app.Runner.Commands == nil {
+		t.Fatal("NewAppWithDependencies() runner commands = nil, want slash registry")
+	}
+	if _, ok := app.Runner.Commands.Get("help"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /help command")
+	}
+	if _, ok := app.Runner.Commands.Get("clear"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /clear command")
+	}
+	if _, ok := app.Runner.Commands.Get("resume"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /resume adapter")
+	}
 }
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
@@ -79,5 +92,39 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 	}
 	if runtime.ApprovalService == nil {
 		t.Fatal("DefaultEngineFactory() approval service = nil, want injected service")
+	}
+}
+
+// TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
+func TestNewCommandRegistryRegistersResume(t *testing.T) {
+	registry, err := newCommandRegistry(nil)
+	if err != nil {
+		t.Fatalf("newCommandRegistry() error = %v", err)
+	}
+
+	cmds := registry.List()
+	if len(cmds) != 3 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 3", len(cmds))
+	}
+	if got := cmds[0].Metadata(); got != (command.Metadata{
+		Name:        "help",
+		Description: "Show help and available commands",
+		Usage:       "/help",
+	}) {
+		t.Fatalf("newCommandRegistry() first metadata = %#v, want help metadata", got)
+	}
+	if got := cmds[1].Metadata(); got != (command.Metadata{
+		Name:        "clear",
+		Description: "Clear conversation history and start a new session",
+		Usage:       "/clear",
+	}) {
+		t.Fatalf("newCommandRegistry() second metadata = %#v, want clear metadata", got)
+	}
+	if got := cmds[2].Metadata(); got != (command.Metadata{
+		Name:        "resume",
+		Description: "Resume a saved session and continue it with a new prompt",
+		Usage:       "/resume <session-id> <prompt>",
+	}) {
+		t.Fatalf("newCommandRegistry() third metadata = %#v, want resume metadata", got)
 	}
 }

@@ -6,12 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 )
 
@@ -71,6 +73,33 @@ func (r *recordingSessionRepository) LoadLatest(ctx context.Context, lookup core
 }
 
 var _ engine.Engine = (*recordingEngine)(nil)
+
+type staticCommand struct {
+	meta   command.Metadata
+	result command.Result
+}
+
+func (c staticCommand) Metadata() command.Metadata {
+	return c.meta
+}
+
+func (c staticCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
+	_ = ctx
+	_ = args
+	return c.result, nil
+}
+
+func registerSlashCommands(t *testing.T, runner *Runner, commands ...command.Command) {
+	t.Helper()
+
+	registry := command.NewInMemoryRegistry()
+	for _, cmd := range commands {
+		if err := registry.Register(cmd); err != nil {
+			t.Fatalf("Register(%q) error = %v", cmd.Metadata().Name, err)
+		}
+	}
+	runner.Commands = registry
+}
 
 // TestParseArgsParsesSlashCommand verifies slash input is split into command and body.
 func TestParseArgsParsesSlashCommand(t *testing.T) {
@@ -157,11 +186,19 @@ func TestRunnerRunForwardsPrompt(t *testing.T) {
 	}
 }
 
-// TestRunnerRunHandlesSlashPlaceholder verifies slash commands bypass the engine and render a stable placeholder.
-func TestRunnerRunHandlesSlashPlaceholder(t *testing.T) {
+// TestRunnerRunDispatchesRegisteredSlashCommand verifies slash commands are dispatched through the shared registry.
+func TestRunnerRunDispatchesRegisteredSlashCommand(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, staticCommand{
+		meta: command.Metadata{
+			Name:        "help",
+			Description: "show help",
+			Usage:       "/help",
+		},
+		result: command.Result{Output: "available commands"},
+	})
 
 	if err := runner.Run(context.Background(), []string{"/help"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -171,8 +208,112 @@ func TestRunnerRunHandlesSlashPlaceholder(t *testing.T) {
 		t.Fatalf("engine should not be called for slash command, got request %#v", eng.lastRequest)
 	}
 
-	if got := buf.String(); got != "Slash command /help is not supported yet.\n" {
-		t.Fatalf("Run() output = %q, want slash placeholder", got)
+	if got := buf.String(); got != "available commands\n" {
+		t.Fatalf("Run() output = %q, want registered slash command output", got)
+	}
+}
+
+// TestRunnerRunHelpCommandListsRegisteredCommands verifies the real /help command output matches the registry-backed support surface.
+func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+
+	registry := command.NewInMemoryRegistry()
+	if err := registry.Register(servicecommands.HelpCommand{Registry: registry}); err != nil {
+		t.Fatalf("Register(help) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.ClearCommand{}); err != nil {
+		t.Fatalf("Register(clear) error = %v", err)
+	}
+	if err := registry.Register(NewResumeCommandAdapter(runner)); err != nil {
+		t.Fatalf("Register(resume) error = %v", err)
+	}
+	runner.Commands = registry
+
+	if err := runner.Run(context.Background(), []string{"/help"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Usage: /resume <session-id> <prompt>\nSend plain text without a leading slash to start a normal prompt.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run() output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunClearStartsFreshSession verifies /clear switches the runner to a fresh session so the next prompt does not reuse old history.
+func TestRunnerRunClearStartsFreshSession(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "fresh reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("fresh prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("fresh reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		loadResult: coresession.Session{
+			ID: "session-old",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+	autosave := runtimesession.NewAutoSave(manager)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.SessionID = "session-old"
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+	runner.AutoSave = autosave
+	registerSlashCommands(t, runner, servicecommands.ClearCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/clear"}); err != nil {
+		t.Fatalf("Run(/clear) error = %v", err)
+	}
+
+	oldSessionID := "session-old"
+	if runner.SessionID == "" || runner.SessionID == oldSessionID {
+		t.Fatalf("Run(/clear) session id = %q, want fresh session id", runner.SessionID)
+	}
+	if got := buf.String(); got != "Started a new session.\n" {
+		t.Fatalf("Run(/clear) output = %q, want clear confirmation", got)
+	}
+
+	buf.Reset()
+	if err := runner.Run(context.Background(), []string{"fresh", "prompt"}); err != nil {
+		t.Fatalf("Run(prompt after clear) error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID != runner.SessionID {
+		t.Fatalf("Run(prompt after clear) session id = %q, want %q", eng.lastRequest.SessionID, runner.SessionID)
+	}
+	if len(eng.lastRequest.Messages) != 1 || eng.lastRequest.Messages[0].Content[0].Text != "fresh prompt" {
+		t.Fatalf("Run(prompt after clear) messages = %#v, want fresh prompt only", eng.lastRequest.Messages)
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("autosave saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].ID != runner.SessionID {
+		t.Fatalf("autosave saved session id = %q, want %q", repo.saved[0].ID, runner.SessionID)
 	}
 }
 
@@ -219,6 +360,7 @@ func TestRunnerRunResumeRestoresSessionAndRunsPrompt(t *testing.T) {
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
 	runner.SessionManager = manager
 	runner.AutoSave = autosave
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
 
 	if err := runner.Run(context.Background(), []string{"/resume", "session-2", "new", "prompt"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -251,6 +393,7 @@ func TestRunnerRunResumeSessionNotFound(t *testing.T) {
 	manager := runtimesession.NewManager(&recordingSessionRepository{loadErr: coresession.ErrSessionNotFound})
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
 	runner.SessionManager = manager
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
 
 	if err := runner.Run(context.Background(), []string{"/resume", "missing-session", "hello"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -269,6 +412,7 @@ func TestRunnerRunResumeRequiresPrompt(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
 
 	if err := runner.Run(context.Background(), []string{"/resume", "session-3"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -597,6 +741,7 @@ func TestRunnerRunResumeForksSession(t *testing.T) {
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
 	runner.SessionManager = manager
 	runner.AutoSave = autosave
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
 
 	if err := runner.Run(context.Background(), []string{"--fork-session", "/resume", "session-2", "new", "prompt"}); err != nil {
 		t.Fatalf("Run() error = %v", err)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -23,6 +24,8 @@ type Runner struct {
 	Engine engine.Engine
 	// Renderer handles console output for both engine events and slash placeholders.
 	Renderer *console.StreamRenderer
+	// Commands resolves registered slash handlers for REPL dispatch.
+	Commands command.Registry
 	// ProjectPath identifies the current workspace used for project-scoped session recovery.
 	ProjectPath string
 	// SessionID identifies the current logical CLI session.
@@ -63,10 +66,7 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 	})
 
 	if parsed.IsSlashCommand {
-		if parsed.Command == "resume" {
-			return r.runResumeCommand(ctx, parsed.Body, parsed.ForkSession)
-		}
-		return r.Renderer.RenderLine(fmt.Sprintf("Slash command /%s is not supported yet.", parsed.Command))
+		return r.runSlashCommand(ctx, parsed)
 	}
 
 	history, err := r.restoreHistory(ctx, parsed.ContinueLatest, parsed.ForkSession)
@@ -77,6 +77,46 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 		return err
 	}
 	return r.runPrompt(ctx, history, parsed.Body)
+}
+
+// runSlashCommand dispatches one parsed slash command through the registered command catalog.
+func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error {
+	if r == nil || r.Commands == nil {
+		return r.Renderer.RenderLine(fmt.Sprintf("Slash command /%s is not supported yet.", parsed.Command))
+	}
+
+	cmd, ok := r.Commands.Get(parsed.Command)
+	if !ok {
+		return r.Renderer.RenderLine(fmt.Sprintf("Slash command /%s is not supported yet.", parsed.Command))
+	}
+
+	logger.DebugCF("repl", "dispatching slash command", map[string]any{
+		"command":      parsed.Command,
+		"has_body":     parsed.Body != "",
+		"fork_session": parsed.ForkSession,
+	})
+
+	result, err := cmd.Execute(ctx, command.Args{
+		Raw: strings.Fields(parsed.Body),
+		Flags: map[string]string{
+			"fork_session": fmt.Sprintf("%t", parsed.ForkSession),
+		},
+		RawLine: parsed.Body,
+	})
+	if err != nil {
+		return err
+	}
+	if result.NewSessionID != "" {
+		r.SessionID = result.NewSessionID
+		logger.DebugCF("repl", "switched active session from slash command", map[string]any{
+			"command":    parsed.Command,
+			"session_id": r.SessionID,
+		})
+	}
+	if result.Output != "" {
+		return r.Renderer.RenderLine(result.Output)
+	}
+	return nil
 }
 
 // runResumeCommand restores one persisted session and immediately continues it with the provided prompt tail.
