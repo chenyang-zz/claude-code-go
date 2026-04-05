@@ -80,6 +80,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("doctor"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /doctor command")
 	}
+	if _, ok := app.Runner.Commands.Get("session"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /session command")
+	}
 }
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
@@ -110,8 +113,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 5 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 5", len(cmds))
+	if len(cmds) != 6 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 6", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -149,5 +152,12 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		Usage:       "/doctor",
 	}) {
 		t.Fatalf("newCommandRegistry() fifth metadata = %#v, want doctor metadata", got)
+	}
+	if got := cmds[5].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "session",
+		Description: "Show remote session URL and QR code",
+		Usage:       "/session",
+	}) {
+		t.Fatalf("newCommandRegistry() sixth metadata = %#v, want session metadata", got)
 	}
 }

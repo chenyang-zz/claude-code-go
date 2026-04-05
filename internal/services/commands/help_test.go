@@ -57,13 +57,20 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "session",
+		Description: "Show remote session URL and QR code",
+		Usage:       "/session",
+	}}); err != nil {
+		t.Fatalf("Register(session) error = %v", err)
+	}
 
 	result, err := HelpCommand{Registry: registry}.Execute(context.Background(), command.Args{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

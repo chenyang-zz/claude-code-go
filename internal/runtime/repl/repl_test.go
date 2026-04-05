@@ -264,15 +264,35 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.DoctorCommand{}); err != nil {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
+		t.Fatalf("Register(session) error = %v", err)
+	}
 	runner.Commands = registry
 
 	if err := runner.Run(context.Background(), []string{"/help"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session and continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunSessionCommandReportsRemoteFallback verifies /session is routed through the shared registry and emits the stable non-remote message.
+func TestRunnerRunSessionCommandReportsRemoteFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.SessionCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/session"}); err != nil {
+		t.Fatalf("Run(/session) error = %v", err)
+	}
+
+	want := "Not in remote mode. Start with `claude --remote` to use this command.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/session) output = %q, want %q", got, want)
 	}
 }
 
