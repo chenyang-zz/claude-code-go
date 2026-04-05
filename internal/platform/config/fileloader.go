@@ -64,6 +64,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	_ = ctx
 
 	cfg := coreconfig.DefaultConfig()
+	cfg.ProjectPath = l.CWD
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	for _, path := range l.settingsPaths() {

@@ -1,6 +1,9 @@
 package config
 
 func Merge(base, override Config) Config {
+	if override.ProjectPath != "" {
+		base.ProjectPath = override.ProjectPath
+	}
 	if override.Model != "" {
 		base.Model = override.Model
 	}

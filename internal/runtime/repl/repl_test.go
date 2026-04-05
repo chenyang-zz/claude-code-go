@@ -41,20 +41,24 @@ func (r *recordingSessionRepository) Save(ctx context.Context, session coresessi
 
 func (r *recordingSessionRepository) Load(ctx context.Context, id string) (coresession.Session, error) {
 	_ = ctx
-	_ = id
 	if r.loadErr != nil {
 		return coresession.Session{}, r.loadErr
+	}
+	if r.loadResult.ID == "" && r.latestResult.ID == id {
+		return r.latestResult.Clone(), nil
 	}
 	return r.loadResult.Clone(), nil
 }
 
 func (r *recordingSessionRepository) LoadLatest(ctx context.Context, lookup coresession.Lookup) (coresession.Session, error) {
 	_ = ctx
-	_ = lookup
 	if r.latestErr != nil {
 		return coresession.Session{}, r.latestErr
 	}
 	if r.latestResult.ID != "" || len(r.latestResult.Messages) != 0 || r.latestResult.ProjectPath != "" {
+		if r.latestResult.ProjectPath != lookup.ProjectPath {
+			return coresession.Session{}, coresession.ErrSessionNotFound
+		}
 		return r.latestResult.Clone(), nil
 	}
 	if r.loadErr != nil {
@@ -306,5 +310,122 @@ func TestRunnerRunRestoresAndAutosavesHistory(t *testing.T) {
 	}
 	if len(repo.saved[0].Messages) != 4 {
 		t.Fatalf("autosave saved message count = %d, want 4", len(repo.saved[0].Messages))
+	}
+}
+
+// TestRunnerRunResumesLatestSessionForProject verifies normal prompt execution restores the latest session in the current project.
+func TestRunnerRunResumesLatestSessionForProject(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "latest reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("follow-up")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("latest reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		latestResult: coresession.Session{
+			ID:          "session-latest",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+	autosave := runtimesession.NewAutoSave(manager)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+	runner.AutoSave = autosave
+
+	if err := runner.Run(context.Background(), []string{"follow-up"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID != "session-latest" {
+		t.Fatalf("Run() request.SessionID = %q, want session-latest", eng.lastRequest.SessionID)
+	}
+	if len(eng.lastRequest.Messages) != 3 {
+		t.Fatalf("Run() request message count = %d, want 3", len(eng.lastRequest.Messages))
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("autosave saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].ID != "session-latest" {
+		t.Fatalf("autosave saved session id = %q, want session-latest", repo.saved[0].ID)
+	}
+	if repo.saved[0].ProjectPath != "/repo" {
+		t.Fatalf("autosave saved project path = %q, want /repo", repo.saved[0].ProjectPath)
+	}
+}
+
+// TestRunnerRunStartsFreshProjectScopedSession verifies a missing latest session falls back to a new project-scoped session.
+func TestRunnerRunStartsFreshProjectScopedSession(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "fresh reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("fresh prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("fresh reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{latestErr: coresession.ErrSessionNotFound}
+	manager := runtimesession.NewManager(repo)
+	autosave := runtimesession.NewAutoSave(manager)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+	runner.AutoSave = autosave
+
+	if err := runner.Run(context.Background(), []string{"fresh", "prompt"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID == "" {
+		t.Fatal("Run() request.SessionID = empty, want generated session id")
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("autosave saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].ProjectPath != "/repo" {
+		t.Fatalf("autosave saved project path = %q, want /repo", repo.saved[0].ProjectPath)
 	}
 }

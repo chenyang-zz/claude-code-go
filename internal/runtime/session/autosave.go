@@ -21,9 +21,14 @@ func NewAutoSave(manager *Manager) *AutoSave {
 
 // PersistHistory overwrites the target session with the latest normalized conversation history.
 func (a *AutoSave) PersistHistory(ctx context.Context, sessionID string, history conversation.History) (coresession.Snapshot, error) {
+	return a.PersistHistoryInProject(ctx, sessionID, "", history)
+}
+
+// PersistHistoryInProject overwrites the target session history while preserving project scope for latest-session lookup.
+func (a *AutoSave) PersistHistoryInProject(ctx context.Context, sessionID string, projectPath string, history conversation.History) (coresession.Snapshot, error) {
 	if a == nil || a.Manager == nil {
 		return coresession.Snapshot{}, fmt.Errorf("session autosave manager is not configured")
 	}
 
-	return a.Manager.ReplaceMessages(ctx, sessionID, history.Messages)
+	return a.Manager.ReplaceMessagesInProject(ctx, sessionID, projectPath, history.Messages)
 }

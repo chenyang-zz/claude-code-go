@@ -55,6 +55,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
 	runner := repl.NewRunner(eng, renderer)
+	runner.ProjectPath = cfg.ProjectPath
 
 	if cfg.SessionDBPath != "" {
 		db, err := platformsqlite.Open(context.Background(), cfg.SessionDBPath)

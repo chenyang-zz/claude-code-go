@@ -57,6 +57,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if app.Config.Provider != "anthropic" || app.Runner == nil {
 		t.Fatalf("NewAppWithDependencies() = %#v, want anthropic config and runner", app)
 	}
+	if app.Runner.ProjectPath != "" {
+		t.Fatalf("NewAppWithDependencies() runner project path = %q, want empty when loader does not supply one", app.Runner.ProjectPath)
+	}
 }
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.

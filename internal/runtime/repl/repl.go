@@ -23,6 +23,8 @@ type Runner struct {
 	Engine engine.Engine
 	// Renderer handles console output for both engine events and slash placeholders.
 	Renderer *console.StreamRenderer
+	// ProjectPath identifies the current workspace used for project-scoped session recovery.
+	ProjectPath string
 	// SessionID identifies the current logical CLI session.
 	SessionID string
 	// SessionManager restores previously persisted conversation history when available.
@@ -34,9 +36,8 @@ type Runner struct {
 // NewRunner builds a runner from explicit dependencies.
 func NewRunner(eng engine.Engine, renderer *console.StreamRenderer) *Runner {
 	return &Runner{
-		Engine:    eng,
-		Renderer:  renderer,
-		SessionID: uuid.NewString(),
+		Engine:   eng,
+		Renderer: renderer,
 	}
 }
 
@@ -90,8 +91,12 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string) error {
 	}
 
 	r.SessionID = sessionID
+	if snapshot.Session.ProjectPath != "" {
+		r.ProjectPath = snapshot.Session.ProjectPath
+	}
 	logger.DebugCF("repl", "resumed session from slash command", map[string]any{
 		"session_id":    sessionID,
+		"project_path":  r.ProjectPath,
 		"message_count": len(snapshot.Session.Messages),
 	})
 	return r.runPrompt(ctx, conversation.History{Messages: snapshot.Session.Messages}, prompt)
@@ -120,7 +125,7 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		return err
 	}
 	if r.AutoSave != nil {
-		if _, err := r.AutoSave.PersistHistory(ctx, r.sessionID(), finalHistory); err != nil {
+		if _, err := r.AutoSave.PersistHistoryInProject(ctx, r.sessionID(), r.ProjectPath, finalHistory); err != nil {
 			return err
 		}
 	}
@@ -153,13 +158,34 @@ func (r *Runner) restoreHistory(ctx context.Context) (conversation.History, erro
 		return conversation.History{}, nil
 	}
 
-	snapshot, err := r.SessionManager.Start(ctx, r.sessionID())
+	if r.SessionID == "" && r.ProjectPath != "" {
+		snapshot, err := r.SessionManager.ResumeLatest(ctx, r.ProjectPath)
+		if err == nil {
+			r.SessionID = snapshot.Session.ID
+			logger.DebugCF("repl", "restored latest session history for turn", map[string]any{
+				"session_id":    r.sessionID(),
+				"project_path":  r.ProjectPath,
+				"message_count": len(snapshot.Session.Messages),
+				"resumed":       snapshot.Resumed,
+			})
+			return conversation.History{Messages: snapshot.Session.Messages}, nil
+		}
+		if !errors.Is(err, coresession.ErrSessionNotFound) {
+			return conversation.History{}, err
+		}
+		logger.DebugCF("repl", "no latest session found for project; starting fresh session", map[string]any{
+			"project_path": r.ProjectPath,
+		})
+	}
+
+	snapshot, err := r.SessionManager.StartInProject(ctx, r.sessionID(), r.ProjectPath)
 	if err != nil {
 		return conversation.History{}, err
 	}
 
 	logger.DebugCF("repl", "restored session history for turn", map[string]any{
 		"session_id":    r.sessionID(),
+		"project_path":  r.ProjectPath,
 		"message_count": len(snapshot.Session.Messages),
 		"resumed":       snapshot.Resumed,
 	})
@@ -195,8 +221,11 @@ func (r *Runner) renderAndCaptureHistory(stream event.Stream) (conversation.Hist
 
 // sessionID returns the stable runner session identifier, defaulting to a generated UUID when unset.
 func (r *Runner) sessionID() string {
-	if r != nil && r.SessionID != "" {
-		return r.SessionID
+	if r == nil {
+		return uuid.NewString()
 	}
-	return uuid.NewString()
+	if r.SessionID == "" {
+		r.SessionID = uuid.NewString()
+	}
+	return r.SessionID
 }

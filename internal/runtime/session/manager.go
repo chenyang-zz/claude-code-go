@@ -29,6 +29,11 @@ func NewManager(repository coresession.Repository) *Manager {
 
 // Start returns an existing session snapshot when available or initializes a new empty session.
 func (m *Manager) Start(ctx context.Context, id string) (coresession.Snapshot, error) {
+	return m.StartInProject(ctx, id, "")
+}
+
+// StartInProject returns an existing session snapshot when available or initializes a new project-scoped session.
+func (m *Manager) StartInProject(ctx context.Context, id string, projectPath string) (coresession.Snapshot, error) {
 	if id == "" {
 		return coresession.Snapshot{}, fmt.Errorf("missing session id")
 	}
@@ -42,11 +47,13 @@ func (m *Manager) Start(ctx context.Context, id string) (coresession.Snapshot, e
 	}
 
 	session := coresession.Session{
-		ID:        id,
-		UpdatedAt: m.now(),
+		ID:          id,
+		ProjectPath: projectPath,
+		UpdatedAt:   m.now(),
 	}
 	logger.DebugCF("session_manager", "initialized new session", map[string]any{
-		"session_id": id,
+		"session_id":   id,
+		"project_path": projectPath,
 	})
 
 	return coresession.Snapshot{
@@ -108,11 +115,16 @@ func (m *Manager) ResumeLatest(ctx context.Context, projectPath string) (coreses
 
 // ReplaceMessages overwrites the stored session history with the supplied normalized messages.
 func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []message.Message) (coresession.Snapshot, error) {
+	return m.ReplaceMessagesInProject(ctx, id, "", messages)
+}
+
+// ReplaceMessagesInProject overwrites the stored session history while preserving or seeding project scope.
+func (m *Manager) ReplaceMessagesInProject(ctx context.Context, id string, projectPath string, messages []message.Message) (coresession.Snapshot, error) {
 	if id == "" {
 		return coresession.Snapshot{}, fmt.Errorf("missing session id")
 	}
 
-	snapshot, err := m.Start(ctx, id)
+	snapshot, err := m.StartInProject(ctx, id, projectPath)
 	if err != nil {
 		return coresession.Snapshot{}, err
 	}
@@ -121,6 +133,9 @@ func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []mes
 	copy(cloned, messages)
 
 	snapshot.Session.Messages = cloned
+	if snapshot.Session.ProjectPath == "" {
+		snapshot.Session.ProjectPath = projectPath
+	}
 	snapshot.Session.UpdatedAt = m.now()
 
 	if err := m.save(ctx, snapshot.Session); err != nil {
@@ -129,6 +144,7 @@ func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []mes
 
 	logger.DebugCF("session_manager", "saved session snapshot", map[string]any{
 		"session_id":    id,
+		"project_path":  snapshot.Session.ProjectPath,
 		"message_count": len(messages),
 	})
 

@@ -50,6 +50,9 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	if cfg.Provider != "anthropic" || cfg.Model != "env-model" || cfg.APIKey != "env-key" || cfg.ApprovalMode != "bypassPermissions" || cfg.SessionDBPath != "/tmp/env-session.db" {
 		t.Fatalf("Load() = %#v, want provider anthropic, model env-model, api key env-key, approval mode bypassPermissions, session db /tmp/env-session.db", cfg)
 	}
+	if cfg.ProjectPath != projectDir {
+		t.Fatalf("Load() project path = %q, want %q", cfg.ProjectPath, projectDir)
+	}
 }
 
 // TestFileLoaderLoadDefaultsSessionDBPath verifies the loader derives a stable default session DB path from the home directory.

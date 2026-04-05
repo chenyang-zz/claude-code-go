@@ -2,6 +2,8 @@ package config
 
 // Config stores the minimal runtime configuration currently consumed by the Go host.
 type Config struct {
+	// ProjectPath identifies the current workspace path used for project-scoped runtime behavior.
+	ProjectPath string
 	// Model overrides the default model selection when provided.
 	Model string
 	// Provider selects which backend provider implementation to use.
