@@ -10,6 +10,8 @@ import (
 type Session struct {
 	// ID identifies one logical CLI conversation.
 	ID string
+	// ProjectPath identifies the workspace path this session belongs to.
+	ProjectPath string
 	// Messages stores the normalized conversation history that should be restored on resume.
 	Messages []message.Message
 	// UpdatedAt records when the session snapshot was last overwritten.
@@ -22,8 +24,9 @@ func (s Session) Clone() Session {
 	copy(cloned, s.Messages)
 
 	return Session{
-		ID:        s.ID,
-		Messages:  cloned,
-		UpdatedAt: s.UpdatedAt,
+		ID:          s.ID,
+		ProjectPath: s.ProjectPath,
+		Messages:    cloned,
+		UpdatedAt:   s.UpdatedAt,
 	}
 }

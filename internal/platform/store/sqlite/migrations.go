@@ -14,8 +14,13 @@ var sessionMigrations = []Migration{
 		SQL: `
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
+	project_path TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL,
 	messages_json TEXT NOT NULL
 );`,
+	},
+	{
+		Name: "create_sessions_project_path_updated_at_index",
+		SQL:  `CREATE INDEX IF NOT EXISTS idx_sessions_project_path_updated_at ON sessions(project_path, updated_at DESC);`,
 	},
 }

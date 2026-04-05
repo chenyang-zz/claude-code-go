@@ -21,9 +21,11 @@ type recordingEngine struct {
 }
 
 type recordingSessionRepository struct {
-	loadResult coresession.Session
-	loadErr    error
-	saved      []coresession.Session
+	loadResult   coresession.Session
+	loadErr      error
+	latestResult coresession.Session
+	latestErr    error
+	saved        []coresession.Session
 }
 
 func (e *recordingEngine) Run(ctx context.Context, req conversation.RunRequest) (event.Stream, error) {
@@ -40,6 +42,21 @@ func (r *recordingSessionRepository) Save(ctx context.Context, session coresessi
 func (r *recordingSessionRepository) Load(ctx context.Context, id string) (coresession.Session, error) {
 	_ = ctx
 	_ = id
+	if r.loadErr != nil {
+		return coresession.Session{}, r.loadErr
+	}
+	return r.loadResult.Clone(), nil
+}
+
+func (r *recordingSessionRepository) LoadLatest(ctx context.Context, lookup coresession.Lookup) (coresession.Session, error) {
+	_ = ctx
+	_ = lookup
+	if r.latestErr != nil {
+		return coresession.Session{}, r.latestErr
+	}
+	if r.latestResult.ID != "" || len(r.latestResult.Messages) != 0 || r.latestResult.ProjectPath != "" {
+		return r.latestResult.Clone(), nil
+	}
 	if r.loadErr != nil {
 		return coresession.Session{}, r.loadErr
 	}

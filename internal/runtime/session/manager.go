@@ -81,6 +81,31 @@ func (m *Manager) Resume(ctx context.Context, id string) (coresession.Snapshot, 
 	}, nil
 }
 
+// ResumeLatest loads the most recently updated session for one project scope.
+func (m *Manager) ResumeLatest(ctx context.Context, projectPath string) (coresession.Snapshot, error) {
+	if projectPath == "" {
+		return coresession.Snapshot{}, fmt.Errorf("missing project path")
+	}
+	if m.Repository == nil {
+		return coresession.Snapshot{}, coresession.ErrSessionNotFound
+	}
+
+	session, err := m.Repository.LoadLatest(ctx, coresession.Lookup{ProjectPath: projectPath})
+	if err != nil {
+		return coresession.Snapshot{}, err
+	}
+
+	logger.DebugCF("session_manager", "restored latest persisted session", map[string]any{
+		"session_id":    session.ID,
+		"project_path":  session.ProjectPath,
+		"message_count": len(session.Messages),
+	})
+	return coresession.Snapshot{
+		Session: session.Clone(),
+		Resumed: true,
+	}, nil
+}
+
 // ReplaceMessages overwrites the stored session history with the supplied normalized messages.
 func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []message.Message) (coresession.Snapshot, error) {
 	if id == "" {
@@ -108,6 +133,32 @@ func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []mes
 	})
 
 	return snapshot.Clone(), nil
+}
+
+// Fork clones one restored session into a new target session identifier and persists it immediately.
+func (m *Manager) Fork(ctx context.Context, source coresession.Session, targetID string) (coresession.Snapshot, error) {
+	if targetID == "" {
+		return coresession.Snapshot{}, fmt.Errorf("missing target session id")
+	}
+
+	forked := source.Clone()
+	forked.ID = targetID
+	forked.UpdatedAt = m.now()
+
+	if err := m.save(ctx, forked); err != nil {
+		return coresession.Snapshot{}, err
+	}
+
+	logger.DebugCF("session_manager", "forked session snapshot", map[string]any{
+		"source_session_id": source.ID,
+		"target_session_id": targetID,
+		"project_path":      forked.ProjectPath,
+		"message_count":     len(forked.Messages),
+	})
+	return coresession.Snapshot{
+		Session: forked.Clone(),
+		Resumed: true,
+	}, nil
 }
 
 func (m *Manager) save(ctx context.Context, session coresession.Session) error {

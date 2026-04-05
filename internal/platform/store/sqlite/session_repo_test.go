@@ -18,7 +18,8 @@ func TestSessionRepositorySaveAndLoadRoundTrip(t *testing.T) {
 
 	now := time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC)
 	input := coresession.Session{
-		ID: "session-1",
+		ID:          "session-1",
+		ProjectPath: "/repo-a",
 		Messages: []message.Message{
 			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
 			{Role: message.RoleAssistant, Content: []message.ContentPart{
@@ -43,6 +44,9 @@ func TestSessionRepositorySaveAndLoadRoundTrip(t *testing.T) {
 	if got.ID != input.ID {
 		t.Fatalf("Load() id = %q, want %q", got.ID, input.ID)
 	}
+	if got.ProjectPath != input.ProjectPath {
+		t.Fatalf("Load() project path = %q, want %q", got.ProjectPath, input.ProjectPath)
+	}
 	if !got.UpdatedAt.Equal(now) {
 		t.Fatalf("Load() updated_at = %v, want %v", got.UpdatedAt, now)
 	}
@@ -65,12 +69,14 @@ func TestSessionRepositorySaveOverwritesExistingSnapshot(t *testing.T) {
 	repo := NewSessionRepository(db)
 
 	first := coresession.Session{
-		ID:        "session-2",
-		Messages:  []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("first")}}},
-		UpdatedAt: time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
+		ID:          "session-2",
+		ProjectPath: "/repo-a",
+		Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("first")}}},
+		UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
 	}
 	second := coresession.Session{
-		ID: "session-2",
+		ID:          "session-2",
+		ProjectPath: "/repo-b",
 		Messages: []message.Message{
 			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("second")}},
 			{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("reply")}},
@@ -93,8 +99,55 @@ func TestSessionRepositorySaveOverwritesExistingSnapshot(t *testing.T) {
 	if len(got.Messages) != 2 {
 		t.Fatalf("Load() message count = %d, want 2", len(got.Messages))
 	}
+	if got.ProjectPath != "/repo-b" {
+		t.Fatalf("Load() project path = %q, want /repo-b", got.ProjectPath)
+	}
 	if got.Messages[0].Content[0].Text != "second" {
 		t.Fatalf("Load() first message = %q, want second", got.Messages[0].Content[0].Text)
+	}
+}
+
+// TestSessionRepositoryLoadLatestByProject verifies project-scoped latest lookups return the newest matching session.
+func TestSessionRepositoryLoadLatestByProject(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-1",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("first")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-2",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("second")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-3",
+			ProjectPath: "/repo-b",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("other")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.LoadLatest(context.Background(), coresession.Lookup{ProjectPath: "/repo-a"})
+	if err != nil {
+		t.Fatalf("LoadLatest() error = %v", err)
+	}
+
+	if got.ID != "session-2" {
+		t.Fatalf("LoadLatest() id = %q, want session-2", got.ID)
+	}
+	if got.ProjectPath != "/repo-a" {
+		t.Fatalf("LoadLatest() project path = %q, want /repo-a", got.ProjectPath)
 	}
 }
 

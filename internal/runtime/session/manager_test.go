@@ -12,9 +12,11 @@ import (
 )
 
 type stubRepository struct {
-	loadResult coresession.Session
-	loadErr    error
-	saved      []coresession.Session
+	loadResult   coresession.Session
+	loadErr      error
+	latestResult coresession.Session
+	latestErr    error
+	saved        []coresession.Session
 }
 
 func (r *stubRepository) Save(ctx context.Context, session coresession.Session) error {
@@ -30,6 +32,15 @@ func (r *stubRepository) Load(ctx context.Context, id string) (coresession.Sessi
 		return coresession.Session{}, r.loadErr
 	}
 	return r.loadResult.Clone(), nil
+}
+
+func (r *stubRepository) LoadLatest(ctx context.Context, lookup coresession.Lookup) (coresession.Session, error) {
+	_ = ctx
+	_ = lookup
+	if r.latestErr != nil {
+		return coresession.Session{}, r.latestErr
+	}
+	return r.latestResult.Clone(), nil
 }
 
 // TestManagerStartCreatesNewSession verifies the manager initializes an empty session when nothing is persisted yet.
@@ -58,7 +69,8 @@ func TestManagerStartCreatesNewSession(t *testing.T) {
 func TestManagerResumeLoadsExistingSession(t *testing.T) {
 	repo := &stubRepository{
 		loadResult: coresession.Session{
-			ID: "session-2",
+			ID:          "session-2",
+			ProjectPath: "/repo",
 			Messages: []message.Message{
 				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hi")}},
 			},
@@ -76,6 +88,35 @@ func TestManagerResumeLoadsExistingSession(t *testing.T) {
 	}
 	if len(snapshot.Session.Messages) != 1 {
 		t.Fatalf("Resume() message count = %d, want 1", len(snapshot.Session.Messages))
+	}
+	if snapshot.Session.ProjectPath != "/repo" {
+		t.Fatalf("Resume() project path = %q, want /repo", snapshot.Session.ProjectPath)
+	}
+}
+
+// TestManagerResumeLatestLoadsExistingSession verifies project-scoped latest-session queries are bridged through the manager.
+func TestManagerResumeLatestLoadsExistingSession(t *testing.T) {
+	repo := &stubRepository{
+		latestResult: coresession.Session{
+			ID:          "session-latest",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("welcome back")}},
+			},
+		},
+	}
+	manager := NewManager(repo)
+
+	snapshot, err := manager.ResumeLatest(context.Background(), "/repo")
+	if err != nil {
+		t.Fatalf("ResumeLatest() error = %v", err)
+	}
+
+	if !snapshot.Resumed {
+		t.Fatalf("ResumeLatest() resumed = false, want true")
+	}
+	if snapshot.Session.ID != "session-latest" {
+		t.Fatalf("ResumeLatest() session id = %q, want session-latest", snapshot.Session.ID)
 	}
 }
 
@@ -115,6 +156,43 @@ func TestManagerResumePropagatesRepositoryErrors(t *testing.T) {
 	_, err := manager.Resume(context.Background(), "session-4")
 	if err == nil || err.Error() != "boom" {
 		t.Fatalf("Resume() error = %v, want boom", err)
+	}
+}
+
+// TestManagerForkPersistsNewTargetSession verifies forking preserves history while switching to a new session id.
+func TestManagerForkPersistsNewTargetSession(t *testing.T) {
+	now := time.Date(2026, 4, 5, 10, 0, 0, 0, time.UTC)
+	repo := &stubRepository{}
+	manager := NewManager(repo)
+	manager.Now = func() time.Time { return now }
+
+	source := coresession.Session{
+		ID:          "session-source",
+		ProjectPath: "/repo",
+		Messages: []message.Message{
+			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("carry over")}},
+		},
+	}
+
+	snapshot, err := manager.Fork(context.Background(), source, "session-forked")
+	if err != nil {
+		t.Fatalf("Fork() error = %v", err)
+	}
+
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].ID != "session-forked" {
+		t.Fatalf("saved id = %q, want session-forked", repo.saved[0].ID)
+	}
+	if repo.saved[0].ProjectPath != "/repo" {
+		t.Fatalf("saved project path = %q, want /repo", repo.saved[0].ProjectPath)
+	}
+	if !repo.saved[0].UpdatedAt.Equal(now) {
+		t.Fatalf("saved updated_at = %v, want %v", repo.saved[0].UpdatedAt, now)
+	}
+	if snapshot.Session.ID != "session-forked" {
+		t.Fatalf("snapshot id = %q, want session-forked", snapshot.Session.ID)
 	}
 }
 

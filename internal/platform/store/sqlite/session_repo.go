@@ -37,12 +37,14 @@ func (r *SessionRepository) Save(ctx context.Context, session coresession.Sessio
 
 	_, err = r.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, updated_at, messages_json)
-VALUES (?, ?, ?)
+		`INSERT INTO sessions (id, project_path, updated_at, messages_json)
+VALUES (?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
+	project_path = excluded.project_path,
 	updated_at = excluded.updated_at,
 	messages_json = excluded.messages_json`,
 		session.ID,
+		session.ProjectPath,
 		session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		string(messagesJSON),
 	)
@@ -66,13 +68,14 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 
 	row := r.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT updated_at, messages_json FROM sessions WHERE id = ?`,
+		`SELECT project_path, updated_at, messages_json FROM sessions WHERE id = ?`,
 		id,
 	)
 
+	var projectPath string
 	var updatedAtText string
 	var messagesJSON string
-	if err := row.Scan(&updatedAtText, &messagesJSON); err != nil {
+	if err := row.Scan(&projectPath, &updatedAtText, &messagesJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return coresession.Session{}, coresession.ErrSessionNotFound
 		}
@@ -95,8 +98,63 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 		"path":          r.DB.Path,
 	})
 	return coresession.Session{
-		ID:        id,
-		Messages:  messages,
-		UpdatedAt: updatedAt,
+		ID:          id,
+		ProjectPath: projectPath,
+		Messages:    messages,
+		UpdatedAt:   updatedAt,
+	}, nil
+}
+
+// LoadLatest restores the most recently updated session within one project scope.
+func (r *SessionRepository) LoadLatest(ctx context.Context, lookup coresession.Lookup) (coresession.Session, error) {
+	if r == nil || r.DB == nil || r.DB.SQL == nil {
+		return coresession.Session{}, fmt.Errorf("sqlite session repository is not initialized")
+	}
+	if lookup.ProjectPath == "" {
+		return coresession.Session{}, fmt.Errorf("missing project path")
+	}
+
+	row := r.DB.SQL.QueryRowContext(
+		ctx,
+		`SELECT id, project_path, updated_at, messages_json
+FROM sessions
+WHERE project_path = ?
+ORDER BY updated_at DESC, id DESC
+LIMIT 1`,
+		lookup.ProjectPath,
+	)
+
+	var sessionID string
+	var projectPath string
+	var updatedAtText string
+	var messagesJSON string
+	if err := row.Scan(&sessionID, &projectPath, &updatedAtText, &messagesJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return coresession.Session{}, coresession.ErrSessionNotFound
+		}
+		return coresession.Session{}, fmt.Errorf("load latest session for %s: %w", lookup.ProjectPath, err)
+	}
+
+	updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtText)
+	if err != nil {
+		return coresession.Session{}, fmt.Errorf("parse latest session %s updated_at: %w", sessionID, err)
+	}
+
+	var messages []message.Message
+	if err := json.Unmarshal([]byte(messagesJSON), &messages); err != nil {
+		return coresession.Session{}, fmt.Errorf("decode latest session %s messages: %w", sessionID, err)
+	}
+
+	logger.DebugCF("sqlite_session_repo", "loaded latest session snapshot", map[string]any{
+		"session_id":    sessionID,
+		"project_path":  projectPath,
+		"message_count": len(messages),
+		"path":          r.DB.Path,
+	})
+	return coresession.Session{
+		ID:          sessionID,
+		ProjectPath: projectPath,
+		Messages:    messages,
+		UpdatedAt:   updatedAt,
 	}, nil
 }
