@@ -50,6 +50,7 @@ const (
 	resumeNotConfiguredMessage = "Resume command is not available because session storage is not configured."
 	resumeNoSessionsMessage    = "No conversations found to resume."
 	resumeMultipleMatchesUsage = "Use /resume <session-id> <prompt> to continue one of them."
+	resumeCrossProjectUsage    = "For another project, change to that directory and use /resume <session-id> <prompt> there."
 	continueNotConfigured      = "Continue command is not available because session storage is not configured."
 	continueNotFoundMessage    = "No conversation found to continue."
 )
@@ -175,11 +176,8 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 		return r.Renderer.RenderLine(resumeUsageMessage)
 	}
 
-	summaries, err := r.SessionManager.Search(ctx, r.ProjectPath, query, 10)
+	summaries, err := r.SessionManager.SearchAllProjects(ctx, query, 10)
 	if err != nil {
-		if strings.Contains(err.Error(), "missing project path") {
-			return r.Renderer.RenderLine(resumeNoSessionsMessage)
-		}
 		return err
 	}
 	if len(summaries) == 0 {
@@ -190,16 +188,34 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 			fmt.Sprintf("Found %d conversations matching %s.", len(summaries), query),
 			"Matching conversations:",
 		}
+		hasCrossProject := false
 		for _, summary := range summaries {
+			if isCrossProjectSummary(r.ProjectPath, summary) {
+				hasCrossProject = true
+			}
 			lines = append(lines, formatRecentSessionLine(summary))
 		}
 		lines = append(lines, resumeMultipleMatchesUsage)
+		if hasCrossProject {
+			lines = append(lines, resumeCrossProjectUsage)
+		}
 		return r.Renderer.RenderLine(strings.Join(lines, "\n"))
 	}
 
-	r.SessionID = summaries[0].ID
-	if summaries[0].ProjectPath != "" {
-		r.ProjectPath = summaries[0].ProjectPath
+	summary := summaries[0]
+	if isCrossProjectSummary(r.ProjectPath, summary) {
+		lines := []string{
+			fmt.Sprintf("Found conversation %s in another project.", summary.ID),
+			formatRecentSessionLine(summary),
+			"Run it from that project directory:",
+			fmt.Sprintf("  cd %s && cc /resume %s <prompt>", quoteShellPath(summary.ProjectPath), summary.ID),
+		}
+		return r.Renderer.RenderLine(strings.Join(lines, "\n"))
+	}
+
+	r.SessionID = summary.ID
+	if summary.ProjectPath != "" {
+		r.ProjectPath = summary.ProjectPath
 	}
 	logger.DebugCF("repl", "selected session from resume search", map[string]any{
 		"session_id":   r.SessionID,
@@ -214,11 +230,8 @@ func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
 		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
 	}
 
-	summaries, err := r.SessionManager.ListRecent(ctx, r.ProjectPath, 5)
+	summaries, err := r.SessionManager.ListRecentAllProjects(ctx, 10)
 	if err != nil {
-		if strings.Contains(err.Error(), "missing project path") {
-			return r.Renderer.RenderLine(resumeNoSessionsMessage)
-		}
 		return err
 	}
 	if len(summaries) == 0 {
@@ -226,10 +239,26 @@ func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
 	}
 
 	lines := []string{"Recent conversations:"}
-	for _, summary := range summaries {
+	currentProject, otherProjects := partitionSummariesByProject(r.ProjectPath, summaries)
+	for _, summary := range currentProject {
 		lines = append(lines, formatRecentSessionLine(summary))
 	}
-	lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
+	if len(otherProjects) > 0 {
+		if len(currentProject) > 0 {
+			lines = append(lines, "Other projects:")
+		}
+		for _, summary := range otherProjects {
+			lines = append(lines, formatRecentSessionLine(summary))
+		}
+	}
+	if len(currentProject) == 0 && len(otherProjects) > 0 {
+		lines = append(lines, resumeCrossProjectUsage)
+	} else {
+		lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
+		if len(otherProjects) > 0 {
+			lines = append(lines, resumeCrossProjectUsage)
+		}
+	}
 	return r.Renderer.RenderLine(strings.Join(lines, "\n"))
 }
 
@@ -332,6 +361,39 @@ func formatRecentSessionLine(summary coresession.Summary) string {
 	}
 
 	return fmt.Sprintf("- %s | %s%s | %s", updatedAt, preview, projectHint, summary.ID)
+}
+
+// partitionSummariesByProject keeps current-project sessions ahead of cross-project sessions in `/resume` output.
+func partitionSummariesByProject(projectPath string, summaries []coresession.Summary) ([]coresession.Summary, []coresession.Summary) {
+	var currentProject []coresession.Summary
+	var otherProjects []coresession.Summary
+	for _, summary := range summaries {
+		if isCrossProjectSummary(projectPath, summary) {
+			otherProjects = append(otherProjects, summary)
+			continue
+		}
+		currentProject = append(currentProject, summary)
+	}
+	return currentProject, otherProjects
+}
+
+// isCrossProjectSummary reports whether one summary belongs to a different project than the active REPL workspace.
+func isCrossProjectSummary(projectPath string, summary coresession.Summary) bool {
+	if strings.TrimSpace(summary.ProjectPath) == "" {
+		return false
+	}
+	if strings.TrimSpace(projectPath) == "" {
+		return true
+	}
+	return filepath.Clean(summary.ProjectPath) != filepath.Clean(projectPath)
+}
+
+// quoteShellPath keeps the cross-project resume hint shell-safe without pulling shell formatting into lower layers.
+func quoteShellPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "."
+	}
+	return "'" + strings.ReplaceAll(filepath.Clean(path), "'", `'\''`) + "'"
 }
 
 // restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.

@@ -141,6 +141,29 @@ func (m *Manager) ListRecent(ctx context.Context, projectPath string, limit int)
 	return summaries, nil
 }
 
+// ListRecentAllProjects returns recent session summaries across every persisted project.
+func (m *Manager) ListRecentAllProjects(ctx context.Context, limit int) ([]coresession.Summary, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if m.Repository == nil {
+		return nil, nil
+	}
+
+	summaries, err := m.Repository.ListRecent(ctx, coresession.Lookup{
+		AllProjects: true,
+		Limit:       limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugCF("session_manager", "listed persisted sessions across all projects", map[string]any{
+		"limit": limit,
+		"count": len(summaries),
+	})
+	return summaries, nil
+}
+
 // Search returns project-scoped session summaries matching one free-text query.
 func (m *Manager) Search(ctx context.Context, projectPath string, query string, limit int) ([]coresession.Summary, error) {
 	if projectPath == "" {
@@ -169,6 +192,34 @@ func (m *Manager) Search(ctx context.Context, projectPath string, query string, 
 		"query":        query,
 		"limit":        limit,
 		"count":        len(summaries),
+	})
+	return summaries, nil
+}
+
+// SearchAllProjects returns session summaries matching one free-text query across every persisted project.
+func (m *Manager) SearchAllProjects(ctx context.Context, query string, limit int) ([]coresession.Summary, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("missing query")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if m.Repository == nil {
+		return nil, nil
+	}
+
+	summaries, err := m.Repository.Search(ctx, coresession.Lookup{
+		AllProjects: true,
+		Limit:       limit,
+		Query:       query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugCF("session_manager", "searched persisted sessions across all projects", map[string]any{
+		"query": query,
+		"limit": limit,
+		"count": len(summaries),
 	})
 	return summaries, nil
 }

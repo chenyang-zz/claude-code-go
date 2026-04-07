@@ -93,9 +93,10 @@ func (r *recordingSessionRepository) ListRecent(ctx context.Context, lookup core
 	}
 	var filtered []coresession.Summary
 	for _, summary := range r.listRecent {
-		if summary.ProjectPath == lookup.ProjectPath {
-			filtered = append(filtered, summary)
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
+			continue
 		}
+		filtered = append(filtered, summary)
 		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
 			break
 		}
@@ -110,7 +111,7 @@ func (r *recordingSessionRepository) Search(ctx context.Context, lookup coresess
 	}
 	var filtered []coresession.Summary
 	for _, summary := range r.searchResult {
-		if summary.ProjectPath != lookup.ProjectPath {
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
 			continue
 		}
 		filtered = append(filtered, summary)
@@ -358,6 +359,31 @@ func TestRunnerRunResumeWithoutArgsListsRecentSessions(t *testing.T) {
 	}
 }
 
+// TestRunnerRunResumeWithoutArgsIncludesOtherProjects verifies bare /resume now surfaces cross-project sessions with a stable hint.
+func TestRunnerRunResumeWithoutArgsIncludesOtherProjects(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-9", ProjectPath: "/other", Preview: "other repo prompt", UpdatedAt: time.Date(2026, 4, 5, 11, 30, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	want := "Recent conversations:\n- 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\nOther projects:\n- 2026-04-05 11:30 UTC | other repo prompt [other] | session-9\nUse /resume <session-id> <prompt> to continue one.\nFor another project, change to that directory and use /resume <session-id> <prompt> there.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume) output = %q, want cross-project recent list", got)
+	}
+}
+
 // TestRunnerRunResumeSearchResolvesUniqueMatch verifies `/resume <search-term>` can switch the active session without requiring a prompt.
 func TestRunnerRunResumeSearchResolvesUniqueMatch(t *testing.T) {
 	var buf bytes.Buffer
@@ -384,6 +410,33 @@ func TestRunnerRunResumeSearchResolvesUniqueMatch(t *testing.T) {
 	}
 }
 
+// TestRunnerRunResumeSearchShowsCrossProjectHint verifies unique matches in another project produce a stable resume hint instead of switching projects implicitly.
+func TestRunnerRunResumeSearchShowsCrossProjectHint(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-9", ProjectPath: "/other/repo", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume deploy) error = %v", err)
+	}
+
+	if runner.SessionID != "" {
+		t.Fatalf("Run(/resume deploy) session id = %q, want empty because cross-project matches should not switch sessions", runner.SessionID)
+	}
+	want := "Found conversation session-9 in another project.\n- 2026-04-05 12:00 UTC | deploy failure [repo] | session-9\nRun it from that project directory:\n  cd '/other/repo' && cc /resume session-9 <prompt>\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume deploy) output = %q, want cross-project resume hint", got)
+	}
+}
+
 // TestRunnerRunResumeSearchShowsDisambiguation verifies multiple text matches are rendered as a stable text-only candidate list.
 func TestRunnerRunResumeSearchShowsDisambiguation(t *testing.T) {
 	var buf bytes.Buffer
@@ -406,6 +459,31 @@ func TestRunnerRunResumeSearchShowsDisambiguation(t *testing.T) {
 	want := "Found 2 conversations matching deploy.\nMatching conversations:\n- 2026-04-05 12:00 UTC | deploy failure [repo] | session-3\n- 2026-04-05 11:00 UTC | deploy checklist [repo] | session-2\nUse /resume <session-id> <prompt> to continue one of them.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/resume deploy) output = %q, want search disambiguation list", got)
+	}
+}
+
+// TestRunnerRunResumeSearchShowsCrossProjectDisambiguation verifies mixed-project multiple matches append the stable cross-project hint.
+func TestRunnerRunResumeSearchShowsCrossProjectDisambiguation(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-9", ProjectPath: "/other", Preview: "deploy checklist", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume deploy) error = %v", err)
+	}
+
+	want := "Found 2 conversations matching deploy.\nMatching conversations:\n- 2026-04-05 12:00 UTC | deploy failure [repo] | session-3\n- 2026-04-05 11:00 UTC | deploy checklist [other] | session-9\nUse /resume <session-id> <prompt> to continue one of them.\nFor another project, change to that directory and use /resume <session-id> <prompt> there.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume deploy) output = %q, want mixed-project disambiguation list", got)
 	}
 }
 

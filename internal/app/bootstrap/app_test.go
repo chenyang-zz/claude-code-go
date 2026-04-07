@@ -133,8 +133,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	if got := cmds[2].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "resume",
 		Aliases:     []string{"continue"},
-		Description: "Resume a saved session and continue it with a new prompt",
-		Usage:       "/resume <session-id> <prompt>",
+		Description: "Resume a saved session by search or continue it with a new prompt",
+		Usage:       "/resume <search-term> | /resume <session-id> <prompt>",
 	}) {
 		t.Fatalf("newCommandRegistry() third metadata = %#v, want resume metadata", got)
 	}

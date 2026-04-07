@@ -169,38 +169,43 @@ func (r *SessionRepository) ListRecent(ctx context.Context, lookup coresession.L
 	if r == nil || r.DB == nil || r.DB.SQL == nil {
 		return nil, fmt.Errorf("sqlite session repository is not initialized")
 	}
-	if lookup.ProjectPath == "" {
+	if !lookup.AllProjects && lookup.ProjectPath == "" {
 		return nil, fmt.Errorf("missing project path")
 	}
 	if lookup.Limit <= 0 {
 		return nil, fmt.Errorf("missing limit")
 	}
 
-	rows, err := r.DB.SQL.QueryContext(
-		ctx,
-		`SELECT id, project_path, summary_text, updated_at, messages_json
+	query := `SELECT id, project_path, summary_text, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC, id DESC
-LIMIT ?`,
-		lookup.ProjectPath,
-		lookup.Limit,
-	)
+LIMIT ?`
+	args := []any{lookup.ProjectPath, lookup.Limit}
+	if lookup.AllProjects {
+		query = `SELECT id, project_path, summary_text, updated_at, messages_json
+FROM sessions
+ORDER BY updated_at DESC, id DESC
+LIMIT ?`
+		args = []any{lookup.Limit}
+	}
+
+	rows, err := r.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list recent sessions for %s: %w", lookup.ProjectPath, err)
+		return nil, fmt.Errorf("list recent sessions for %s: %w", lookupLabel(lookup), err)
 	}
 	defer rows.Close()
 
-	summaries, err := scanSessionSummaries(rows, lookup.ProjectPath)
+	summaries, err := scanSessionSummaries(rows)
 	if err != nil {
 		return nil, err
 	}
 
 	logger.DebugCF("sqlite_session_repo", "listed recent session summaries", map[string]any{
-		"project_path": lookup.ProjectPath,
-		"limit":        lookup.Limit,
-		"count":        len(summaries),
-		"path":         r.DB.Path,
+		"project_scope": lookupLabel(lookup),
+		"limit":         lookup.Limit,
+		"count":         len(summaries),
+		"path":          r.DB.Path,
 	})
 	return summaries, nil
 }
@@ -210,7 +215,7 @@ func (r *SessionRepository) Search(ctx context.Context, lookup coresession.Looku
 	if r == nil || r.DB == nil || r.DB.SQL == nil {
 		return nil, fmt.Errorf("sqlite session repository is not initialized")
 	}
-	if lookup.ProjectPath == "" {
+	if !lookup.AllProjects && lookup.ProjectPath == "" {
 		return nil, fmt.Errorf("missing project path")
 	}
 	if lookup.Limit <= 0 {
@@ -222,9 +227,7 @@ func (r *SessionRepository) Search(ctx context.Context, lookup coresession.Looku
 	}
 
 	pattern := "%" + strings.ToLower(query) + "%"
-	rows, err := r.DB.SQL.QueryContext(
-		ctx,
-		`SELECT id, project_path, summary_text, updated_at, messages_json
+	statement := `SELECT id, project_path, summary_text, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 	AND (
@@ -232,30 +235,47 @@ WHERE project_path = ?
 		OR LOWER(COALESCE(NULLIF(summary_text, ''), messages_json, '')) LIKE ?
 	)
 ORDER BY updated_at DESC, id DESC
-LIMIT ?`,
-		lookup.ProjectPath,
-		pattern,
-		pattern,
-		lookup.Limit,
-	)
+LIMIT ?`
+	args := []any{lookup.ProjectPath, pattern, pattern, lookup.Limit}
+	if lookup.AllProjects {
+		statement = `SELECT id, project_path, summary_text, updated_at, messages_json
+FROM sessions
+WHERE (
+	LOWER(id) LIKE ?
+	OR LOWER(COALESCE(NULLIF(summary_text, ''), messages_json, '')) LIKE ?
+)
+ORDER BY updated_at DESC, id DESC
+LIMIT ?`
+		args = []any{pattern, pattern, lookup.Limit}
+	}
+
+	rows, err := r.DB.SQL.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search sessions for %s: %w", lookup.ProjectPath, err)
+		return nil, fmt.Errorf("search sessions for %s: %w", lookupLabel(lookup), err)
 	}
 	defer rows.Close()
 
-	summaries, err := scanSessionSummaries(rows, lookup.ProjectPath)
+	summaries, err := scanSessionSummaries(rows)
 	if err != nil {
 		return nil, err
 	}
 
 	logger.DebugCF("sqlite_session_repo", "searched session summaries", map[string]any{
-		"project_path": lookup.ProjectPath,
-		"query":        query,
-		"limit":        lookup.Limit,
-		"count":        len(summaries),
-		"path":         r.DB.Path,
+		"project_scope": lookupLabel(lookup),
+		"query":         query,
+		"limit":         lookup.Limit,
+		"count":         len(summaries),
+		"path":          r.DB.Path,
 	})
 	return summaries, nil
+}
+
+// lookupLabel returns one stable scope label for logs and error messages.
+func lookupLabel(lookup coresession.Lookup) string {
+	if lookup.AllProjects {
+		return "all-projects"
+	}
+	return lookup.ProjectPath
 }
 
 // resolveSummaryPreview keeps old rows readable by falling back to messages_json when summary_text is empty.
@@ -275,7 +295,7 @@ func resolveSummaryPreview(summaryText string, messagesJSON string) (string, err
 }
 
 // scanSessionSummaries normalizes summary rows shared by recent-list and search queries.
-func scanSessionSummaries(rows *sql.Rows, projectPath string) ([]coresession.Summary, error) {
+func scanSessionSummaries(rows *sql.Rows) ([]coresession.Summary, error) {
 	var summaries []coresession.Summary
 	for rows.Next() {
 		var summary coresession.Summary
@@ -283,7 +303,7 @@ func scanSessionSummaries(rows *sql.Rows, projectPath string) ([]coresession.Sum
 		var updatedAtText string
 		var messagesJSON string
 		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &summaryText, &updatedAtText, &messagesJSON); err != nil {
-			return nil, fmt.Errorf("scan session summary for %s: %w", projectPath, err)
+			return nil, fmt.Errorf("scan session summary: %w", err)
 		}
 		updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtText)
 		if err != nil {
@@ -298,7 +318,7 @@ func scanSessionSummaries(rows *sql.Rows, projectPath string) ([]coresession.Sum
 		summaries = append(summaries, summary)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate session summaries for %s: %w", projectPath, err)
+		return nil, fmt.Errorf("iterate session summaries: %w", err)
 	}
 	return summaries, nil
 }

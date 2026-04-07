@@ -25,6 +25,8 @@ type Summary struct {
 type Lookup struct {
 	// ProjectPath limits the query to one workspace path.
 	ProjectPath string
+	// AllProjects widens the query to every persisted workspace instead of one project path.
+	AllProjects bool
 	// Limit bounds recent-session queries.
 	Limit int
 	// Query carries the minimum free-text search term used by `/resume <search-term>`.

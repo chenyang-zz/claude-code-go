@@ -49,24 +49,38 @@ func (r *stubRepository) LoadLatest(ctx context.Context, lookup coresession.Look
 
 func (r *stubRepository) ListRecent(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
 	_ = ctx
-	_ = lookup
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
-	cloned := make([]coresession.Summary, len(r.listRecent))
-	copy(cloned, r.listRecent)
-	return cloned, nil
+	var filtered []coresession.Summary
+	for _, summary := range r.listRecent {
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
+			continue
+		}
+		filtered = append(filtered, summary)
+		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
+			break
+		}
+	}
+	return filtered, nil
 }
 
 func (r *stubRepository) Search(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
 	_ = ctx
-	_ = lookup
 	if r.searchErr != nil {
 		return nil, r.searchErr
 	}
-	cloned := make([]coresession.Summary, len(r.searchResult))
-	copy(cloned, r.searchResult)
-	return cloned, nil
+	var filtered []coresession.Summary
+	for _, summary := range r.searchResult {
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
+			continue
+		}
+		filtered = append(filtered, summary)
+		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
+			break
+		}
+	}
+	return filtered, nil
 }
 
 // TestManagerStartCreatesNewSession verifies the manager initializes an empty session when nothing is persisted yet.
@@ -187,6 +201,50 @@ func TestManagerSearchReturnsSummaries(t *testing.T) {
 	}
 	if summaries[0].ID != "session-2" || summaries[1].ID != "session-1" {
 		t.Fatalf("Search() ids = %#v, want session-2 then session-1", []string{summaries[0].ID, summaries[1].ID})
+	}
+}
+
+// TestManagerListRecentAllProjectsReturnsSummaries verifies all-project recent-session queries are bridged through the manager.
+func TestManagerListRecentAllProjectsReturnsSummaries(t *testing.T) {
+	repo := &stubRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo-b", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-2", ProjectPath: "/repo-a", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	manager := NewManager(repo)
+
+	summaries, err := manager.ListRecentAllProjects(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListRecentAllProjects() error = %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("ListRecentAllProjects() len = %d, want 2", len(summaries))
+	}
+	if summaries[0].ID != "session-3" || summaries[1].ID != "session-2" {
+		t.Fatalf("ListRecentAllProjects() ids = %#v, want session-3 then session-2", []string{summaries[0].ID, summaries[1].ID})
+	}
+}
+
+// TestManagerSearchAllProjectsReturnsSummaries verifies all-project search queries are bridged through the manager.
+func TestManagerSearchAllProjectsReturnsSummaries(t *testing.T) {
+	repo := &stubRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo-b", Preview: "deploy issue"},
+			{ID: "session-2", ProjectPath: "/repo-a", Preview: "deploy fix"},
+		},
+	}
+	manager := NewManager(repo)
+
+	summaries, err := manager.SearchAllProjects(context.Background(), "deploy", 10)
+	if err != nil {
+		t.Fatalf("SearchAllProjects() error = %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("SearchAllProjects() len = %d, want 2", len(summaries))
+	}
+	if summaries[0].ID != "session-3" || summaries[1].ID != "session-2" {
+		t.Fatalf("SearchAllProjects() ids = %#v, want session-3 then session-2", []string{summaries[0].ID, summaries[1].ID})
 	}
 }
 

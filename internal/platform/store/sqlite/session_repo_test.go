@@ -229,6 +229,43 @@ func TestSessionRepositoryListRecentFallsBackToMessagesJSON(t *testing.T) {
 	}
 }
 
+// TestSessionRepositoryListRecentAllProjects verifies all-project recent-session queries return sessions across project boundaries.
+func TestSessionRepositoryListRecentAllProjects(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-1",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("repo a prompt")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-2",
+			ProjectPath: "/repo-b",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("repo b prompt")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.ListRecent(context.Background(), coresession.Lookup{AllProjects: true, Limit: 5})
+	if err != nil {
+		t.Fatalf("ListRecent(all-projects) error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListRecent(all-projects) len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-2" || got[1].ID != "session-1" {
+		t.Fatalf("ListRecent(all-projects) ids = %#v, want session-2 then session-1", []string{got[0].ID, got[1].ID})
+	}
+}
+
 // TestSessionRepositorySearchByProject verifies project-scoped session search matches summary preview and session id.
 func TestSessionRepositorySearchByProject(t *testing.T) {
 	db := openTestDB(t)
@@ -302,6 +339,43 @@ func TestSessionRepositorySearchFallsBackToMessagesJSON(t *testing.T) {
 	}
 	if got[0].ID != session.ID {
 		t.Fatalf("Search() id = %q, want %q", got[0].ID, session.ID)
+	}
+}
+
+// TestSessionRepositorySearchAllProjects verifies all-project search queries can match sessions outside the active project.
+func TestSessionRepositorySearchAllProjects(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-repo-a",
+			ProjectPath: "/repo-a",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo a")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-repo-b",
+			ProjectPath: "/repo-b",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo b")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.Search(context.Background(), coresession.Lookup{AllProjects: true, Query: "deploy", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search(all-projects) error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Search(all-projects) len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-repo-b" || got[1].ID != "session-repo-a" {
+		t.Fatalf("Search(all-projects) ids = %#v, want session-repo-b then session-repo-a", []string{got[0].ID, got[1].ID})
 	}
 }
 
