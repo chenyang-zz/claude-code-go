@@ -11,6 +11,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -58,6 +59,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
+	runner.WorktreeLister = platformgit.NewClient()
 
 	commandRegistry, err := newCommandRegistry(cfg, runner)
 	if err != nil {

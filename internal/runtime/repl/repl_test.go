@@ -22,6 +22,11 @@ type recordingEngine struct {
 	stream      event.Stream
 }
 
+type stubWorktreeLister struct {
+	paths []string
+	err   error
+}
+
 type recordingSessionRepository struct {
 	loadResult   coresession.Session
 	loadErr      error
@@ -37,6 +42,12 @@ type recordingSessionRepository struct {
 func (e *recordingEngine) Run(ctx context.Context, req conversation.RunRequest) (event.Stream, error) {
 	e.lastRequest = req
 	return e.stream, nil
+}
+
+func (s stubWorktreeLister) ListWorktrees(ctx context.Context, cwd string) ([]string, error) {
+	_ = ctx
+	_ = cwd
+	return append([]string(nil), s.paths...), s.err
 }
 
 func (r *recordingSessionRepository) Save(ctx context.Context, session coresession.Session) error {
@@ -434,6 +445,36 @@ func TestRunnerRunResumeSearchShowsCrossProjectHint(t *testing.T) {
 	want := "Found conversation session-9 in another project.\n- 2026-04-05 12:00 UTC | deploy failure [repo] | session-9\nRun it from that project directory:\n  cd '/other/repo' && cc /resume session-9 <prompt>\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/resume deploy) output = %q, want cross-project resume hint", got)
+	}
+}
+
+// TestRunnerRunResumeSearchResumesSameRepoWorktree verifies unique same-repo worktree matches resume directly without a cd hint.
+func TestRunnerRunResumeSearchResumesSameRepoWorktree(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-wt", ProjectPath: "/repo-wt/feature", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	runner.WorktreeLister = stubWorktreeLister{paths: []string{"/repo", "/repo-wt"}}
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume deploy) error = %v", err)
+	}
+
+	if runner.SessionID != "session-wt" {
+		t.Fatalf("Run(/resume deploy) session id = %q, want session-wt", runner.SessionID)
+	}
+	if runner.ProjectPath != "/repo-wt/feature" {
+		t.Fatalf("Run(/resume deploy) project path = %q, want /repo-wt/feature", runner.ProjectPath)
+	}
+	if got := buf.String(); got != "Resumed conversation session-wt.\n" {
+		t.Fatalf("Run(/resume deploy) output = %q, want resumed confirmation", got)
 	}
 }
 

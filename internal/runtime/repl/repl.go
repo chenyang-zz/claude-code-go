@@ -19,6 +19,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
+// WorktreeLister resolves Git worktree paths for the current workspace without coupling runtime to one platform implementation.
+type WorktreeLister interface {
+	// ListWorktrees returns visible worktree paths for cwd, or an empty slice when none are available.
+	ListWorktrees(ctx context.Context, cwd string) ([]string, error)
+}
+
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
 type Runner struct {
 	// Engine handles normal prompt execution.
@@ -35,6 +41,8 @@ type Runner struct {
 	SessionManager *runtimesession.Manager
 	// AutoSave persists the final normalized history after each successful turn.
 	AutoSave *runtimesession.AutoSave
+	// WorktreeLister resolves same-repo worktree membership for cross-project resume decisions.
+	WorktreeLister WorktreeLister
 }
 
 // NewRunner builds a runner from explicit dependencies.
@@ -204,6 +212,24 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 
 	summary := summaries[0]
 	if isCrossProjectSummary(r.ProjectPath, summary) {
+		sameRepoWorktree, err := r.isSameRepoWorktree(ctx, summary)
+		if err != nil {
+			return err
+		}
+		if sameRepoWorktree {
+			r.SessionID = summary.ID
+			if summary.ProjectPath != "" {
+				r.ProjectPath = summary.ProjectPath
+			}
+			logger.DebugCF("repl", "selected same-repo worktree session from resume search", map[string]any{
+				"session_id":    r.SessionID,
+				"project_path":  r.ProjectPath,
+				"query":         query,
+				"same_repo_wt":  true,
+				"cross_project": true,
+			})
+			return r.Renderer.RenderLine(fmt.Sprintf("Resumed conversation %s.", r.SessionID))
+		}
 		lines := []string{
 			fmt.Sprintf("Found conversation %s in another project.", summary.ID),
 			formatRecentSessionLine(summary),
@@ -394,6 +420,43 @@ func quoteShellPath(path string) string {
 		return "."
 	}
 	return "'" + strings.ReplaceAll(filepath.Clean(path), "'", `'\''`) + "'"
+}
+
+// isSameRepoWorktree reports whether a cross-project summary belongs to one of the current repository's worktrees.
+func (r *Runner) isSameRepoWorktree(ctx context.Context, summary coresession.Summary) (bool, error) {
+	if r == nil || r.WorktreeLister == nil {
+		return false, nil
+	}
+	if strings.TrimSpace(r.ProjectPath) == "" || strings.TrimSpace(summary.ProjectPath) == "" {
+		return false, nil
+	}
+
+	worktrees, err := r.WorktreeLister.ListWorktrees(ctx, r.ProjectPath)
+	if err != nil {
+		return false, err
+	}
+	if len(worktrees) == 0 {
+		return false, nil
+	}
+	for _, worktree := range worktrees {
+		if pathMatchesWorktree(worktree, summary.ProjectPath) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// pathMatchesWorktree reports whether target equals one worktree path or is nested below it.
+func pathMatchesWorktree(worktree string, target string) bool {
+	cleanWorktree := filepath.Clean(strings.TrimSpace(worktree))
+	cleanTarget := filepath.Clean(strings.TrimSpace(target))
+	if cleanWorktree == "." || cleanWorktree == "" || cleanTarget == "." || cleanTarget == "" {
+		return false
+	}
+	if cleanWorktree == cleanTarget {
+		return true
+	}
+	return strings.HasPrefix(cleanTarget, cleanWorktree+string(filepath.Separator))
 }
 
 // restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.
