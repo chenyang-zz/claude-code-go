@@ -387,6 +387,45 @@ func TestSessionRepositorySearchAllProjects(t *testing.T) {
 	}
 }
 
+// TestSessionRepositorySearchMatchesCustomTitle verifies search queries can fuzzy-match custom titles in recency order.
+func TestSessionRepositorySearchMatchesCustomTitle(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-title-old",
+			ProjectPath: "/repo-a",
+			CustomTitle: "Deploy follow-up",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("unrelated preview")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-title-new",
+			ProjectPath: "/repo-a",
+			CustomTitle: "Deploy retrospective",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("still unrelated")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.Search(context.Background(), coresession.Lookup{ProjectPath: "/repo-a", Query: "deploy", Limit: 5})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Search() len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-title-new" || got[1].ID != "session-title-old" {
+		t.Fatalf("Search() ids = %#v, want session-title-new then session-title-old", []string{got[0].ID, got[1].ID})
+	}
+}
+
 // TestSessionRepositoryFindByCustomTitle verifies exact title lookups return matching sessions in recency order.
 func TestSessionRepositoryFindByCustomTitle(t *testing.T) {
 	db := openTestDB(t)

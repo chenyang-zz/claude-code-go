@@ -513,6 +513,32 @@ func TestRunnerRunResumeSearchPrefersExactCustomTitle(t *testing.T) {
 	}
 }
 
+// TestRunnerRunResumeSearchMatchesFuzzyCustomTitle verifies non-exact title queries can still restore a session through the shared search path.
+func TestRunnerRunResumeSearchMatchesFuzzyCustomTitle(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		searchResult: []coresession.Summary{
+			{ID: "session-8", ProjectPath: "/repo", CustomTitle: "Deploy retrospective", Preview: "unrelated preview", UpdatedAt: time.Date(2026, 4, 5, 13, 30, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "deploy"}); err != nil {
+		t.Fatalf("Run(/resume fuzzy title) error = %v", err)
+	}
+
+	if runner.SessionID != "session-8" {
+		t.Fatalf("Run(/resume fuzzy title) session id = %q, want session-8", runner.SessionID)
+	}
+	if got := buf.String(); got != "Resumed conversation session-8.\n" {
+		t.Fatalf("Run(/resume fuzzy title) output = %q, want resumed confirmation", got)
+	}
+}
+
 // TestRunnerRunResumeSearchShowsCrossProjectHint verifies unique matches in another project produce a stable resume hint instead of switching projects implicitly.
 func TestRunnerRunResumeSearchShowsCrossProjectHint(t *testing.T) {
 	var buf bytes.Buffer
