@@ -338,13 +338,16 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.SeedSessionsCommand{}); err != nil {
+		t.Fatalf("Register(seed-sessions) error = %v", err)
+	}
 	runner.Commands = registry
 
 	if err := runner.Run(context.Background(), []string{"/help"}); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}

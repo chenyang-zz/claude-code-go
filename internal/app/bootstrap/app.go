@@ -9,6 +9,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
@@ -63,12 +64,6 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	runner.Input = os.Stdin
 	runner.WorktreeLister = platformgit.NewClient()
 
-	commandRegistry, err := newCommandRegistry(cfg, runner)
-	if err != nil {
-		return nil, err
-	}
-	runner.Commands = commandRegistry
-
 	if cfg.SessionDBPath != "" {
 		db, err := platformsqlite.Open(context.Background(), cfg.SessionDBPath)
 		if err != nil {
@@ -79,6 +74,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		runner.SessionManager = manager
 		runner.AutoSave = runtimesession.NewAutoSave(manager)
 	}
+
+	commandRegistry, err := newCommandRegistry(cfg, runner)
+	if err != nil {
+		return nil, err
+	}
+	runner.Commands = commandRegistry
 
 	logger.DebugCF("bootstrap", "constructed application", map[string]any{
 		"provider":            cfg.Provider,
@@ -95,6 +96,10 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
 func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
+	var sessionRepository coresession.Repository
+	if runner != nil && runner.SessionManager != nil {
+		sessionRepository = runner.SessionManager.Repository
+	}
 	if err := registry.Register(servicecommands.HelpCommand{Registry: registry}); err != nil {
 		return nil, err
 	}
@@ -114,6 +119,12 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.SeedSessionsCommand{
+		Repository:  sessionRepository,
+		ProjectPath: cfg.ProjectPath,
+	}); err != nil {
 		return nil, err
 	}
 	return registry, nil

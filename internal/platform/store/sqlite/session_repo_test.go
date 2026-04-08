@@ -241,36 +241,26 @@ func TestSessionRepositoryListRecentFallsBackToMessagesJSON(t *testing.T) {
 func TestSessionRepositoryListRecentAllProjects(t *testing.T) {
 	db := openTestDB(t)
 	repo := NewSessionRepository(db)
-
-	sessions := []coresession.Session{
-		{
-			ID:          "session-1",
-			ProjectPath: "/repo-a",
-			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("repo a prompt")}}},
-			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
-		},
-		{
-			ID:          "session-2",
-			ProjectPath: "/repo-b",
-			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("repo b prompt")}}},
-			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
-		},
-	}
-	for _, session := range sessions {
-		if err := repo.Save(context.Background(), session); err != nil {
-			t.Fatalf("Save(%s) error = %v", session.ID, err)
-		}
-	}
+	sessions := seedResumeFixtureSessions(t, repo)
 
 	got, err := repo.ListRecent(context.Background(), coresession.Lookup{AllProjects: true, Limit: 5})
 	if err != nil {
 		t.Fatalf("ListRecent(all-projects) error = %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("ListRecent(all-projects) len = %d, want 2", len(got))
+	if len(got) != 4 {
+		t.Fatalf("ListRecent(all-projects) len = %d, want 4", len(got))
 	}
-	if got[0].ID != "session-2" || got[1].ID != "session-1" {
-		t.Fatalf("ListRecent(all-projects) ids = %#v, want session-2 then session-1", []string{got[0].ID, got[1].ID})
+	wantIDs := []string{
+		sessions[3].ID,
+		sessions[2].ID,
+		sessions[1].ID,
+		sessions[0].ID,
+	}
+	gotIDs := []string{got[0].ID, got[1].ID, got[2].ID, got[3].ID}
+	for index := range wantIDs {
+		if gotIDs[index] != wantIDs[index] {
+			t.Fatalf("ListRecent(all-projects) ids = %#v, want %#v", gotIDs, wantIDs)
+		}
 	}
 }
 
@@ -354,36 +344,26 @@ func TestSessionRepositorySearchFallsBackToMessagesJSON(t *testing.T) {
 func TestSessionRepositorySearchAllProjects(t *testing.T) {
 	db := openTestDB(t)
 	repo := NewSessionRepository(db)
-
-	sessions := []coresession.Session{
-		{
-			ID:          "session-repo-a",
-			ProjectPath: "/repo-a",
-			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo a")}}},
-			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
-		},
-		{
-			ID:          "session-repo-b",
-			ProjectPath: "/repo-b",
-			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo b")}}},
-			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
-		},
-	}
-	for _, session := range sessions {
-		if err := repo.Save(context.Background(), session); err != nil {
-			t.Fatalf("Save(%s) error = %v", session.ID, err)
-		}
-	}
+	sessions := seedResumeFixtureSessions(t, repo)
 
 	got, err := repo.Search(context.Background(), coresession.Lookup{AllProjects: true, Query: "deploy", Limit: 5})
 	if err != nil {
 		t.Fatalf("Search(all-projects) error = %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("Search(all-projects) len = %d, want 2", len(got))
+	if len(got) != 4 {
+		t.Fatalf("Search(all-projects) len = %d, want 4", len(got))
 	}
-	if got[0].ID != "session-repo-b" || got[1].ID != "session-repo-a" {
-		t.Fatalf("Search(all-projects) ids = %#v, want session-repo-b then session-repo-a", []string{got[0].ID, got[1].ID})
+	wantIDs := []string{
+		sessions[3].ID,
+		sessions[2].ID,
+		sessions[1].ID,
+		sessions[0].ID,
+	}
+	gotIDs := []string{got[0].ID, got[1].ID, got[2].ID, got[3].ID}
+	for index := range wantIDs {
+		if gotIDs[index] != wantIDs[index] {
+			t.Fatalf("Search(all-projects) ids = %#v, want %#v", gotIDs, wantIDs)
+		}
 	}
 }
 
@@ -463,6 +443,48 @@ func TestSessionRepositoryFindByCustomTitle(t *testing.T) {
 	if got[0].ID != "session-repo-b" || got[1].ID != "session-repo-a" {
 		t.Fatalf("FindByCustomTitle() ids = %#v, want session-repo-b then session-repo-a", []string{got[0].ID, got[1].ID})
 	}
+}
+
+// seedResumeFixtureSessions writes a reusable cross-project `/resume` fixture into one repository.
+func seedResumeFixtureSessions(t *testing.T, repo *SessionRepository) []coresession.Session {
+	t.Helper()
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-repo-a-old",
+			ProjectPath: "/repo-a",
+			CustomTitle: "Deploy fix",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo a old")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 13, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-repo-b-old",
+			ProjectPath: "/repo-b",
+			CustomTitle: "Deploy fix",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo b old")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-repo-a-new",
+			ProjectPath: "/repo-a",
+			CustomTitle: "Deploy retrospective",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo a new")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-repo-b-new",
+			ProjectPath: "/repo-b",
+			CustomTitle: "Deploy checklist",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo b new")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 16, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+	return sessions
 }
 
 // TestSessionRepositoryLoadMissingSession verifies unknown session ids map to the shared not-found error.

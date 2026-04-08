@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -15,6 +16,42 @@ import (
 
 type stubLoader struct {
 	cfg coreconfig.Config
+}
+
+// TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage verifies /seed-sessions sees the repository once session storage is wired.
+func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testing.T) {
+	loader := stubLoader{
+		cfg: coreconfig.Config{
+			Provider:      "anthropic",
+			Model:         "claude-sonnet-4-5",
+			SessionDBPath: filepath.Join(t.TempDir(), "sessions.db"),
+		},
+	}
+
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, error) {
+		_ = cfg
+		return stubEngine{}, nil
+	})
+	if err != nil {
+		t.Fatalf("NewAppWithDependencies() error = %v", err)
+	}
+
+	cmd, ok := app.Runner.Commands.Get("seed-sessions")
+	if !ok {
+		t.Fatal("runner commands missing /seed-sessions command")
+	}
+
+	result, err := cmd.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("seed-sessions Execute() error = %v", err)
+	}
+	if result.Output == servicecommandsSeedNotConfiguredMessageForTest() {
+		t.Fatalf("seed-sessions output = %q, want configured storage path", result.Output)
+	}
+}
+
+func servicecommandsSeedNotConfiguredMessageForTest() string {
+	return "Seed command is not available because session storage is not configured."
 }
 
 func (l stubLoader) Load(ctx context.Context) (coreconfig.Config, error) {
@@ -86,6 +123,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("session"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /session command")
 	}
+	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
+	}
 }
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
@@ -116,8 +156,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 7 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 7", len(cmds))
+	if len(cmds) != 8 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 8", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -169,5 +209,12 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		Usage:       "/session",
 	}) {
 		t.Fatalf("newCommandRegistry() seventh metadata = %#v, want session metadata", got)
+	}
+	if got := cmds[7].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "seed-sessions",
+		Description: "Insert demo persisted sessions for /resume testing",
+		Usage:       "/seed-sessions",
+	}) {
+		t.Fatalf("newCommandRegistry() eighth metadata = %#v, want seed-sessions metadata", got)
 	}
 }
