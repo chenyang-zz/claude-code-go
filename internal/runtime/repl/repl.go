@@ -1,10 +1,13 @@
 package repl
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -41,6 +44,8 @@ type Runner struct {
 	SessionManager *runtimesession.Manager
 	// AutoSave persists the final normalized history after each successful turn.
 	AutoSave *runtimesession.AutoSave
+	// Input reads one-off interactive replies such as `/resume` picker selections.
+	Input io.Reader
 	// WorktreeLister resolves same-repo worktree membership for cross-project resume decisions.
 	WorktreeLister WorktreeLister
 }
@@ -59,6 +64,9 @@ const (
 	resumeNoSessionsMessage    = "No conversations found to resume."
 	resumeMultipleMatchesUsage = "Use /resume <session-id> <prompt> to continue one of them."
 	resumeCrossProjectUsage    = "For another project, change to that directory and use /resume <session-id> <prompt> there."
+	resumeSelectionPrompt      = "Select a conversation number to resume, or press Enter to cancel."
+	resumeSelectionCancelled   = "Resume cancelled."
+	resumeSelectionInvalid     = "Invalid selection. Use a number from the list or press Enter to cancel."
 	continueNotConfigured      = "Continue command is not available because session storage is not configured."
 	continueNotFoundMessage    = "No conversation found to continue."
 	renameUsageMessage         = "Rename command requires a title: use /rename <title>."
@@ -136,7 +144,7 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 // runResumeCommand restores one persisted session and immediately continues it with the provided prompt tail.
 func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession bool) error {
 	if strings.TrimSpace(body) == "" {
-		return r.renderRecentResumeSessions(ctx)
+		return r.runRecentResumeSelection(ctx)
 	}
 	if r == nil || r.SessionManager == nil {
 		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
@@ -223,6 +231,39 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 	return r.resumeMatchedSummary(ctx, query, summaries[0], false)
 }
 
+// runRecentResumeSelection renders the recent-session picker and optionally accepts one text selection.
+func (r *Runner) runRecentResumeSelection(ctx context.Context) error {
+	if r == nil || r.SessionManager == nil {
+		return r.Renderer.RenderLine(resumeNotConfiguredMessage)
+	}
+
+	summaries, err := r.SessionManager.ListRecentAllProjects(ctx, 10)
+	if err != nil {
+		return err
+	}
+	if len(summaries) == 0 {
+		return r.Renderer.RenderLine(resumeNoSessionsMessage)
+	}
+	if r.Input == nil {
+		return r.Renderer.RenderLine(renderRecentResumeSessionsOutput(r.ProjectPath, summaries, false))
+	}
+
+	if err := r.Renderer.RenderLine(renderRecentResumeSessionsOutput(r.ProjectPath, summaries, true)); err != nil {
+		return err
+	}
+	selection, ok, err := r.readResumeSelection(summaries)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	if !ok {
+		return r.Renderer.RenderLine(resumeSelectionCancelled)
+	}
+	return r.resumeMatchedSummary(ctx, selection.ID, selection, false)
+}
+
 // runRenameCommand stores one user-assigned title for the current active session.
 func (r *Runner) runRenameCommand(ctx context.Context, body string) error {
 	if r == nil || r.SessionManager == nil {
@@ -305,29 +346,7 @@ func (r *Runner) renderRecentResumeSessions(ctx context.Context) error {
 	if len(summaries) == 0 {
 		return r.Renderer.RenderLine(resumeNoSessionsMessage)
 	}
-
-	lines := []string{"Recent conversations:"}
-	currentProject, otherProjects := partitionSummariesByProject(r.ProjectPath, summaries)
-	for _, summary := range currentProject {
-		lines = append(lines, formatRecentSessionLine(summary))
-	}
-	if len(otherProjects) > 0 {
-		if len(currentProject) > 0 {
-			lines = append(lines, "Other projects:")
-		}
-		for _, summary := range otherProjects {
-			lines = append(lines, formatRecentSessionLine(summary))
-		}
-	}
-	if len(currentProject) == 0 && len(otherProjects) > 0 {
-		lines = append(lines, resumeCrossProjectUsage)
-	} else {
-		lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
-		if len(otherProjects) > 0 {
-			lines = append(lines, resumeCrossProjectUsage)
-		}
-	}
-	return r.Renderer.RenderLine(strings.Join(lines, "\n"))
+	return r.Renderer.RenderLine(renderRecentResumeSessionsOutput(r.ProjectPath, summaries, false))
 }
 
 // runPrompt appends one user prompt onto the supplied history, executes the engine and persists the final history.
@@ -434,6 +453,50 @@ func formatRecentSessionLine(summary coresession.Summary) string {
 	return fmt.Sprintf("- %s | %s%s | %s", updatedAt, displayText, projectHint, summary.ID)
 }
 
+// formatIndexedRecentSessionLine renders one numbered picker row for interactive `/resume`.
+func formatIndexedRecentSessionLine(index int, summary coresession.Summary) string {
+	return fmt.Sprintf("%d. %s", index, strings.TrimPrefix(formatRecentSessionLine(summary), "- "))
+}
+
+// renderRecentResumeSessionsOutput formats either the legacy static list or the numbered picker view.
+func renderRecentResumeSessionsOutput(projectPath string, summaries []coresession.Summary, interactive bool) string {
+	lines := []string{"Recent conversations:"}
+	currentProject, otherProjects := partitionSummariesByProject(projectPath, summaries)
+	nextIndex := 1
+	appendSummary := func(summary coresession.Summary) {
+		if interactive {
+			lines = append(lines, formatIndexedRecentSessionLine(nextIndex, summary))
+			nextIndex++
+			return
+		}
+		lines = append(lines, formatRecentSessionLine(summary))
+	}
+	for _, summary := range currentProject {
+		appendSummary(summary)
+	}
+	if len(otherProjects) > 0 {
+		if len(currentProject) > 0 {
+			lines = append(lines, "Other projects:")
+		}
+		for _, summary := range otherProjects {
+			appendSummary(summary)
+		}
+	}
+	if interactive {
+		lines = append(lines, resumeSelectionPrompt)
+		return strings.Join(lines, "\n")
+	}
+	if len(currentProject) == 0 && len(otherProjects) > 0 {
+		lines = append(lines, resumeCrossProjectUsage)
+	} else {
+		lines = append(lines, "Use /resume <session-id> <prompt> to continue one.")
+		if len(otherProjects) > 0 {
+			lines = append(lines, resumeCrossProjectUsage)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // partitionSummariesByProject keeps current-project sessions ahead of cross-project sessions in `/resume` output.
 func partitionSummariesByProject(projectPath string, summaries []coresession.Summary) ([]coresession.Summary, []coresession.Summary) {
 	var currentProject []coresession.Summary
@@ -446,6 +509,32 @@ func partitionSummariesByProject(projectPath string, summaries []coresession.Sum
 		currentProject = append(currentProject, summary)
 	}
 	return currentProject, otherProjects
+}
+
+// readResumeSelection reads one picker response and maps it back to one summary.
+func (r *Runner) readResumeSelection(summaries []coresession.Summary) (coresession.Summary, bool, error) {
+	if r == nil || r.Input == nil {
+		return coresession.Summary{}, false, io.EOF
+	}
+
+	line, err := bufio.NewReader(r.Input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return coresession.Summary{}, false, err
+	}
+	if errors.Is(err, io.EOF) && line == "" {
+		return coresession.Summary{}, false, io.EOF
+	}
+
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return coresession.Summary{}, false, nil
+	}
+
+	index, convErr := strconv.Atoi(trimmed)
+	if convErr != nil || index < 1 || index > len(summaries) {
+		return coresession.Summary{}, false, r.Renderer.RenderLine(resumeSelectionInvalid)
+	}
+	return summaries[index-1], true, nil
 }
 
 // isCrossProjectSummary reports whether one summary belongs to a different project than the active REPL workspace.

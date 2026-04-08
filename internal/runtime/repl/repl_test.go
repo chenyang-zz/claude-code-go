@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -455,6 +456,125 @@ func TestRunnerRunResumeWithoutArgsIncludesOtherProjects(t *testing.T) {
 	want := "Recent conversations:\n- 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\nOther projects:\n- 2026-04-05 11:30 UTC | other repo prompt [other] | session-9\nUse /resume <session-id> <prompt> to continue one.\nFor another project, change to that directory and use /resume <session-id> <prompt> there.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/resume) output = %q, want cross-project recent list", got)
+	}
+}
+
+// TestRunnerRunResumeWithoutArgsSelectsConversation verifies bare /resume can read one numbered selection and switch sessions immediately.
+func TestRunnerRunResumeWithoutArgsSelectsConversation(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-2", ProjectPath: "/repo", Preview: "older prompt", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.Input = strings.NewReader("2\n")
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	if runner.SessionID != "session-2" {
+		t.Fatalf("Run(/resume) session id = %q, want session-2", runner.SessionID)
+	}
+	want := "Recent conversations:\n1. 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\n2. 2026-04-05 11:00 UTC | older prompt [repo] | session-2\nSelect a conversation number to resume, or press Enter to cancel.\nResumed conversation session-2.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume) output = %q, want picker selection confirmation", got)
+	}
+}
+
+// TestRunnerRunResumeWithoutArgsCancelsSelection verifies an empty picker response exits without switching sessions.
+func TestRunnerRunResumeWithoutArgsCancelsSelection(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.Input = strings.NewReader("\n")
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	if runner.SessionID != "" {
+		t.Fatalf("Run(/resume) session id = %q, want empty after cancel", runner.SessionID)
+	}
+	want := "Recent conversations:\n1. 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\nSelect a conversation number to resume, or press Enter to cancel.\nResume cancelled.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume) output = %q, want cancel confirmation", got)
+	}
+}
+
+// TestRunnerRunResumeWithoutArgsSelectsSameRepoWorktree verifies picker selections reuse the same-repo worktree direct-resume path.
+func TestRunnerRunResumeWithoutArgsSelectsSameRepoWorktree(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-wt", ProjectPath: "/repo-wt/feature", Preview: "worktree prompt", UpdatedAt: time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.Input = strings.NewReader("2\n")
+	runner.WorktreeLister = stubWorktreeLister{paths: []string{"/repo", "/repo-wt"}}
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	if runner.SessionID != "session-wt" {
+		t.Fatalf("Run(/resume) session id = %q, want session-wt", runner.SessionID)
+	}
+	if runner.ProjectPath != "/repo-wt/feature" {
+		t.Fatalf("Run(/resume) project path = %q, want /repo-wt/feature", runner.ProjectPath)
+	}
+	want := "Recent conversations:\n1. 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\nOther projects:\n2. 2026-04-05 11:00 UTC | worktree prompt [feature] | session-wt\nSelect a conversation number to resume, or press Enter to cancel.\nResumed conversation session-wt.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume) output = %q, want same-repo worktree resume", got)
+	}
+}
+
+// TestRunnerRunResumeWithoutArgsSelectsOtherProjectShowsHint verifies picker selections still emit the stable cross-project command hint.
+func TestRunnerRunResumeWithoutArgsSelectsOtherProjectShowsHint(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		listRecent: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "latest prompt", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+			{ID: "session-9", ProjectPath: "/other/repo", Preview: "other repo prompt", UpdatedAt: time.Date(2026, 4, 5, 11, 30, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.Input = strings.NewReader("2\n")
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	if runner.SessionID != "" {
+		t.Fatalf("Run(/resume) session id = %q, want empty because cross-project selection should not switch session", runner.SessionID)
+	}
+	want := "Recent conversations:\n1. 2026-04-05 12:00 UTC | latest prompt [repo] | session-3\nOther projects:\n2. 2026-04-05 11:30 UTC | other repo prompt [repo] | session-9\nSelect a conversation number to resume, or press Enter to cancel.\nFound conversation session-9 in another project.\n- 2026-04-05 11:30 UTC | other repo prompt [repo] | session-9\nRun it from that project directory:\n  cd '/other/repo' && cc /resume session-9 <prompt>\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/resume) output = %q, want cross-project picker hint", got)
 	}
 }
 

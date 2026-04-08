@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -59,6 +60,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
+	runner.Input = os.Stdin
 	runner.WorktreeLister = platformgit.NewClient()
 
 	commandRegistry, err := newCommandRegistry(cfg, runner)
