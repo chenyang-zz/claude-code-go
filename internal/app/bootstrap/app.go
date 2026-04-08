@@ -102,6 +102,9 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 	if err := registry.Register(repl.NewResumeCommandAdapter(runner)); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(repl.NewRenameCommandAdapter(runner)); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.ConfigCommand{Config: cfg}); err != nil {
 		return nil, err
 	}

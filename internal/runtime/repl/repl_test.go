@@ -36,6 +36,8 @@ type recordingSessionRepository struct {
 	listErr      error
 	searchResult []coresession.Summary
 	searchErr    error
+	titleResult  []coresession.Summary
+	titleErr     error
 	saved        []coresession.Session
 }
 
@@ -131,6 +133,39 @@ func (r *recordingSessionRepository) Search(ctx context.Context, lookup coresess
 		}
 	}
 	return filtered, nil
+}
+
+func (r *recordingSessionRepository) FindByCustomTitle(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	_ = ctx
+	if r.titleErr != nil {
+		return nil, r.titleErr
+	}
+	var filtered []coresession.Summary
+	for _, summary := range r.titleResult {
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
+			continue
+		}
+		filtered = append(filtered, summary)
+		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
+func (r *recordingSessionRepository) UpdateCustomTitle(ctx context.Context, id string, title string) error {
+	_ = ctx
+	for index := range r.saved {
+		if r.saved[index].ID == id {
+			r.saved[index].CustomTitle = title
+			return nil
+		}
+	}
+	if r.loadResult.ID == id {
+		r.loadResult.CustomTitle = title
+		return nil
+	}
+	return coresession.ErrSessionNotFound
 }
 
 var _ engine.Engine = (*recordingEngine)(nil)
@@ -290,6 +325,9 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(NewResumeCommandAdapter(runner)); err != nil {
 		t.Fatalf("Register(resume) error = %v", err)
 	}
+	if err := registry.Register(NewRenameCommandAdapter(runner)); err != nil {
+		t.Fatalf("Register(rename) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.ConfigCommand{}); err != nil {
 		t.Fatalf("Register(config) error = %v", err)
 	}
@@ -305,7 +343,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -342,6 +380,31 @@ func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
 	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/settings) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunRenamePersistsCustomTitle verifies `/rename` stores the title on the active session.
+func TestRunnerRunRenamePersistsCustomTitle(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{loadErr: coresession.ErrSessionNotFound}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewRenameCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/rename", "Deploy", "fix"}); err != nil {
+		t.Fatalf("Run(/rename) error = %v", err)
+	}
+
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].CustomTitle != "Deploy fix" {
+		t.Fatalf("saved custom title = %q, want Deploy fix", repo.saved[0].CustomTitle)
+	}
+	if got := buf.String(); got != "Renamed conversation to \"Deploy fix\".\n" {
+		t.Fatalf("Run(/rename) output = %q, want rename confirmation", got)
 	}
 }
 
@@ -418,6 +481,35 @@ func TestRunnerRunResumeSearchResolvesUniqueMatch(t *testing.T) {
 	}
 	if got := buf.String(); got != "Resumed conversation session-3.\n" {
 		t.Fatalf("Run(/resume deploy) output = %q, want resumed confirmation", got)
+	}
+}
+
+// TestRunnerRunResumeSearchPrefersExactCustomTitle verifies exact title matches resume before preview-based search.
+func TestRunnerRunResumeSearchPrefersExactCustomTitle(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	repo := &recordingSessionRepository{
+		titleResult: []coresession.Summary{
+			{ID: "session-7", ProjectPath: "/repo", CustomTitle: "Deploy fix", Preview: "unrelated preview", UpdatedAt: time.Date(2026, 4, 5, 13, 0, 0, 0, time.UTC)},
+		},
+		searchResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo", Preview: "deploy failure", UpdatedAt: time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)},
+		},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = runtimesession.NewManager(repo)
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "Deploy", "fix"}); err != nil {
+		t.Fatalf("Run(/resume title) error = %v", err)
+	}
+
+	if runner.SessionID != "session-7" {
+		t.Fatalf("Run(/resume title) session id = %q, want session-7", runner.SessionID)
+	}
+	if got := buf.String(); got != "Resumed conversation session-7.\n" {
+		t.Fatalf("Run(/resume title) output = %q, want resumed confirmation", got)
 	}
 }
 

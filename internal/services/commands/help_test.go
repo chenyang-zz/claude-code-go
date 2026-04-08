@@ -51,6 +51,13 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Register(config) error = %v", err)
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "rename",
+		Description: "Rename the current conversation for easier resume discovery",
+		Usage:       "/rename <title>",
+	}}); err != nil {
+		t.Fatalf("Register(rename) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "doctor",
 		Description: "Diagnose the current Claude Code Go host setup",
 		Usage:       "/doctor",
@@ -70,7 +77,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

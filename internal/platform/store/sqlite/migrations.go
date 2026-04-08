@@ -15,6 +15,7 @@ var sessionMigrations = []Migration{
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
 	project_path TEXT NOT NULL DEFAULT '',
+	custom_title TEXT NOT NULL DEFAULT '',
 	summary_text TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL,
 	messages_json TEXT NOT NULL

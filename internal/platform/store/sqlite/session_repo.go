@@ -39,15 +39,17 @@ func (r *SessionRepository) Save(ctx context.Context, session coresession.Sessio
 
 	_, err = r.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, project_path, summary_text, updated_at, messages_json)
-VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO sessions (id, project_path, custom_title, summary_text, updated_at, messages_json)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	project_path = excluded.project_path,
+	custom_title = excluded.custom_title,
 	summary_text = excluded.summary_text,
 	updated_at = excluded.updated_at,
 	messages_json = excluded.messages_json`,
 		session.ID,
 		session.ProjectPath,
+		session.CustomTitle,
 		summaryText,
 		session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		string(messagesJSON),
@@ -73,14 +75,15 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 
 	row := r.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT project_path, updated_at, messages_json FROM sessions WHERE id = ?`,
+		`SELECT project_path, custom_title, updated_at, messages_json FROM sessions WHERE id = ?`,
 		id,
 	)
 
 	var projectPath string
+	var customTitle string
 	var updatedAtText string
 	var messagesJSON string
-	if err := row.Scan(&projectPath, &updatedAtText, &messagesJSON); err != nil {
+	if err := row.Scan(&projectPath, &customTitle, &updatedAtText, &messagesJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return coresession.Session{}, coresession.ErrSessionNotFound
 		}
@@ -105,6 +108,7 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 	return coresession.Session{
 		ID:          id,
 		ProjectPath: projectPath,
+		CustomTitle: customTitle,
 		Messages:    messages,
 		UpdatedAt:   updatedAt,
 	}, nil
@@ -121,7 +125,7 @@ func (r *SessionRepository) LoadLatest(ctx context.Context, lookup coresession.L
 
 	row := r.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT id, project_path, updated_at, messages_json
+		`SELECT id, project_path, custom_title, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC, id DESC
@@ -131,9 +135,10 @@ LIMIT 1`,
 
 	var sessionID string
 	var projectPath string
+	var customTitle string
 	var updatedAtText string
 	var messagesJSON string
-	if err := row.Scan(&sessionID, &projectPath, &updatedAtText, &messagesJSON); err != nil {
+	if err := row.Scan(&sessionID, &projectPath, &customTitle, &updatedAtText, &messagesJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return coresession.Session{}, coresession.ErrSessionNotFound
 		}
@@ -159,6 +164,7 @@ LIMIT 1`,
 	return coresession.Session{
 		ID:          sessionID,
 		ProjectPath: projectPath,
+		CustomTitle: customTitle,
 		Messages:    messages,
 		UpdatedAt:   updatedAt,
 	}, nil
@@ -176,14 +182,14 @@ func (r *SessionRepository) ListRecent(ctx context.Context, lookup coresession.L
 		return nil, fmt.Errorf("missing limit")
 	}
 
-	query := `SELECT id, project_path, summary_text, updated_at, messages_json
+	query := `SELECT id, project_path, custom_title, summary_text, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC, id DESC
 LIMIT ?`
 	args := []any{lookup.ProjectPath, lookup.Limit}
 	if lookup.AllProjects {
-		query = `SELECT id, project_path, summary_text, updated_at, messages_json
+		query = `SELECT id, project_path, custom_title, summary_text, updated_at, messages_json
 FROM sessions
 ORDER BY updated_at DESC, id DESC
 LIMIT ?`
@@ -227,26 +233,28 @@ func (r *SessionRepository) Search(ctx context.Context, lookup coresession.Looku
 	}
 
 	pattern := "%" + strings.ToLower(query) + "%"
-	statement := `SELECT id, project_path, summary_text, updated_at, messages_json
+	statement := `SELECT id, project_path, custom_title, summary_text, updated_at, messages_json
 FROM sessions
 WHERE project_path = ?
 	AND (
 		LOWER(id) LIKE ?
+		OR LOWER(custom_title) LIKE ?
 		OR LOWER(COALESCE(NULLIF(summary_text, ''), messages_json, '')) LIKE ?
 	)
 ORDER BY updated_at DESC, id DESC
 LIMIT ?`
-	args := []any{lookup.ProjectPath, pattern, pattern, lookup.Limit}
+	args := []any{lookup.ProjectPath, pattern, pattern, pattern, lookup.Limit}
 	if lookup.AllProjects {
-		statement = `SELECT id, project_path, summary_text, updated_at, messages_json
+		statement = `SELECT id, project_path, custom_title, summary_text, updated_at, messages_json
 FROM sessions
 WHERE (
 	LOWER(id) LIKE ?
+	OR LOWER(custom_title) LIKE ?
 	OR LOWER(COALESCE(NULLIF(summary_text, ''), messages_json, '')) LIKE ?
 )
 ORDER BY updated_at DESC, id DESC
 LIMIT ?`
-		args = []any{pattern, pattern, lookup.Limit}
+		args = []any{pattern, pattern, pattern, lookup.Limit}
 	}
 
 	rows, err := r.DB.SQL.QueryContext(ctx, statement, args...)
@@ -268,6 +276,68 @@ LIMIT ?`
 		"path":          r.DB.Path,
 	})
 	return summaries, nil
+}
+
+// FindByCustomTitle restores session summaries whose custom title exactly matches one normalized query.
+func (r *SessionRepository) FindByCustomTitle(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	if r == nil || r.DB == nil || r.DB.SQL == nil {
+		return nil, fmt.Errorf("sqlite session repository is not initialized")
+	}
+	if strings.TrimSpace(lookup.Query) == "" {
+		return nil, fmt.Errorf("missing query")
+	}
+	if lookup.Limit <= 0 {
+		return nil, fmt.Errorf("missing limit")
+	}
+
+	query := strings.ToLower(strings.TrimSpace(lookup.Query))
+	statement := `SELECT id, project_path, custom_title, summary_text, updated_at, messages_json
+FROM sessions
+WHERE LOWER(custom_title) = ?
+ORDER BY updated_at DESC, id DESC
+LIMIT ?`
+
+	rows, err := r.DB.SQL.QueryContext(ctx, statement, query, lookup.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("search sessions by custom title for %s: %w", lookupLabel(lookup), err)
+	}
+	defer rows.Close()
+
+	summaries, err := scanSessionSummaries(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.DebugCF("sqlite_session_repo", "searched exact session custom titles", map[string]any{
+		"query": query,
+		"limit": lookup.Limit,
+		"count": len(summaries),
+		"path":  r.DB.Path,
+	})
+	return summaries, nil
+}
+
+// UpdateCustomTitle overwrites one session's persisted custom title.
+func (r *SessionRepository) UpdateCustomTitle(ctx context.Context, id string, title string) error {
+	if r == nil || r.DB == nil || r.DB.SQL == nil {
+		return fmt.Errorf("sqlite session repository is not initialized")
+	}
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("missing session id")
+	}
+
+	result, err := r.DB.SQL.ExecContext(ctx, `UPDATE sessions SET custom_title = ? WHERE id = ?`, strings.TrimSpace(title), id)
+	if err != nil {
+		return fmt.Errorf("update custom title for session %s: %w", id, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read updated row count for session %s: %w", id, err)
+	}
+	if rowsAffected == 0 {
+		return coresession.ErrSessionNotFound
+	}
+	return nil
 }
 
 // lookupLabel returns one stable scope label for logs and error messages.
@@ -299,12 +369,14 @@ func scanSessionSummaries(rows *sql.Rows) ([]coresession.Summary, error) {
 	var summaries []coresession.Summary
 	for rows.Next() {
 		var summary coresession.Summary
+		var customTitle string
 		var summaryText string
 		var updatedAtText string
 		var messagesJSON string
-		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &summaryText, &updatedAtText, &messagesJSON); err != nil {
+		if err := rows.Scan(&summary.ID, &summary.ProjectPath, &customTitle, &summaryText, &updatedAtText, &messagesJSON); err != nil {
 			return nil, fmt.Errorf("scan session summary: %w", err)
 		}
+		summary.CustomTitle = customTitle
 		updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtText)
 		if err != nil {
 			return nil, fmt.Errorf("parse session %s updated_at: %w", summary.ID, err)

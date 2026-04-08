@@ -12,6 +12,8 @@ type Session struct {
 	ID string
 	// ProjectPath identifies the workspace path this session belongs to.
 	ProjectPath string
+	// CustomTitle stores the user-assigned session title shown by `/resume` when present.
+	CustomTitle string
 	// Messages stores the normalized conversation history that should be restored on resume.
 	Messages []message.Message
 	// UpdatedAt records when the session snapshot was last overwritten.
@@ -26,6 +28,7 @@ func (s Session) Clone() Session {
 	return Session{
 		ID:          s.ID,
 		ProjectPath: s.ProjectPath,
+		CustomTitle: s.CustomTitle,
 		Messages:    cloned,
 		UpdatedAt:   s.UpdatedAt,
 	}

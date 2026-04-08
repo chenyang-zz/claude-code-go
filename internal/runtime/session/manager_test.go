@@ -20,6 +20,8 @@ type stubRepository struct {
 	listErr      error
 	searchResult []coresession.Summary
 	searchErr    error
+	titleResult  []coresession.Summary
+	titleErr     error
 	saved        []coresession.Session
 }
 
@@ -81,6 +83,36 @@ func (r *stubRepository) Search(ctx context.Context, lookup coresession.Lookup) 
 		}
 	}
 	return filtered, nil
+}
+
+func (r *stubRepository) FindByCustomTitle(ctx context.Context, lookup coresession.Lookup) ([]coresession.Summary, error) {
+	_ = ctx
+	if r.titleErr != nil {
+		return nil, r.titleErr
+	}
+	var filtered []coresession.Summary
+	for _, summary := range r.titleResult {
+		if !lookup.AllProjects && summary.ProjectPath != lookup.ProjectPath {
+			continue
+		}
+		filtered = append(filtered, summary)
+		if lookup.Limit > 0 && len(filtered) == lookup.Limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
+func (r *stubRepository) UpdateCustomTitle(ctx context.Context, id string, title string) error {
+	_ = ctx
+	for index := range r.saved {
+		if r.saved[index].ID == id {
+			r.saved[index].CustomTitle = title
+			return nil
+		}
+	}
+	r.saved = append(r.saved, coresession.Session{ID: id, CustomTitle: title})
+	return nil
 }
 
 // TestManagerStartCreatesNewSession verifies the manager initializes an empty session when nothing is persisted yet.
@@ -248,6 +280,27 @@ func TestManagerSearchAllProjectsReturnsSummaries(t *testing.T) {
 	}
 }
 
+// TestManagerFindByCustomTitleReturnsSummaries verifies exact title lookups are bridged through the manager.
+func TestManagerFindByCustomTitleReturnsSummaries(t *testing.T) {
+	repo := &stubRepository{
+		titleResult: []coresession.Summary{
+			{ID: "session-3", ProjectPath: "/repo-b", CustomTitle: "Deploy fix"},
+		},
+	}
+	manager := NewManager(repo)
+
+	summaries, err := manager.FindByCustomTitle(context.Background(), "Deploy fix", 10)
+	if err != nil {
+		t.Fatalf("FindByCustomTitle() error = %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("FindByCustomTitle() len = %d, want 1", len(summaries))
+	}
+	if summaries[0].CustomTitle != "Deploy fix" {
+		t.Fatalf("FindByCustomTitle() title = %q, want Deploy fix", summaries[0].CustomTitle)
+	}
+}
+
 // TestManagerReplaceMessagesSavesSnapshot verifies autosave-style overwrites persist the latest normalized history.
 func TestManagerReplaceMessagesSavesSnapshot(t *testing.T) {
 	now := time.Date(2026, 4, 4, 11, 0, 0, 0, time.UTC)
@@ -321,6 +374,32 @@ func TestManagerForkPersistsNewTargetSession(t *testing.T) {
 	}
 	if snapshot.Session.ID != "session-forked" {
 		t.Fatalf("snapshot id = %q, want session-forked", snapshot.Session.ID)
+	}
+}
+
+// TestManagerRenameSessionPersistsCustomTitle verifies rename writes the minimum custom title metadata.
+func TestManagerRenameSessionPersistsCustomTitle(t *testing.T) {
+	now := time.Date(2026, 4, 5, 11, 0, 0, 0, time.UTC)
+	repo := &stubRepository{loadErr: coresession.ErrSessionNotFound}
+	manager := NewManager(repo)
+	manager.Now = func() time.Time { return now }
+
+	snapshot, err := manager.RenameSession(context.Background(), "session-title", "/repo", "Deploy fix")
+	if err != nil {
+		t.Fatalf("RenameSession() error = %v", err)
+	}
+
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved count = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].CustomTitle != "Deploy fix" {
+		t.Fatalf("saved custom title = %q, want Deploy fix", repo.saved[0].CustomTitle)
+	}
+	if !repo.saved[0].UpdatedAt.Equal(now) {
+		t.Fatalf("saved updated_at = %v, want %v", repo.saved[0].UpdatedAt, now)
+	}
+	if snapshot.Session.CustomTitle != "Deploy fix" {
+		t.Fatalf("snapshot custom title = %q, want Deploy fix", snapshot.Session.CustomTitle)
 	}
 }
 

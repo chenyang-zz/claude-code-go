@@ -20,6 +20,7 @@ func TestSessionRepositorySaveAndLoadRoundTrip(t *testing.T) {
 	input := coresession.Session{
 		ID:          "session-1",
 		ProjectPath: "/repo-a",
+		CustomTitle: "Deploy fix",
 		Messages: []message.Message{
 			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
 			{Role: message.RoleAssistant, Content: []message.ContentPart{
@@ -46,6 +47,9 @@ func TestSessionRepositorySaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if got.ProjectPath != input.ProjectPath {
 		t.Fatalf("Load() project path = %q, want %q", got.ProjectPath, input.ProjectPath)
+	}
+	if got.CustomTitle != input.CustomTitle {
+		t.Fatalf("Load() custom title = %q, want %q", got.CustomTitle, input.CustomTitle)
 	}
 	if !got.UpdatedAt.Equal(now) {
 		t.Fatalf("Load() updated_at = %v, want %v", got.UpdatedAt, now)
@@ -166,6 +170,7 @@ func TestSessionRepositoryListRecentByProject(t *testing.T) {
 		{
 			ID:          "session-2",
 			ProjectPath: "/repo-a",
+			CustomTitle: "Pinned title",
 			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("latest prompt")}}},
 			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
 		},
@@ -193,6 +198,9 @@ func TestSessionRepositoryListRecentByProject(t *testing.T) {
 	}
 	if got[0].Preview != "latest prompt" || got[1].Preview != "first prompt" {
 		t.Fatalf("ListRecent() previews = %#v, want latest prompt then first prompt", []string{got[0].Preview, got[1].Preview})
+	}
+	if got[0].CustomTitle != "Pinned title" {
+		t.Fatalf("ListRecent() custom title = %q, want Pinned title", got[0].CustomTitle)
 	}
 }
 
@@ -376,6 +384,45 @@ func TestSessionRepositorySearchAllProjects(t *testing.T) {
 	}
 	if got[0].ID != "session-repo-b" || got[1].ID != "session-repo-a" {
 		t.Fatalf("Search(all-projects) ids = %#v, want session-repo-b then session-repo-a", []string{got[0].ID, got[1].ID})
+	}
+}
+
+// TestSessionRepositoryFindByCustomTitle verifies exact title lookups return matching sessions in recency order.
+func TestSessionRepositoryFindByCustomTitle(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewSessionRepository(db)
+
+	sessions := []coresession.Session{
+		{
+			ID:          "session-repo-a",
+			ProjectPath: "/repo-a",
+			CustomTitle: "Deploy fix",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo a")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 14, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:          "session-repo-b",
+			ProjectPath: "/repo-b",
+			CustomTitle: "Deploy fix",
+			Messages:    []message.Message{{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("deploy repo b")}}},
+			UpdatedAt:   time.Date(2026, 4, 4, 15, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, session := range sessions {
+		if err := repo.Save(context.Background(), session); err != nil {
+			t.Fatalf("Save(%s) error = %v", session.ID, err)
+		}
+	}
+
+	got, err := repo.FindByCustomTitle(context.Background(), coresession.Lookup{AllProjects: true, Query: "Deploy fix", Limit: 5})
+	if err != nil {
+		t.Fatalf("FindByCustomTitle() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("FindByCustomTitle() len = %d, want 2", len(got))
+	}
+	if got[0].ID != "session-repo-b" || got[1].ID != "session-repo-a" {
+		t.Fatalf("FindByCustomTitle() ids = %#v, want session-repo-b then session-repo-a", []string{got[0].ID, got[1].ID})
 	}
 }
 

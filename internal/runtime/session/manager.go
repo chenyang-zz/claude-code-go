@@ -224,6 +224,34 @@ func (m *Manager) SearchAllProjects(ctx context.Context, query string, limit int
 	return summaries, nil
 }
 
+// FindByCustomTitle returns session summaries whose custom title exactly matches one query.
+func (m *Manager) FindByCustomTitle(ctx context.Context, query string, limit int) ([]coresession.Summary, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("missing query")
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	if m.Repository == nil {
+		return nil, nil
+	}
+
+	summaries, err := m.Repository.FindByCustomTitle(ctx, coresession.Lookup{
+		AllProjects: true,
+		Limit:       limit,
+		Query:       query,
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.DebugCF("session_manager", "searched persisted sessions by exact custom title", map[string]any{
+		"query": query,
+		"limit": limit,
+		"count": len(summaries),
+	})
+	return summaries, nil
+}
+
 // ReplaceMessages overwrites the stored session history with the supplied normalized messages.
 func (m *Manager) ReplaceMessages(ctx context.Context, id string, messages []message.Message) (coresession.Snapshot, error) {
 	return m.ReplaceMessagesInProject(ctx, id, "", messages)
@@ -286,6 +314,38 @@ func (m *Manager) Fork(ctx context.Context, source coresession.Session, targetID
 		Session: forked.Clone(),
 		Resumed: true,
 	}, nil
+}
+
+// RenameSession stores one custom title for the target session while preserving existing history and project scope.
+func (m *Manager) RenameSession(ctx context.Context, id string, projectPath string, title string) (coresession.Snapshot, error) {
+	if id == "" {
+		return coresession.Snapshot{}, fmt.Errorf("missing session id")
+	}
+	trimmedTitle := strings.TrimSpace(title)
+	if trimmedTitle == "" {
+		return coresession.Snapshot{}, fmt.Errorf("missing session title")
+	}
+
+	snapshot, err := m.StartInProject(ctx, id, projectPath)
+	if err != nil {
+		return coresession.Snapshot{}, err
+	}
+	if snapshot.Session.ProjectPath == "" {
+		snapshot.Session.ProjectPath = projectPath
+	}
+	snapshot.Session.CustomTitle = trimmedTitle
+	snapshot.Session.UpdatedAt = m.now()
+
+	if err := m.save(ctx, snapshot.Session); err != nil {
+		return coresession.Snapshot{}, err
+	}
+
+	logger.DebugCF("session_manager", "renamed session", map[string]any{
+		"session_id":   snapshot.Session.ID,
+		"project_path": snapshot.Session.ProjectPath,
+		"title_set":    snapshot.Session.CustomTitle != "",
+	})
+	return snapshot.Clone(), nil
 }
 
 func (m *Manager) save(ctx context.Context, session coresession.Session) error {

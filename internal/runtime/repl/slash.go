@@ -22,6 +22,16 @@ func NewResumeCommandAdapter(runner *Runner) command.Command {
 	return resumeCommandAdapter{runner: runner}
 }
 
+// renameCommandAdapter keeps the existing `/rename` runtime path available through the shared command registry.
+type renameCommandAdapter struct {
+	runner *Runner
+}
+
+// NewRenameCommandAdapter exposes the existing `/rename` flow through the shared command registry.
+func NewRenameCommandAdapter(runner *Runner) command.Command {
+	return renameCommandAdapter{runner: runner}
+}
+
 // Metadata describes the minimum slash descriptor exposed for /resume.
 func (c resumeCommandAdapter) Metadata() command.Metadata {
 	return command.Metadata{
@@ -35,4 +45,18 @@ func (c resumeCommandAdapter) Metadata() command.Metadata {
 // Execute forwards /resume handling back into the existing runner recovery flow.
 func (c resumeCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	return command.Result{}, c.runner.runResumeCommand(ctx, args.RawLine, args.Flags["fork_session"] == "true")
+}
+
+// Metadata describes the minimum slash descriptor exposed for `/rename`.
+func (c renameCommandAdapter) Metadata() command.Metadata {
+	return command.Metadata{
+		Name:        "rename",
+		Description: "Rename the current conversation for easier resume discovery",
+		Usage:       "/rename <title>",
+	}
+}
+
+// Execute forwards `/rename` handling back into the runner session-title flow.
+func (c renameCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
+	return command.Result{}, c.runner.runRenameCommand(ctx, args.RawLine)
 }

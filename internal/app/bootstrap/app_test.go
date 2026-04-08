@@ -74,6 +74,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("resume"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /resume adapter")
 	}
+	if _, ok := app.Runner.Commands.Get("rename"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /rename adapter")
+	}
 	if _, ok := app.Runner.Commands.Get("config"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /config command")
 	}
@@ -113,8 +116,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 6 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 6", len(cmds))
+	if len(cmds) != 7 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 7", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -139,25 +142,32 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() third metadata = %#v, want resume metadata", got)
 	}
 	if got := cmds[3].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "rename",
+		Description: "Rename the current conversation for easier resume discovery",
+		Usage:       "/rename <title>",
+	}) {
+		t.Fatalf("newCommandRegistry() fourth metadata = %#v, want rename metadata", got)
+	}
+	if got := cmds[4].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "config",
 		Aliases:     []string{"settings"},
 		Description: "Show the current runtime configuration",
 		Usage:       "/config",
 	}) {
-		t.Fatalf("newCommandRegistry() fourth metadata = %#v, want config metadata", got)
+		t.Fatalf("newCommandRegistry() fifth metadata = %#v, want config metadata", got)
 	}
-	if got := cmds[4].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[5].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "doctor",
 		Description: "Diagnose the current Claude Code Go host setup",
 		Usage:       "/doctor",
 	}) {
-		t.Fatalf("newCommandRegistry() fifth metadata = %#v, want doctor metadata", got)
+		t.Fatalf("newCommandRegistry() sixth metadata = %#v, want doctor metadata", got)
 	}
-	if got := cmds[5].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[6].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
-		t.Fatalf("newCommandRegistry() sixth metadata = %#v, want session metadata", got)
+		t.Fatalf("newCommandRegistry() seventh metadata = %#v, want session metadata", got)
 	}
 }

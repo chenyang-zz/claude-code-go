@@ -61,6 +61,8 @@ const (
 	resumeCrossProjectUsage    = "For another project, change to that directory and use /resume <session-id> <prompt> there."
 	continueNotConfigured      = "Continue command is not available because session storage is not configured."
 	continueNotFoundMessage    = "No conversation found to continue."
+	renameUsageMessage         = "Rename command requires a title: use /rename <title>."
+	renameNotConfiguredMessage = "Rename command is not available because session storage is not configured."
 )
 
 var errContinueHandled = errors.New("continue flow already handled")
@@ -184,6 +186,14 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 		return r.Renderer.RenderLine(resumeUsageMessage)
 	}
 
+	titleMatches, err := r.SessionManager.FindByCustomTitle(ctx, query, 10)
+	if err != nil {
+		return err
+	}
+	if len(titleMatches) == 1 {
+		return r.resumeMatchedSummary(ctx, query, titleMatches[0], true)
+	}
+
 	summaries, err := r.SessionManager.SearchAllProjects(ctx, query, 10)
 	if err != nil {
 		return err
@@ -210,7 +220,37 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 		return r.Renderer.RenderLine(strings.Join(lines, "\n"))
 	}
 
-	summary := summaries[0]
+	return r.resumeMatchedSummary(ctx, query, summaries[0], false)
+}
+
+// runRenameCommand stores one user-assigned title for the current active session.
+func (r *Runner) runRenameCommand(ctx context.Context, body string) error {
+	if r == nil || r.SessionManager == nil {
+		return r.Renderer.RenderLine(renameNotConfiguredMessage)
+	}
+	title := strings.TrimSpace(body)
+	if title == "" {
+		return r.Renderer.RenderLine(renameUsageMessage)
+	}
+
+	snapshot, err := r.SessionManager.RenameSession(ctx, r.sessionID(), r.ProjectPath, title)
+	if err != nil {
+		return err
+	}
+	r.SessionID = snapshot.Session.ID
+	if snapshot.Session.ProjectPath != "" {
+		r.ProjectPath = snapshot.Session.ProjectPath
+	}
+	logger.DebugCF("repl", "renamed current session", map[string]any{
+		"session_id":   snapshot.Session.ID,
+		"project_path": snapshot.Session.ProjectPath,
+		"title":        snapshot.Session.CustomTitle,
+	})
+	return r.Renderer.RenderLine(fmt.Sprintf("Renamed conversation to %q.", snapshot.Session.CustomTitle))
+}
+
+// resumeMatchedSummary applies the existing project/worktree restore policy to one selected summary.
+func (r *Runner) resumeMatchedSummary(ctx context.Context, query string, summary coresession.Summary, exactTitleMatch bool) error {
 	if isCrossProjectSummary(r.ProjectPath, summary) {
 		sameRepoWorktree, err := r.isSameRepoWorktree(ctx, summary)
 		if err != nil {
@@ -225,6 +265,7 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 				"session_id":    r.SessionID,
 				"project_path":  r.ProjectPath,
 				"query":         query,
+				"title_match":   exactTitleMatch,
 				"same_repo_wt":  true,
 				"cross_project": true,
 			})
@@ -247,6 +288,7 @@ func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error 
 		"session_id":   r.SessionID,
 		"project_path": r.ProjectPath,
 		"query":        query,
+		"title_match":  exactTitleMatch,
 	})
 	return r.Renderer.RenderLine(fmt.Sprintf("Resumed conversation %s.", r.SessionID))
 }
@@ -371,9 +413,12 @@ func isLikelySessionID(value string) bool {
 
 // formatRecentSessionLine renders one recent-session candidate using a stable text-only layout.
 func formatRecentSessionLine(summary coresession.Summary) string {
-	preview := strings.TrimSpace(summary.Preview)
-	if preview == "" {
-		preview = "Previous conversation"
+	displayText := strings.TrimSpace(summary.CustomTitle)
+	if displayText == "" {
+		displayText = strings.TrimSpace(summary.Preview)
+	}
+	if displayText == "" {
+		displayText = "Previous conversation"
 	}
 
 	updatedAt := "unknown time"
@@ -386,7 +431,7 @@ func formatRecentSessionLine(summary coresession.Summary) string {
 		projectHint = fmt.Sprintf(" [%s]", filepath.Base(summary.ProjectPath))
 	}
 
-	return fmt.Sprintf("- %s | %s%s | %s", updatedAt, preview, projectHint, summary.ID)
+	return fmt.Sprintf("- %s | %s%s | %s", updatedAt, displayText, projectHint, summary.ID)
 }
 
 // partitionSummariesByProject keeps current-project sessions ahead of cross-project sessions in `/resume` output.

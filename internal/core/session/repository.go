@@ -15,6 +15,8 @@ type Summary struct {
 	ID string
 	// ProjectPath records the workspace the session belongs to.
 	ProjectPath string
+	// CustomTitle stores the optional user-assigned session title.
+	CustomTitle string
 	// Preview carries the minimum human-readable session summary shown by `/resume`.
 	Preview string
 	// UpdatedAt records when the session snapshot was last overwritten.
@@ -45,4 +47,8 @@ type Repository interface {
 	ListRecent(ctx context.Context, lookup Lookup) ([]Summary, error)
 	// Search returns project-scoped session summaries matching one free-text query.
 	Search(ctx context.Context, lookup Lookup) ([]Summary, error)
+	// FindByCustomTitle returns session summaries whose custom title exactly matches the supplied lookup query.
+	FindByCustomTitle(ctx context.Context, lookup Lookup) ([]Summary, error)
+	// UpdateCustomTitle overwrites the user-assigned title for one persisted session.
+	UpdateCustomTitle(ctx context.Context, id string, title string) error
 }
