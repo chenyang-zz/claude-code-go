@@ -129,6 +129,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("login"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /login command")
 	}
+	if _, ok := app.Runner.Commands.Get("logout"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /logout command")
+	}
 	if _, ok := app.Runner.Commands.Get("mcp"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /mcp command")
 	}
@@ -168,8 +171,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 11 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 11", len(cmds))
+	if len(cmds) != 12 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 12", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -231,24 +234,31 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() eighth metadata = %#v, want login metadata", got)
 	}
 	if got := cmds[8].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "logout",
+		Description: "Sign out from your Anthropic account",
+		Usage:       "/logout",
+	}) {
+		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want logout metadata", got)
+	}
+	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
 		Usage:       "/mcp [enable|disable <server-name>]",
 	}) {
-		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want mcp metadata", got)
+		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want mcp metadata", got)
 	}
-	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
-		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want session metadata", got)
+		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want session metadata", got)
 	}
-	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want seed-sessions metadata", got)
 	}
 }
