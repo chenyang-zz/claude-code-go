@@ -7,12 +7,12 @@ import (
 
 // TestValidateSettingsContentAcceptsSupportedSubset verifies the migrated validator accepts the supported settings subset.
 func TestValidateSettingsContentAcceptsSupportedSubset(t *testing.T) {
-	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
+	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"editorMode\": \"vim\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
 	if !result.IsValid {
 		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
 	}
-	if !strings.Contains(result.FullSchema, "\"permissions\"") {
-		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions schema", result.FullSchema)
+	if !strings.Contains(result.FullSchema, "\"permissions\"") || !strings.Contains(result.FullSchema, "\"editorMode\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions and editorMode schema", result.FullSchema)
 	}
 }
 
@@ -60,5 +60,16 @@ func TestValidateSettingsContentRejectsExpandedFieldErrors(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "- permissions.defaultMode: Invalid value. Expected one of: \"acceptEdits\", \"bypassPermissions\", \"default\", \"dontAsk\", \"plan\"") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want defaultMode enum error", result.Error)
+	}
+}
+
+// TestValidateSettingsContentRejectsUnsupportedEditorMode verifies editorMode uses a stable enum allowlist.
+func TestValidateSettingsContentRejectsUnsupportedEditorMode(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"editorMode\": \"vi\"\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	if !strings.Contains(result.Error, "- editorMode: Invalid value. Expected one of: \"emacs\", \"normal\", \"vim\"") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want editorMode enum error", result.Error)
 	}
 }

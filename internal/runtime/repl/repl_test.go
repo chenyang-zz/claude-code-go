@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -26,6 +27,10 @@ type recordingEngine struct {
 type stubWorktreeLister struct {
 	paths []string
 	err   error
+}
+
+type stubEditorModeStore struct {
+	saved []string
 }
 
 type recordingSessionRepository struct {
@@ -51,6 +56,12 @@ func (s stubWorktreeLister) ListWorktrees(ctx context.Context, cwd string) ([]st
 	_ = ctx
 	_ = cwd
 	return append([]string(nil), s.paths...), s.err
+}
+
+func (s *stubEditorModeStore) SaveEditorMode(ctx context.Context, mode string) error {
+	_ = ctx
+	s.saved = append(s.saved, mode)
+	return nil
 }
 
 func (r *recordingSessionRepository) Save(ctx context.Context, session coresession.Session) error {
@@ -380,6 +391,9 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.VimCommand{}); err != nil {
+		t.Fatalf("Register(vim) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{}); err != nil {
 		t.Fatalf("Register(seed-sessions) error = %v", err)
 	}
@@ -389,7 +403,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -497,6 +511,34 @@ func TestRunnerRunSessionCommandReportsRemoteFallback(t *testing.T) {
 	}
 }
 
+// TestRunnerRunVimCommandPersistsEditorMode verifies /vim is routed through the shared registry and updates the stored mode.
+func TestRunnerRunVimCommandPersistsEditorMode(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	cfg := &coreconfig.Config{EditorMode: coreconfig.EditorModeNormal}
+	store := &stubEditorModeStore{}
+	registerSlashCommands(t, runner, servicecommands.VimCommand{
+		Config: cfg,
+		Store:  store,
+	})
+
+	if err := runner.Run(context.Background(), []string{"/vim"}); err != nil {
+		t.Fatalf("Run(/vim) error = %v", err)
+	}
+
+	want := "Editor mode set to vim. Claude Code Go stores the setting now, but prompt-editor Vim keybindings are not implemented yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/vim) output = %q, want %q", got, want)
+	}
+	if len(store.saved) != 1 || store.saved[0] != coreconfig.EditorModeVim {
+		t.Fatalf("saved modes = %#v, want []string{\"vim\"}", store.saved)
+	}
+	if cfg.EditorMode != coreconfig.EditorModeVim {
+		t.Fatalf("config editor mode = %q, want %q", cfg.EditorMode, coreconfig.EditorModeVim)
+	}
+}
+
 // TestRunnerRunSettingsAliasDispatchesConfig verifies /settings resolves through the shared registry alias table.
 func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
 	var buf bytes.Buffer
@@ -508,7 +550,7 @@ func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
 		t.Fatalf("Run(/settings) error = %v", err)
 	}
 
-	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
+	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Editor mode: normal\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/settings) output = %q, want %q", got, want)
 	}

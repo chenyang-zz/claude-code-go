@@ -6,6 +6,8 @@ type Config struct {
 	ProjectPath string
 	// Model overrides the default model selection when provided.
 	Model string
+	// EditorMode stores the persisted prompt editor keybinding mode.
+	EditorMode string
 	// Provider selects which backend provider implementation to use.
 	Provider string
 	// APIKey carries the credential required by the selected provider.
@@ -40,10 +42,32 @@ type PermissionConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Model:        "claude-sonnet-4-5",
+		EditorMode:   NormalizeEditorMode(""),
 		Provider:     "anthropic",
 		ApprovalMode: "default",
 		Permissions: PermissionConfig{
 			DefaultMode: "default",
 		},
+	}
+}
+
+const (
+	// EditorModeNormal identifies the default prompt editor mode used by current settings.
+	EditorModeNormal = "normal"
+	// EditorModeVim identifies the Vim-style prompt editor mode.
+	EditorModeVim = "vim"
+	// EditorModeEmacs identifies the legacy source-compatible value that should normalize to normal mode.
+	EditorModeEmacs = "emacs"
+)
+
+// NormalizeEditorMode folds legacy and empty editor mode values into the stable runtime representation.
+func NormalizeEditorMode(value string) string {
+	switch value {
+	case "", EditorModeEmacs, EditorModeNormal:
+		return EditorModeNormal
+	case EditorModeVim:
+		return EditorModeVim
+	default:
+		return value
 	}
 }

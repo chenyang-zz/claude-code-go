@@ -7,6 +7,9 @@ func Merge(base, override Config) Config {
 	if override.Model != "" {
 		base.Model = override.Model
 	}
+	if override.EditorMode != "" {
+		base.EditorMode = NormalizeEditorMode(override.EditorMode)
+	}
 	if override.Provider != "" {
 		base.Provider = override.Provider
 	}

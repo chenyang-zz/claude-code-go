@@ -24,6 +24,7 @@ type FileLoader struct {
 
 type settingsFile struct {
 	Model         string `json:"model"`
+	EditorMode    string `json:"editorMode"`
 	Provider      string `json:"provider"`
 	SessionDBPath string `json:"sessionDbPath"`
 	Permissions   struct {
@@ -82,6 +83,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 
 	envCfg := coreconfig.Config{
 		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
+		EditorMode:    l.LookupEnv("CLAUDE_CODE_EDITOR_MODE"),
 		Provider:      l.LookupEnv("CLAUDE_CODE_PROVIDER"),
 		APIKey:        l.LookupEnv("ANTHROPIC_API_KEY"),
 		APIBaseURL:    l.LookupEnv("ANTHROPIC_BASE_URL"),
@@ -93,6 +95,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	logger.DebugCF("runtime_config", "loaded runtime config", map[string]any{
 		"provider":            cfg.Provider,
 		"model":               cfg.Model,
+		"editor_mode":         cfg.EditorMode,
 		"has_api_key":         cfg.APIKey != "",
 		"api_base_url":        cfg.APIBaseURL,
 		"has_session_db_path": cfg.SessionDBPath != "",
@@ -130,6 +133,7 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 
 	return coreconfig.Config{
 		Model:         parsed.Model,
+		EditorMode:    coreconfig.NormalizeEditorMode(parsed.EditorMode),
 		Provider:      parsed.Provider,
 		ApprovalMode:  parsed.Permissions.DefaultMode,
 		SessionDBPath: parsed.SessionDBPath,

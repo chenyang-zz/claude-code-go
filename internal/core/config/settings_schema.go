@@ -28,6 +28,13 @@ var (
 		"bash",
 		"powershell",
 	}
+
+	// editorModeValues stores the currently migrated prompt editor mode values.
+	editorModeValues = []string{
+		EditorModeEmacs,
+		EditorModeNormal,
+		EditorModeVim,
+	}
 )
 
 // ValidationIssue describes one caller-facing settings validation failure.
@@ -54,6 +61,11 @@ func SettingsSchemaDocument() map[string]any {
 			"model": map[string]any{
 				"type":        "string",
 				"description": "Override the default model used by Claude Code",
+			},
+			"editorMode": map[string]any{
+				"type":        "string",
+				"enum":        editorModeValues,
+				"description": "Prompt editor keybinding mode",
 			},
 			"apiKeyHelper": map[string]any{
 				"type":        "string",
@@ -148,6 +160,10 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			}
 		case "model":
 			if issue, ok := validateStringField("model", objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "editorMode":
+			if issue, ok := validateEnumField(key, objectValue[key], editorModeValues); ok {
 				issues = append(issues, issue)
 			}
 		case "apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh", "sessionDbPath":

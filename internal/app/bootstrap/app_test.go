@@ -144,6 +144,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("session"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /session command")
 	}
+	if _, ok := app.Runner.Commands.Get("vim"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /vim command")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -171,14 +174,14 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(coreconfig.Config{}, nil)
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 14 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 14", len(cmds))
+	if len(cmds) != 15 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 15", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -275,10 +278,17 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want session metadata", got)
 	}
 	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "vim",
+		Description: "Toggle between Vim and Normal editing modes",
+		Usage:       "/vim",
+	}) {
+		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want vim metadata", got)
+	}
+	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

@@ -35,6 +35,7 @@ func (c ConfigCommand) Execute(ctx context.Context, args command.Args) (command.
 		"Current configuration:",
 		fmt.Sprintf("- Provider: %s", displayValue(c.Config.Provider)),
 		fmt.Sprintf("- Model: %s", displayValue(c.Config.Model)),
+		fmt.Sprintf("- Editor mode: %s", displayValue(coreconfig.NormalizeEditorMode(c.Config.EditorMode))),
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
 		fmt.Sprintf("- Session DB path: %s", displayValue(c.Config.SessionDBPath)),
@@ -45,6 +46,7 @@ func (c ConfigCommand) Execute(ctx context.Context, args command.Args) (command.
 	logger.DebugCF("commands", "rendered config command output", map[string]any{
 		"provider":            c.Config.Provider,
 		"model":               c.Config.Model,
+		"editor_mode":         coreconfig.NormalizeEditorMode(c.Config.EditorMode),
 		"project_path":        c.Config.ProjectPath,
 		"approval_mode":       c.Config.ApprovalMode,
 		"has_api_key":         c.Config.APIKey != "",

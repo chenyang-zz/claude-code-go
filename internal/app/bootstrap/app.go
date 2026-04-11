@@ -75,7 +75,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		runner.AutoSave = runtimesession.NewAutoSave(manager)
 	}
 
-	commandRegistry, err := newCommandRegistry(cfg, runner)
+	var globalSettingsStore *platformconfig.GlobalSettingsStore
+	if fileLoader, ok := loader.(*platformconfig.FileLoader); ok {
+		globalSettingsStore = platformconfig.NewGlobalSettingsStore(fileLoader.HomeDir)
+	}
+
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +99,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -112,25 +117,25 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 	if err := registry.Register(repl.NewRenameCommandAdapter(runner)); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.ConfigCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.ConfigCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.DoctorCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.DoctorCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.PermissionsCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.PermissionsCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.LoginCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.LoginCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.LogoutCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.LogoutCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.StatusCommand{Config: cfg}); err != nil {
+	if err := registry.Register(servicecommands.StatusCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
@@ -139,13 +144,27 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.VimCommand{
+		Config: cfg,
+		Store:  globalSettingsStore,
+	}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
-		ProjectPath: cfg.ProjectPath,
+		ProjectPath: dereferenceConfig(cfg).ProjectPath,
 	}); err != nil {
 		return nil, err
 	}
 	return registry, nil
+}
+
+// dereferenceConfig copies the pointed runtime config or returns the zero value when unavailable.
+func dereferenceConfig(cfg *coreconfig.Config) coreconfig.Config {
+	if cfg == nil {
+		return coreconfig.Config{}
+	}
+	return *cfg
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.

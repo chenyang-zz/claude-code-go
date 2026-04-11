@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 )
 
 // TestFileLoaderLoadMergesSettingsAndEnv verifies env overrides project settings while defaults fill the rest.
@@ -20,7 +22,7 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 		t.Fatalf("MkdirAll(home) error = %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model","sessionDbPath":"/tmp/home-session.db"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model","sessionDbPath":"/tmp/home-session.db","editorMode":"emacs"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"defaultMode":"plan","allow":["Bash(ls)"],"deny":["Bash(rm -rf)"],"ask":["Edit(*)"],"additionalDirectories":["packages/app"],"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
@@ -50,6 +52,9 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	if cfg.Provider != "anthropic" || cfg.Model != "env-model" || cfg.APIKey != "env-key" || cfg.ApprovalMode != "bypassPermissions" || cfg.SessionDBPath != "/tmp/env-session.db" {
 		t.Fatalf("Load() = %#v, want provider anthropic, model env-model, api key env-key, approval mode bypassPermissions, session db /tmp/env-session.db", cfg)
 	}
+	if cfg.EditorMode != coreconfig.EditorModeNormal {
+		t.Fatalf("Load() editor mode = %q, want %q", cfg.EditorMode, coreconfig.EditorModeNormal)
+	}
 	if cfg.ProjectPath != projectDir {
 		t.Fatalf("Load() project path = %q, want %q", cfg.ProjectPath, projectDir)
 	}
@@ -70,6 +75,37 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	}
 	if cfg.Permissions.DisableBypassPermissionsMode != "disable" {
 		t.Fatalf("Load() permissions.disableBypassPermissionsMode = %q, want disable", cfg.Permissions.DisableBypassPermissionsMode)
+	}
+}
+
+// TestFileLoaderLoadProjectEditorModeOverridesHome verifies project settings can override the normalized home editor mode.
+func TestFileLoaderLoadProjectEditorModeOverridesHome(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"editorMode":"emacs"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"editorMode":"vim"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.EditorMode != coreconfig.EditorModeVim {
+		t.Fatalf("Load() editor mode = %q, want %q", cfg.EditorMode, coreconfig.EditorModeVim)
 	}
 }
 
