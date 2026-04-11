@@ -130,6 +130,9 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.StatusCommand{Config: cfg}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
 		return nil, err
 	}

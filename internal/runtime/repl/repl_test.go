@@ -371,6 +371,9 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
 		t.Fatalf("Register(cost) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.StatusCommand{}); err != nil {
+		t.Fatalf("Register(status) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
 		t.Fatalf("Register(mcp) error = %v", err)
 	}
@@ -386,7 +389,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -426,7 +429,6 @@ func TestRunnerRunLogoutCommandReportsFallback(t *testing.T) {
 	}
 }
 
-// TestRunnerRunMCPCommandReportsFallback verifies /mcp is routed through the shared registry and emits the stable MCP fallback.
 // TestRunnerRunCostCommandReportsFallback verifies /cost is routed through the shared registry and emits the stable usage fallback.
 func TestRunnerRunCostCommandReportsFallback(t *testing.T) {
 	var buf bytes.Buffer
@@ -441,6 +443,23 @@ func TestRunnerRunCostCommandReportsFallback(t *testing.T) {
 	want := "Session cost and duration tracking are not available in Claude Code Go yet.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/cost) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunStatusCommandReportsFallback verifies /status is routed through the shared registry and emits the stable status summary.
+func TestRunnerRunStatusCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.StatusCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/status"}); err != nil {
+		t.Fatalf("Run(/status) error = %v", err)
+	}
+
+	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing API key; interactive account status is not available\n- API base URL: default\n- API connectivity check: not available in Claude Code Go yet\n- Tool status checks: not available in Claude Code Go yet\n- Settings status UI: not available in Claude Code Go yet\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/status) output = %q, want %q", got, want)
 	}
 }
 

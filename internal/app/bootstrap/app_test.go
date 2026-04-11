@@ -135,6 +135,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("cost"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /cost command")
 	}
+	if _, ok := app.Runner.Commands.Get("status"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /status command")
+	}
 	if _, ok := app.Runner.Commands.Get("mcp"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /mcp command")
 	}
@@ -174,8 +177,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 13 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 13", len(cmds))
+	if len(cmds) != 14 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 14", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -251,24 +254,31 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want cost metadata", got)
 	}
 	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "status",
+		Description: "Show Claude Code status including version, model, account, API connectivity, and tool statuses",
+		Usage:       "/status",
+	}) {
+		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want status metadata", got)
+	}
+	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
 		Usage:       "/mcp [enable|disable <server-name>]",
 	}) {
-		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want mcp metadata", got)
+		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want mcp metadata", got)
 	}
-	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
-		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want session metadata", got)
+		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want session metadata", got)
 	}
-	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want seed-sessions metadata", got)
 	}
 }
