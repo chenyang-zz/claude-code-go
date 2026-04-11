@@ -23,7 +23,7 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model","sessionDbPath":"/tmp/home-session.db"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"defaultMode":"plan"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"defaultMode":"plan","allow":["Bash(ls)"],"deny":["Bash(rm -rf)"],"ask":["Edit(*)"],"additionalDirectories":["packages/app"],"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(project settings) error = %v", err)
 	}
 
@@ -52,6 +52,24 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	}
 	if cfg.ProjectPath != projectDir {
 		t.Fatalf("Load() project path = %q, want %q", cfg.ProjectPath, projectDir)
+	}
+	if cfg.Permissions.DefaultMode != "plan" {
+		t.Fatalf("Load() permissions.defaultMode = %q, want %q", cfg.Permissions.DefaultMode, "plan")
+	}
+	if len(cfg.Permissions.Allow) != 1 || cfg.Permissions.Allow[0] != "Bash(ls)" {
+		t.Fatalf("Load() permissions.allow = %#v, want Bash(ls)", cfg.Permissions.Allow)
+	}
+	if len(cfg.Permissions.Deny) != 1 || cfg.Permissions.Deny[0] != "Bash(rm -rf)" {
+		t.Fatalf("Load() permissions.deny = %#v, want Bash(rm -rf)", cfg.Permissions.Deny)
+	}
+	if len(cfg.Permissions.Ask) != 1 || cfg.Permissions.Ask[0] != "Edit(*)" {
+		t.Fatalf("Load() permissions.ask = %#v, want Edit(*)", cfg.Permissions.Ask)
+	}
+	if len(cfg.Permissions.AdditionalDirectories) != 1 || cfg.Permissions.AdditionalDirectories[0] != "packages/app" {
+		t.Fatalf("Load() permissions.additionalDirectories = %#v, want packages/app", cfg.Permissions.AdditionalDirectories)
+	}
+	if cfg.Permissions.DisableBypassPermissionsMode != "disable" {
+		t.Fatalf("Load() permissions.disableBypassPermissionsMode = %q, want disable", cfg.Permissions.DisableBypassPermissionsMode)
 	}
 }
 

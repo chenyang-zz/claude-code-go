@@ -310,6 +310,33 @@ func TestRunnerRunDispatchesRegisteredSlashCommand(t *testing.T) {
 	}
 }
 
+// TestRunnerRunDispatchesSlashAlias verifies slash aliases resolve through the shared registry lookup path.
+func TestRunnerRunDispatchesSlashAlias(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, staticCommand{
+		meta: command.Metadata{
+			Name:        "permissions",
+			Aliases:     []string{"allowed-tools"},
+			Description: "Manage allow & deny tool permission rules",
+			Usage:       "/permissions",
+		},
+		result: command.Result{Output: "Permission settings:\n- Default mode: default"},
+	})
+
+	if err := runner.Run(context.Background(), []string{"/allowed-tools"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.Input != "" {
+		t.Fatalf("engine should not be called for slash alias, got request %#v", eng.lastRequest)
+	}
+	if got := buf.String(); got != "Permission settings:\n- Default mode: default\n" {
+		t.Fatalf("Run() output = %q, want registered slash alias output", got)
+	}
+}
+
 // TestRunnerRunHelpCommandListsRegisteredCommands verifies the real /help command output matches the registry-backed support surface.
 func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	var buf bytes.Buffer
@@ -335,6 +362,12 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.DoctorCommand{}); err != nil {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.LoginCommand{}); err != nil {
+		t.Fatalf("Register(login) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
+		t.Fatalf("Register(mcp) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
@@ -347,9 +380,43 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunLoginCommandReportsAuthFallback verifies /login is routed through the shared registry and emits the stable auth fallback.
+func TestRunnerRunLoginCommandReportsAuthFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.LoginCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/login"}); err != nil {
+		t.Fatalf("Run(/login) error = %v", err)
+	}
+
+	want := "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key in settings or environment variables instead.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/login) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunMCPCommandReportsFallback verifies /mcp is routed through the shared registry and emits the stable MCP fallback.
+func TestRunnerRunMCPCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.MCPCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/mcp"}); err != nil {
+		t.Fatalf("Run(/mcp) error = %v", err)
+	}
+
+	want := "MCP server management is not available in Claude Code Go yet. Configure MCP servers before startup instead.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/mcp) output = %q, want %q", got, want)
 	}
 }
 

@@ -22,5 +22,29 @@ func Merge(base, override Config) Config {
 	if override.SessionDBPath != "" {
 		base.SessionDBPath = override.SessionDBPath
 	}
+	base.Permissions = mergePermissionConfig(base.Permissions, override.Permissions)
+	return base
+}
+
+// mergePermissionConfig overlays one minimal permission configuration onto another.
+func mergePermissionConfig(base, override PermissionConfig) PermissionConfig {
+	if override.DefaultMode != "" {
+		base.DefaultMode = override.DefaultMode
+	}
+	if len(override.Allow) > 0 {
+		base.Allow = append([]string(nil), override.Allow...)
+	}
+	if len(override.Deny) > 0 {
+		base.Deny = append([]string(nil), override.Deny...)
+	}
+	if len(override.Ask) > 0 {
+		base.Ask = append([]string(nil), override.Ask...)
+	}
+	if len(override.AdditionalDirectories) > 0 {
+		base.AdditionalDirectories = append([]string(nil), override.AdditionalDirectories...)
+	}
+	if override.DisableBypassPermissionsMode != "" {
+		base.DisableBypassPermissionsMode = override.DisableBypassPermissionsMode
+	}
 	return base
 }

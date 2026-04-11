@@ -65,6 +65,28 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "permissions",
+		Aliases:     []string{"allowed-tools"},
+		Description: "Manage allow & deny tool permission rules",
+		Usage:       "/permissions",
+	}}); err != nil {
+		t.Fatalf("Register(permissions) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "login",
+		Description: "Sign in with your Anthropic account",
+		Usage:       "/login",
+	}}); err != nil {
+		t.Fatalf("Register(login) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "mcp",
+		Description: "Manage MCP servers",
+		Usage:       "/mcp [enable|disable <server-name>]",
+	}}); err != nil {
+		t.Fatalf("Register(mcp) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
@@ -84,7 +106,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/login - Sign in with your Anthropic account\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

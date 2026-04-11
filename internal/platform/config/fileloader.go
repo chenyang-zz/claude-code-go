@@ -27,7 +27,12 @@ type settingsFile struct {
 	Provider      string `json:"provider"`
 	SessionDBPath string `json:"sessionDbPath"`
 	Permissions   struct {
-		DefaultMode string `json:"defaultMode"`
+		DefaultMode                  string   `json:"defaultMode"`
+		Allow                        []string `json:"allow"`
+		Deny                         []string `json:"deny"`
+		Ask                          []string `json:"ask"`
+		AdditionalDirectories        []string `json:"additionalDirectories"`
+		DisableBypassPermissionsMode string   `json:"disableBypassPermissionsMode"`
 	} `json:"permissions"`
 }
 
@@ -128,6 +133,14 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 		Provider:      parsed.Provider,
 		ApprovalMode:  parsed.Permissions.DefaultMode,
 		SessionDBPath: parsed.SessionDBPath,
+		Permissions: coreconfig.PermissionConfig{
+			DefaultMode:                  parsed.Permissions.DefaultMode,
+			Allow:                        append([]string(nil), parsed.Permissions.Allow...),
+			Deny:                         append([]string(nil), parsed.Permissions.Deny...),
+			Ask:                          append([]string(nil), parsed.Permissions.Ask...),
+			AdditionalDirectories:        append([]string(nil), parsed.Permissions.AdditionalDirectories...),
+			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
+		},
 	}, nil
 }
 

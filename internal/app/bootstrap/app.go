@@ -118,6 +118,15 @@ func newCommandRegistry(cfg coreconfig.Config, runner *repl.Runner) (command.Reg
 	if err := registry.Register(servicecommands.DoctorCommand{Config: cfg}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.PermissionsCommand{Config: cfg}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.LoginCommand{Config: cfg}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		return nil, err
 	}

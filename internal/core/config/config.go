@@ -16,6 +16,24 @@ type Config struct {
 	ApprovalMode string
 	// SessionDBPath points at the session persistence database when enabled.
 	SessionDBPath string
+	// Permissions stores the migrated read-only permission settings surfaced to slash commands.
+	Permissions PermissionConfig
+}
+
+// PermissionConfig stores the minimal migrated permission settings used for runtime summaries.
+type PermissionConfig struct {
+	// DefaultMode controls the default approval mode derived from settings when provided.
+	DefaultMode string
+	// Allow lists explicit allow rules from settings.
+	Allow []string
+	// Deny lists explicit deny rules from settings.
+	Deny []string
+	// Ask lists explicit prompt rules from settings.
+	Ask []string
+	// AdditionalDirectories lists extra directories included in permission scope.
+	AdditionalDirectories []string
+	// DisableBypassPermissionsMode preserves the literal disable marker when bypass mode is turned off.
+	DisableBypassPermissionsMode string
 }
 
 // DefaultConfig returns the minimum configuration required by the single-turn text runtime.
@@ -24,5 +42,8 @@ func DefaultConfig() Config {
 		Model:        "claude-sonnet-4-5",
 		Provider:     "anthropic",
 		ApprovalMode: "default",
+		Permissions: PermissionConfig{
+			DefaultMode: "default",
+		},
 	}
 }
