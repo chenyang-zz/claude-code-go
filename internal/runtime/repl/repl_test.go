@@ -368,6 +368,9 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.LogoutCommand{}); err != nil {
 		t.Fatalf("Register(logout) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
+		t.Fatalf("Register(cost) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
 		t.Fatalf("Register(mcp) error = %v", err)
 	}
@@ -383,7 +386,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -420,6 +423,24 @@ func TestRunnerRunLogoutCommandReportsFallback(t *testing.T) {
 	want := "Interactive Anthropic account logout is not supported in Claude Code Go yet because account login is not available.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/logout) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunMCPCommandReportsFallback verifies /mcp is routed through the shared registry and emits the stable MCP fallback.
+// TestRunnerRunCostCommandReportsFallback verifies /cost is routed through the shared registry and emits the stable usage fallback.
+func TestRunnerRunCostCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.CostCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/cost"}); err != nil {
+		t.Fatalf("Run(/cost) error = %v", err)
+	}
+
+	want := "Session cost and duration tracking are not available in Claude Code Go yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/cost) output = %q, want %q", got, want)
 	}
 }
 
