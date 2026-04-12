@@ -180,6 +180,15 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.PlanCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.TasksCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.DiffCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.FilesCommand{}); err != nil {
 		return nil, err
 	}
