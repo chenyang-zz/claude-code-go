@@ -198,6 +198,15 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.UpgradeCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.UsageCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.StatsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ExtraUsageCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.ThemeCommand{
 		Config: cfg,
 		Store:  globalSettingsStore,

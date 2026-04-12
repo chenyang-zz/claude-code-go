@@ -466,6 +466,15 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.UpgradeCommand{}); err != nil {
 		t.Fatalf("Register(upgrade) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.UsageCommand{}); err != nil {
+		t.Fatalf("Register(usage) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.StatsCommand{}); err != nil {
+		t.Fatalf("Register(stats) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.ExtraUsageCommand{}); err != nil {
+		t.Fatalf("Register(extra-usage) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.ThemeCommand{}); err != nil {
 		t.Fatalf("Register(theme) error = %v", err)
 	}
@@ -487,7 +496,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -761,6 +770,57 @@ func TestRunnerRunUpgradeCommandReportsFallback(t *testing.T) {
 	want := "Interactive upgrade flow is not available in Claude Code Go yet. Review Claude Max plans at https://claude.ai/upgrade/max. Browser launch, subscription detection, and post-upgrade login handoff remain unmigrated.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/upgrade) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunUsageCommandReportsFallback verifies /usage is routed through the shared registry and emits the stable usage-limit fallback.
+func TestRunnerRunUsageCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.UsageCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/usage"}); err != nil {
+		t.Fatalf("Run(/usage) error = %v", err)
+	}
+
+	want := "Plan usage limits UI is not available in Claude Code Go yet. Settings Usage tab rendering, account plan limit lookup, and consumer subscription state detection remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/usage) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunStatsCommandReportsFallback verifies /stats is routed through the shared registry and emits the stable usage-statistics fallback.
+func TestRunnerRunStatsCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.StatsCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/stats"}); err != nil {
+		t.Fatalf("Run(/stats) error = %v", err)
+	}
+
+	want := "Usage statistics and activity views are not available in Claude Code Go yet. Aggregated usage history, activity panels, and analytics-backed summaries remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/stats) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunExtraUsageCommandReportsFallback verifies /extra-usage is routed through the shared registry and emits the stable browser-flow fallback.
+func TestRunnerRunExtraUsageCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.ExtraUsageCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/extra-usage"}); err != nil {
+		t.Fatalf("Run(/extra-usage) error = %v", err)
+	}
+
+	want := "Extra usage enrollment is not available in Claude Code Go yet. Browser launch, account overage management, and post-enrollment login handoff remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/extra-usage) output = %q, want %q", got, want)
 	}
 }
 
