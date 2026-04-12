@@ -180,6 +180,12 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("vim"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /vim command")
 	}
+	if _, ok := app.Runner.Commands.Get("pr-comments"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /pr-comments command")
+	}
+	if _, ok := app.Runner.Commands.Get("security-review"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /security-review command")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -213,8 +219,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 23 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 23", len(cmds))
+	if len(cmds) != 25 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 25", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -374,10 +380,24 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() twenty-second metadata = %#v, want vim metadata", got)
 	}
 	if got := cmds[22].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "pr-comments",
+		Description: "Get comments from a GitHub pull request",
+		Usage:       "/pr-comments",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-third metadata = %#v, want pr-comments metadata", got)
+	}
+	if got := cmds[23].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "security-review",
+		Description: "Complete a security review of the pending changes on the current branch",
+		Usage:       "/security-review",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-fourth metadata = %#v, want security-review metadata", got)
+	}
+	if got := cmds[24].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-third metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-fifth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

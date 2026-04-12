@@ -454,6 +454,12 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.VimCommand{}); err != nil {
 		t.Fatalf("Register(vim) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.PRCommentsCommand{}); err != nil {
+		t.Fatalf("Register(pr-comments) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.SecurityReviewCommand{}); err != nil {
+		t.Fatalf("Register(security-review) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{}); err != nil {
 		t.Fatalf("Register(seed-sessions) error = %v", err)
 	}
@@ -463,7 +469,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -517,6 +523,40 @@ func TestRunnerRunLoginCommandReportsAuthFallback(t *testing.T) {
 	want := "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key in settings or environment variables instead.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/login) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunPRCommentsCommandReportsPluginNotice verifies /pr-comments is routed through the shared registry and emits the stable plugin guidance.
+func TestRunnerRunPRCommentsCommandReportsPluginNotice(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.PRCommentsCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/pr-comments"}); err != nil {
+		t.Fatalf("Run(/pr-comments) error = %v", err)
+	}
+
+	want := "This command has moved to a plugin.\n\n1. Install it with: claude plugin install pr-comments@claude-code-marketplace\n2. Then run: /pr-comments:pr-comments\n3. More information: https://github.com/anthropics/claude-code-marketplace/blob/main/pr-comments/README.md\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/pr-comments) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunSecurityReviewCommandReportsPluginNotice verifies /security-review is routed through the shared registry and emits the stable plugin guidance.
+func TestRunnerRunSecurityReviewCommandReportsPluginNotice(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.SecurityReviewCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/security-review"}); err != nil {
+		t.Fatalf("Run(/security-review) error = %v", err)
+	}
+
+	want := "This command has moved to a plugin.\n\n1. Install it with: claude plugin install security-review@claude-code-marketplace\n2. Then run: /security-review:security-review\n3. More information: https://github.com/anthropics/claude-code-marketplace/blob/main/security-review/README.md\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/security-review) output = %q, want %q", got, want)
 	}
 }
 

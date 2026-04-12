@@ -192,6 +192,12 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.PRCommentsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.SecurityReviewCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
 		ProjectPath: dereferenceConfig(cfg).ProjectPath,
