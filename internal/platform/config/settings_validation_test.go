@@ -7,12 +7,12 @@ import (
 
 // TestValidateSettingsContentAcceptsSupportedSubset verifies the migrated validator accepts the supported settings subset.
 func TestValidateSettingsContentAcceptsSupportedSubset(t *testing.T) {
-	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"editorMode\": \"vim\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
+	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"theme\": \"auto\",\n  \"editorMode\": \"vim\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
 	if !result.IsValid {
 		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
 	}
-	if !strings.Contains(result.FullSchema, "\"permissions\"") || !strings.Contains(result.FullSchema, "\"editorMode\"") {
-		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions and editorMode schema", result.FullSchema)
+	if !strings.Contains(result.FullSchema, "\"permissions\"") || !strings.Contains(result.FullSchema, "\"editorMode\"") || !strings.Contains(result.FullSchema, "\"theme\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions, editorMode, and theme schema", result.FullSchema)
 	}
 }
 
@@ -71,5 +71,16 @@ func TestValidateSettingsContentRejectsUnsupportedEditorMode(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "- editorMode: Invalid value. Expected one of: \"emacs\", \"normal\", \"vim\"") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want editorMode enum error", result.Error)
+	}
+}
+
+// TestValidateSettingsContentRejectsUnsupportedTheme verifies theme uses a stable enum allowlist.
+func TestValidateSettingsContentRejectsUnsupportedTheme(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"theme\": \"solarized\"\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	if !strings.Contains(result.Error, "- theme: Invalid value. Expected one of: \"auto\", \"dark\", \"light\", \"light-daltonized\", \"dark-daltonized\", \"light-ansi\", \"dark-ansi\"") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want theme enum error", result.Error)
 	}
 }

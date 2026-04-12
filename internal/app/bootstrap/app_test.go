@@ -144,6 +144,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("session"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /session command")
 	}
+	if _, ok := app.Runner.Commands.Get("theme"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /theme command")
+	}
 	if _, ok := app.Runner.Commands.Get("vim"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /vim command")
 	}
@@ -180,8 +183,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 15 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 15", len(cmds))
+	if len(cmds) != 16 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 16", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -278,17 +281,24 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want session metadata", got)
 	}
 	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "theme",
+		Description: "Change the theme",
+		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
+	}) {
+		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want theme metadata", got)
+	}
+	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
-		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want vim metadata", got)
+		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

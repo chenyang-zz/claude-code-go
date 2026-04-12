@@ -24,6 +24,7 @@ type FileLoader struct {
 
 type settingsFile struct {
 	Model         string `json:"model"`
+	Theme         string `json:"theme"`
 	EditorMode    string `json:"editorMode"`
 	Provider      string `json:"provider"`
 	SessionDBPath string `json:"sessionDbPath"`
@@ -83,6 +84,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 
 	envCfg := coreconfig.Config{
 		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
+		Theme:         l.LookupEnv("CLAUDE_CODE_THEME"),
 		EditorMode:    l.LookupEnv("CLAUDE_CODE_EDITOR_MODE"),
 		Provider:      l.LookupEnv("CLAUDE_CODE_PROVIDER"),
 		APIKey:        l.LookupEnv("ANTHROPIC_API_KEY"),
@@ -95,6 +97,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	logger.DebugCF("runtime_config", "loaded runtime config", map[string]any{
 		"provider":            cfg.Provider,
 		"model":               cfg.Model,
+		"theme":               cfg.Theme,
 		"editor_mode":         cfg.EditorMode,
 		"has_api_key":         cfg.APIKey != "",
 		"api_base_url":        cfg.APIBaseURL,
@@ -133,6 +136,7 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 
 	return coreconfig.Config{
 		Model:         parsed.Model,
+		Theme:         coreconfig.NormalizeThemeSetting(parsed.Theme),
 		EditorMode:    coreconfig.NormalizeEditorMode(parsed.EditorMode),
 		Provider:      parsed.Provider,
 		ApprovalMode:  parsed.Permissions.DefaultMode,

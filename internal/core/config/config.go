@@ -6,6 +6,8 @@ type Config struct {
 	ProjectPath string
 	// Model overrides the default model selection when provided.
 	Model string
+	// Theme stores the persisted terminal theme preference.
+	Theme string
 	// EditorMode stores the persisted prompt editor keybinding mode.
 	EditorMode string
 	// Provider selects which backend provider implementation to use.
@@ -42,6 +44,7 @@ type PermissionConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Model:        "claude-sonnet-4-5",
+		Theme:        NormalizeThemeSetting(""),
 		EditorMode:   NormalizeEditorMode(""),
 		Provider:     "anthropic",
 		ApprovalMode: "default",
@@ -52,6 +55,20 @@ func DefaultConfig() Config {
 }
 
 const (
+	// ThemeSettingAuto identifies the source-compatible auto-follow terminal theme setting.
+	ThemeSettingAuto = "auto"
+	// ThemeSettingDark identifies the default dark theme setting.
+	ThemeSettingDark = "dark"
+	// ThemeSettingLight identifies the light theme setting.
+	ThemeSettingLight = "light"
+	// ThemeSettingLightDaltonized identifies the light colorblind-friendly setting.
+	ThemeSettingLightDaltonized = "light-daltonized"
+	// ThemeSettingDarkDaltonized identifies the dark colorblind-friendly setting.
+	ThemeSettingDarkDaltonized = "dark-daltonized"
+	// ThemeSettingLightANSI identifies the light ANSI-only theme setting.
+	ThemeSettingLightANSI = "light-ansi"
+	// ThemeSettingDarkANSI identifies the dark ANSI-only theme setting.
+	ThemeSettingDarkANSI = "dark-ansi"
 	// EditorModeNormal identifies the default prompt editor mode used by current settings.
 	EditorModeNormal = "normal"
 	// EditorModeVim identifies the Vim-style prompt editor mode.
@@ -59,6 +76,45 @@ const (
 	// EditorModeEmacs identifies the legacy source-compatible value that should normalize to normal mode.
 	EditorModeEmacs = "emacs"
 )
+
+var supportedThemeSettings = []string{
+	ThemeSettingAuto,
+	ThemeSettingDark,
+	ThemeSettingLight,
+	ThemeSettingLightDaltonized,
+	ThemeSettingDarkDaltonized,
+	ThemeSettingLightANSI,
+	ThemeSettingDarkANSI,
+}
+
+// SupportedThemeSettings returns the stable theme-setting values migrated in the Go host.
+func SupportedThemeSettings() []string {
+	return append([]string(nil), supportedThemeSettings...)
+}
+
+// IsSupportedThemeSetting reports whether a string matches one of the migrated theme-setting values.
+func IsSupportedThemeSetting(value string) bool {
+	switch value {
+	case ThemeSettingAuto,
+		ThemeSettingDark,
+		ThemeSettingLight,
+		ThemeSettingLightDaltonized,
+		ThemeSettingDarkDaltonized,
+		ThemeSettingLightANSI,
+		ThemeSettingDarkANSI:
+		return true
+	default:
+		return false
+	}
+}
+
+// NormalizeThemeSetting folds empty theme values into the stable runtime default.
+func NormalizeThemeSetting(value string) string {
+	if value == "" {
+		return ThemeSettingDark
+	}
+	return value
+}
 
 // NormalizeEditorMode folds legacy and empty editor mode values into the stable runtime representation.
 func NormalizeEditorMode(value string) string {

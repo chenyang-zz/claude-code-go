@@ -16,6 +16,7 @@ func TestSettingsSchemaStringIncludesExpandedFields(t *testing.T) {
 		`"sessionDbPath"`,
 		`"cleanupPeriodDays"`,
 		`"defaultShell"`,
+		`"theme"`,
 		`"defaultMode"`,
 		`"additionalDirectories"`,
 	} {
@@ -30,6 +31,7 @@ func TestValidateSettingsDocumentAcceptsExpandedSubset(t *testing.T) {
 	issues := ValidateSettingsDocument(map[string]any{
 		"apiKeyHelper":           "/tmp/auth.sh",
 		"sessionDbPath":          "/tmp/session.db",
+		"theme":                  "dark",
 		"respectGitignore":       true,
 		"cleanupPeriodDays":      float64(30),
 		"includeCoAuthoredBy":    false,
@@ -44,6 +46,22 @@ func TestValidateSettingsDocumentAcceptsExpandedSubset(t *testing.T) {
 	})
 	if len(issues) != 0 {
 		t.Fatalf("ValidateSettingsDocument() issues = %#v, want none", issues)
+	}
+}
+
+// TestValidateSettingsDocumentRejectsInvalidTheme verifies invalid theme values produce a stable enum error.
+func TestValidateSettingsDocumentRejectsInvalidTheme(t *testing.T) {
+	issues := ValidateSettingsDocument(map[string]any{
+		"theme": "solarized",
+	})
+	if len(issues) != 1 {
+		t.Fatalf("ValidateSettingsDocument() issues = %#v, want 1 issue", issues)
+	}
+	if issues[0].Path != "theme" {
+		t.Fatalf("ValidateSettingsDocument() path = %q, want theme", issues[0].Path)
+	}
+	if issues[0].Message != `Invalid value. Expected one of: "auto", "dark", "light", "light-daltonized", "dark-daltonized", "light-ansi", "dark-ansi"` {
+		t.Fatalf("ValidateSettingsDocument() message = %q, want theme enum error", issues[0].Message)
 	}
 }
 

@@ -33,6 +33,10 @@ type stubEditorModeStore struct {
 	saved []string
 }
 
+type stubThemeStore struct {
+	saved []string
+}
+
 type recordingSessionRepository struct {
 	loadResult   coresession.Session
 	loadErr      error
@@ -61,6 +65,12 @@ func (s stubWorktreeLister) ListWorktrees(ctx context.Context, cwd string) ([]st
 func (s *stubEditorModeStore) SaveEditorMode(ctx context.Context, mode string) error {
 	_ = ctx
 	s.saved = append(s.saved, mode)
+	return nil
+}
+
+func (s *stubThemeStore) SaveTheme(ctx context.Context, theme string) error {
+	_ = ctx
+	s.saved = append(s.saved, theme)
 	return nil
 }
 
@@ -391,6 +401,9 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.ThemeCommand{}); err != nil {
+		t.Fatalf("Register(theme) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.VimCommand{}); err != nil {
 		t.Fatalf("Register(vim) error = %v", err)
 	}
@@ -403,7 +416,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -512,6 +525,32 @@ func TestRunnerRunSessionCommandReportsRemoteFallback(t *testing.T) {
 }
 
 // TestRunnerRunVimCommandPersistsEditorMode verifies /vim is routed through the shared registry and updates the stored mode.
+// TestRunnerRunThemeCommandPersistsTheme verifies /theme is routed through the shared registry and updates the stored theme.
+func TestRunnerRunThemeCommandPersistsTheme(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	cfg := &coreconfig.Config{Theme: coreconfig.ThemeSettingDark}
+	store := &stubThemeStore{}
+	registerSlashCommands(t, runner, servicecommands.ThemeCommand{
+		Config: cfg,
+		Store:  store,
+	})
+
+	if err := runner.Run(context.Background(), []string{"/theme", "light"}); err != nil {
+		t.Fatalf("Run(/theme) error = %v", err)
+	}
+
+	want := "Theme set to light. Claude Code Go stores the preference now, but the interactive theme picker and TUI theme rendering are not implemented yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/theme) output = %q, want %q", got, want)
+	}
+	if len(store.saved) != 1 || store.saved[0] != coreconfig.ThemeSettingLight {
+		t.Fatalf("saved themes = %#v, want []string{\"light\"}", store.saved)
+	}
+}
+
+// TestRunnerRunVimCommandPersistsEditorMode verifies /vim is routed through the shared registry and updates the stored mode.
 func TestRunnerRunVimCommandPersistsEditorMode(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
@@ -550,7 +589,7 @@ func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
 		t.Fatalf("Run(/settings) error = %v", err)
 	}
 
-	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Editor mode: normal\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
+	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Theme: dark\n- Editor mode: normal\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/settings) output = %q, want %q", got, want)
 	}

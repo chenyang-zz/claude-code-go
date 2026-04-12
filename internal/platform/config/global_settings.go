@@ -64,6 +64,46 @@ func (s *GlobalSettingsStore) SaveEditorMode(ctx context.Context, mode string) e
 	return nil
 }
 
+// SaveTheme writes the normalized theme setting into the global settings file without dropping unrelated fields.
+func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error {
+	_ = ctx
+
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	normalized := coreconfig.NormalizeThemeSetting(theme)
+	if !coreconfig.IsSupportedThemeSetting(normalized) {
+		return fmt.Errorf("unsupported theme setting %q", theme)
+	}
+
+	document, err := s.loadDocument()
+	if err != nil {
+		return err
+	}
+	document["theme"] = normalized
+
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
+		return fmt.Errorf("create global settings directory %s: %w", filepath.Dir(s.Path), err)
+	}
+
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode global settings %s: %w", s.Path, err)
+	}
+	encoded = append(encoded, '\n')
+
+	if err := os.WriteFile(s.Path, encoded, 0o644); err != nil {
+		return fmt.Errorf("write global settings %s: %w", s.Path, err)
+	}
+
+	logger.DebugCF("settings_config", "updated global theme setting", map[string]any{
+		"path":  s.Path,
+		"theme": normalized,
+	})
+	return nil
+}
+
 // loadDocument reads the current settings JSON document or returns an empty object when it does not exist.
 func (s *GlobalSettingsStore) loadDocument() (map[string]any, error) {
 	data, err := os.ReadFile(s.Path)

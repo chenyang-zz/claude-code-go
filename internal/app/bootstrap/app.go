@@ -144,6 +144,12 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.ThemeCommand{
+		Config: cfg,
+		Store:  globalSettingsStore,
+	}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.VimCommand{
 		Config: cfg,
 		Store:  globalSettingsStore,

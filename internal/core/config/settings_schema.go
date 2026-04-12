@@ -35,6 +35,9 @@ var (
 		EditorModeNormal,
 		EditorModeVim,
 	}
+
+	// themeSettingValues stores the currently migrated terminal theme setting values.
+	themeSettingValues = SupportedThemeSettings()
 )
 
 // ValidationIssue describes one caller-facing settings validation failure.
@@ -61,6 +64,11 @@ func SettingsSchemaDocument() map[string]any {
 			"model": map[string]any{
 				"type":        "string",
 				"description": "Override the default model used by Claude Code",
+			},
+			"theme": map[string]any{
+				"type":        "string",
+				"enum":        themeSettingValues,
+				"description": "Terminal theme preference",
 			},
 			"editorMode": map[string]any{
 				"type":        "string",
@@ -160,6 +168,10 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			}
 		case "model":
 			if issue, ok := validateStringField("model", objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "theme":
+			if issue, ok := validateEnumField(key, objectValue[key], themeSettingValues); ok {
 				issues = append(issues, issue)
 			}
 		case "editorMode":

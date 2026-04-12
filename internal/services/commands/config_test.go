@@ -25,6 +25,7 @@ func TestConfigCommandExecuteRendersResolvedConfig(t *testing.T) {
 		Config: coreconfig.Config{
 			Provider:      "anthropic",
 			Model:         "claude-sonnet-4-5",
+			Theme:         "light",
 			EditorMode:    "vim",
 			ProjectPath:   "/repo",
 			ApprovalMode:  "default",
@@ -37,7 +38,7 @@ func TestConfigCommandExecuteRendersResolvedConfig(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Current configuration:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- Editor mode: vim\n- Project path: /repo\n- Approval mode: default\n- Session DB path: /tmp/claude.db\n- API key: configured\n- API base URL: https://example.invalid"
+	want := "Current configuration:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- Theme: light\n- Editor mode: vim\n- Project path: /repo\n- Approval mode: default\n- Session DB path: /tmp/claude.db\n- API key: configured\n- API base URL: https://example.invalid"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
