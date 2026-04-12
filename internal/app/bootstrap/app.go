@@ -25,8 +25,8 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// EngineFactory constructs the engine selected by the resolved runtime config.
-type EngineFactory func(cfg coreconfig.Config) (engine.Engine, error)
+// EngineFactory constructs the engine selected by the resolved runtime config together with the shared filesystem policy.
+type EngineFactory func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error)
 
 // App wires together the minimum batch-07 runtime needed by cmd/cc.
 type App struct {
@@ -53,7 +53,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		return nil, err
 	}
 
-	eng, err := engineFactory(cfg)
+	eng, policy, err := engineFactory(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +76,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	}
 
 	var globalSettingsStore *platformconfig.GlobalSettingsStore
+	var projectSettingsStore *platformconfig.ProjectSettingsStore
 	if fileLoader, ok := loader.(*platformconfig.FileLoader); ok {
 		globalSettingsStore = platformconfig.NewGlobalSettingsStore(fileLoader.HomeDir)
+		projectSettingsStore = platformconfig.NewProjectSettingsStore(fileLoader.CWD)
 	}
 
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +101,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, policy *corepermission.FilesystemPolicy) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -130,6 +132,13 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.PermissionsCommand{Config: dereferenceConfig(cfg)}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.AddDirCommand{
+		Config: cfg,
+		Store:  projectSettingsStore,
+		Policy: policy,
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.LoginCommand{Config: dereferenceConfig(cfg)}); err != nil {
@@ -180,15 +189,22 @@ func dereferenceConfig(cfg *coreconfig.Config) coreconfig.Config {
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
-func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
+func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 	filesystem := platformfs.NewLocalFS()
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	for _, configured := range cfg.Permissions.AdditionalDirectories {
+		expanded, err := platformfs.ExpandPath(configured, cfg.ProjectPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("expand configured additional directory %q: %w", configured, err)
+		}
+		policy.AddReadRoot(expanded)
 	}
 	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
@@ -205,9 +221,9 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, error) {
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
 		)
-		return runtime, nil
+		return runtime, policy, nil
 	default:
-		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
+		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
 }
 

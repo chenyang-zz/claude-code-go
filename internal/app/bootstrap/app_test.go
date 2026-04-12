@@ -10,6 +10,7 @@ import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 )
@@ -28,9 +29,13 @@ func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testi
 		},
 	}
 
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		_ = cfg
-		return stubEngine{}, nil
+		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return stubEngine{}, policy, nil
 	})
 	if err != nil {
 		t.Fatalf("NewAppWithDependencies() error = %v", err)
@@ -79,12 +84,16 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	}
 
 	called := false
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		called = true
 		if cfg.APIKey != "test-key" {
 			t.Fatalf("engine factory cfg = %#v, want api key", cfg)
 		}
-		return stubEngine{}, nil
+		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return stubEngine{}, policy, nil
 	})
 	if err != nil {
 		t.Fatalf("NewAppWithDependencies() error = %v", err)
@@ -129,6 +138,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("allowed-tools"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /allowed-tools alias")
 	}
+	if _, ok := app.Runner.Commands.Get("add-dir"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /add-dir command")
+	}
 	if _, ok := app.Runner.Commands.Get("login"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /login command")
 	}
@@ -160,7 +172,7 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
 func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
-	eng, err := DefaultEngineFactory(coreconfig.Config{
+	eng, _, err := DefaultEngineFactory(coreconfig.Config{
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4-5",
 		ApprovalMode: approval.ModeBypassPermissions,
@@ -180,14 +192,14 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil)
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 17 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 17", len(cmds))
+	if len(cmds) != 18 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 18", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -249,66 +261,73 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() eighth metadata = %#v, want permissions metadata", got)
 	}
 	if got := cmds[8].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "add-dir",
+		Description: "Add a new working directory",
+		Usage:       "/add-dir <path>",
+	}) {
+		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want add-dir metadata", got)
+	}
+	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "login",
 		Description: "Sign in with your Anthropic account",
 		Usage:       "/login",
 	}) {
-		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want login metadata", got)
+		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want login metadata", got)
 	}
-	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "logout",
 		Description: "Sign out from your Anthropic account",
 		Usage:       "/logout",
 	}) {
-		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want logout metadata", got)
+		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want logout metadata", got)
 	}
-	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "cost",
 		Description: "Show the total cost and duration of the current session",
 		Usage:       "/cost",
 	}) {
-		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want cost metadata", got)
+		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want cost metadata", got)
 	}
-	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "status",
 		Description: "Show Claude Code status including version, model, account, API connectivity, and tool statuses",
 		Usage:       "/status",
 	}) {
-		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want status metadata", got)
+		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want status metadata", got)
 	}
-	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
 		Usage:       "/mcp [enable|disable <server-name>]",
 	}) {
-		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want mcp metadata", got)
+		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want mcp metadata", got)
 	}
-	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
-		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want session metadata", got)
+		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want session metadata", got)
 	}
-	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "theme",
 		Description: "Change the theme",
 		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
 	}) {
-		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want theme metadata", got)
+		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want theme metadata", got)
 	}
-	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
-		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want vim metadata", got)
+		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[17].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() eighteenth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

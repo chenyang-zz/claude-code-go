@@ -37,7 +37,7 @@ func (s *GlobalSettingsStore) SaveEditorMode(ctx context.Context, mode string) e
 	}
 
 	normalized := coreconfig.NormalizeEditorMode(mode)
-	document, err := s.loadDocument()
+	document, err := loadSettingsDocument(s.Path)
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func (s *GlobalSettingsStore) SaveModel(ctx context.Context, model string) error
 		return fmt.Errorf("global settings path is not configured")
 	}
 
-	document, err := s.loadDocument()
+	document, err := loadSettingsDocument(s.Path)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error
 		return fmt.Errorf("unsupported theme setting %q", theme)
 	}
 
-	document, err := s.loadDocument()
+	document, err := loadSettingsDocument(s.Path)
 	if err != nil {
 		return err
 	}
@@ -145,29 +145,4 @@ func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error
 		"theme": normalized,
 	})
 	return nil
-}
-
-// loadDocument reads the current settings JSON document or returns an empty object when it does not exist.
-func (s *GlobalSettingsStore) loadDocument() (map[string]any, error) {
-	data, err := os.ReadFile(s.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
-		return nil, fmt.Errorf("read global settings %s: %w", s.Path, err)
-	}
-
-	trimmed := strings.TrimSpace(string(data))
-	if trimmed == "" {
-		return map[string]any{}, nil
-	}
-
-	var document map[string]any
-	if err := json.Unmarshal(data, &document); err != nil {
-		return nil, fmt.Errorf("parse global settings %s: %w", s.Path, err)
-	}
-	if document == nil {
-		return map[string]any{}, nil
-	}
-	return document, nil
 }

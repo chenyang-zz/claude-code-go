@@ -44,7 +44,7 @@ func TestPermissionsCommandExecuteRendersSummary(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Permission settings:\n- Default mode: plan\n- Disable bypass-permissions mode: enabled\n- Allow rules: Bash(ls), Read(src/**)\n- Deny rules: Bash(rm -rf)\n- Ask rules: Edit(*)\n- Additional directories: packages/app, docs\nInteractive permission rule editing is not available in the Go host yet. Update .claude/settings.json to change these values."
+	want := "Permission settings:\n- Default mode: plan\n- Disable bypass-permissions mode: enabled\n- Allow rules: Bash(ls), Read(src/**)\n- Deny rules: Bash(rm -rf)\n- Ask rules: Edit(*)\n- Additional directories: packages/app, docs\nRun /add-dir <path> to persist one extra working directory. Interactive permission rule editing is not available in the Go host yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

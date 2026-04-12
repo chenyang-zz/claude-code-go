@@ -3,6 +3,8 @@ package repl
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
@@ -38,6 +41,10 @@ type stubThemeStore struct {
 }
 
 type stubModelStore struct {
+	saved []string
+}
+
+type stubAdditionalDirectoryStore struct {
 	saved []string
 }
 
@@ -81,6 +88,12 @@ func (s *stubThemeStore) SaveTheme(ctx context.Context, theme string) error {
 func (s *stubModelStore) SaveModel(ctx context.Context, model string) error {
 	_ = ctx
 	s.saved = append(s.saved, model)
+	return nil
+}
+
+func (s *stubAdditionalDirectoryStore) AddAdditionalDirectory(ctx context.Context, directory string) error {
+	_ = ctx
+	s.saved = append(s.saved, directory)
 	return nil
 }
 
@@ -396,6 +409,12 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.DoctorCommand{}); err != nil {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.PermissionsCommand{}); err != nil {
+		t.Fatalf("Register(permissions) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.AddDirCommand{}); err != nil {
+		t.Fatalf("Register(add-dir) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.LoginCommand{}); err != nil {
 		t.Fatalf("Register(login) error = %v", err)
 	}
@@ -429,7 +448,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/doctor - Diagnose the current Claude Code Go host setup\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -564,6 +583,50 @@ func TestRunnerRunModelCommandPersistsModel(t *testing.T) {
 	}
 	if cfg.Model != "claude-opus-4-1" {
 		t.Fatalf("config model = %q, want claude-opus-4-1", cfg.Model)
+	}
+}
+
+// TestRunnerRunAddDirCommandPersistsDirectory verifies /add-dir is routed through the shared registry and updates read scope immediately.
+func TestRunnerRunAddDirCommandPersistsDirectory(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+
+	rootDir := t.TempDir()
+	projectDir := filepath.Join(rootDir, "project")
+	extraDir := filepath.Join(rootDir, "shared")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	store := &stubAdditionalDirectoryStore{}
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+	cfg := &coreconfig.Config{ProjectPath: projectDir}
+	registerSlashCommands(t, runner, servicecommands.AddDirCommand{
+		Config: cfg,
+		Store:  store,
+		Policy: policy,
+	})
+
+	if err := runner.Run(context.Background(), []string{"/add-dir", "../shared"}); err != nil {
+		t.Fatalf("Run(/add-dir) error = %v", err)
+	}
+
+	want := "Added " + extraDir + " as a working directory. Claude Code Go persists it to project settings now, but the interactive add-dir flow and session-only directory mode are not implemented yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/add-dir) output = %q, want %q", got, want)
+	}
+	if len(store.saved) != 1 || store.saved[0] != extraDir {
+		t.Fatalf("saved directories = %#v, want %#v", store.saved, []string{extraDir})
+	}
+	if got := policy.CheckReadPermissionForTool(context.Background(), "file_read", filepath.Join(extraDir, "README.md"), projectDir).Decision; got != corepermission.DecisionAllow {
+		t.Fatalf("policy decision = %q, want allow", got)
 	}
 }
 

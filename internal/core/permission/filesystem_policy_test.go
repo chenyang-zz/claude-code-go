@@ -158,6 +158,27 @@ func TestFilesystemPolicyEvaluateFilesystemRead(t *testing.T) {
 	}
 }
 
+func TestFilesystemPolicyEvaluateFilesystemReadAllowsAdditionalReadRoot(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join(string(filepath.Separator), "workspace")
+	policy, err := NewFilesystemPolicy(RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+	policy.AddReadRoot(filepath.Join(workspace, "docs"))
+
+	evaluation := policy.EvaluateFilesystem(context.Background(), FilesystemRequest{
+		ToolName:   "file_read",
+		Path:       filepath.Join(workspace, "docs", "guide.md"),
+		WorkingDir: workspace,
+		Access:     AccessRead,
+	})
+	if evaluation.Decision != DecisionAllow {
+		t.Fatalf("EvaluateFilesystem() decision = %q, want %q", evaluation.Decision, DecisionAllow)
+	}
+}
+
 func TestFilesystemPolicyEvaluateFilesystemWriteDefaultsToAsk(t *testing.T) {
 	t.Parallel()
 

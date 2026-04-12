@@ -44,7 +44,7 @@ func (c PermissionsCommand) Execute(ctx context.Context, args command.Args) (com
 		fmt.Sprintf("- Deny rules: %s", permissionsListSummary(c.Config.Permissions.Deny)),
 		fmt.Sprintf("- Ask rules: %s", permissionsListSummary(c.Config.Permissions.Ask)),
 		fmt.Sprintf("- Additional directories: %s", permissionsListSummary(c.Config.Permissions.AdditionalDirectories)),
-		"Interactive permission rule editing is not available in the Go host yet. Update .claude/settings.json to change these values.",
+		"Run /add-dir <path> to persist one extra working directory. Interactive permission rule editing is not available in the Go host yet.",
 	}
 
 	logger.DebugCF("commands", "rendered permissions command output", map[string]any{

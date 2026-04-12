@@ -15,6 +15,8 @@ import (
 type FilesystemPolicy struct {
 	// Rules keeps the normalized read/write rule collections for later migration stages.
 	Rules RuleSet
+	// AdditionalReadRoots lists extra directories that should behave like source working directories for read-style tool access.
+	AdditionalReadRoots []string
 }
 
 // NewFilesystemPolicy constructs the minimal filesystem policy after validating the provided rules.
@@ -24,6 +26,25 @@ func NewFilesystemPolicy(rules RuleSet) (*FilesystemPolicy, error) {
 	}
 
 	return &FilesystemPolicy{Rules: rules}, nil
+}
+
+// AddReadRoot registers one extra readable root so slash commands can widen the effective workspace during one session.
+func (p *FilesystemPolicy) AddReadRoot(root string) {
+	if p == nil {
+		return
+	}
+
+	normalized := filepath.Clean(strings.TrimSpace(root))
+	if normalized == "" {
+		return
+	}
+
+	for _, existing := range p.AdditionalReadRoots {
+		if existing == normalized {
+			return
+		}
+	}
+	p.AdditionalReadRoots = append(p.AdditionalReadRoots, normalized)
 }
 
 // EvaluateFilesystem evaluates one filesystem access request against the current minimal policy.
@@ -113,7 +134,7 @@ func (p *FilesystemPolicy) evaluateRead(req FilesystemRequest, normalizedPath st
 		}
 	}
 
-	if pathWithinRoot(normalizedWorkingDir, normalizedPath) {
+	if p.pathAllowedForRead(normalizedWorkingDir, normalizedPath) {
 		logger.DebugCF("permission", "filesystem read allowed inside working directory", map[string]any{
 			"path":        normalizedPath,
 			"working_dir": normalizedWorkingDir,
@@ -197,7 +218,7 @@ func (p *FilesystemPolicy) CheckReadPermissionForGlob(ctx context.Context, toolN
 		}
 	}
 
-	if pathWithinRoot(normalizedWorkingDir, normalizedPath) {
+	if p.pathAllowedForRead(normalizedWorkingDir, normalizedPath) {
 		return Evaluation{Decision: DecisionAllow}
 	}
 
@@ -212,6 +233,19 @@ func (p *FilesystemPolicy) CheckReadPermissionForGlob(ctx context.Context, toolN
 		Decision: DecisionAsk,
 		Message:  fmt.Sprintf("Claude requested permissions to read from %s, but you haven't granted it yet.", req.Path),
 	}
+}
+
+// pathAllowedForRead reports whether one path is inside the main working directory or one migrated extra working directory.
+func (p *FilesystemPolicy) pathAllowedForRead(workingDir string, target string) bool {
+	if pathWithinRoot(workingDir, target) {
+		return true
+	}
+	for _, root := range p.AdditionalReadRoots {
+		if pathWithinRoot(root, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckWritePermissionForTool evaluates one write-style filesystem request for a tool.
