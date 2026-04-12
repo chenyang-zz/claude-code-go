@@ -448,6 +448,15 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.BranchCommand{}); err != nil {
+		t.Fatalf("Register(branch) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.VoiceCommand{}); err != nil {
+		t.Fatalf("Register(voice) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.PrivacySettingsCommand{}); err != nil {
+		t.Fatalf("Register(privacy-settings) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.PlanCommand{}); err != nil {
 		t.Fatalf("Register(plan) error = %v", err)
 	}
@@ -511,9 +520,77 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunBranchCommandReportsFallback verifies /branch is routed through the shared registry and emits the stable branch guidance fallback.
+func TestRunnerRunBranchCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.BranchCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/branch", "release-cut"}); err != nil {
+		t.Fatalf("Run(/branch) error = %v", err)
+	}
+
+	want := "Interactive conversation branching is not available through /branch in Claude Code Go yet. Use `cc --fork-session --continue <prompt>` to fork the latest conversation in the current project, or `cc --fork-session /resume <session-id> <prompt>` to fork a specific saved session. Transcript-based branch naming and in-session resume handoff remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/branch) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunBranchAliasReportsFallback verifies /fork resolves to the shared /branch implementation.
+func TestRunnerRunBranchAliasReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.BranchCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/fork"}); err != nil {
+		t.Fatalf("Run(/fork) error = %v", err)
+	}
+
+	want := "Interactive conversation branching is not available through /branch in Claude Code Go yet. Use `cc --fork-session --continue <prompt>` to fork the latest conversation in the current project, or `cc --fork-session /resume <session-id> <prompt>` to fork a specific saved session. Transcript-based branch naming and in-session resume handoff remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/fork) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunVoiceCommandReportsFallback verifies /voice is routed through the shared registry and emits the stable voice fallback.
+func TestRunnerRunVoiceCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.VoiceCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/voice"}); err != nil {
+		t.Fatalf("Run(/voice) error = %v", err)
+	}
+
+	want := "Voice mode is not available in Claude Code Go yet. Microphone capture, push-to-talk, recording dependency checks, speech-to-text language handling, and voice settings persistence remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/voice) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunPrivacySettingsCommandReportsFallback verifies /privacy-settings is routed through the shared registry and emits the stable fallback.
+func TestRunnerRunPrivacySettingsCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.PrivacySettingsCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/privacy-settings"}); err != nil {
+		t.Fatalf("Run(/privacy-settings) error = %v", err)
+	}
+
+	want := "Privacy settings UI is not available in Claude Code Go yet. Review and manage your privacy settings at https://claude.ai/settings/data-privacy-controls. Grove qualification checks, privacy settings fetch/update, and dialog rendering remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/privacy-settings) output = %q, want %q", got, want)
 	}
 }
 
