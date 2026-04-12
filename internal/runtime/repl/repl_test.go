@@ -481,6 +481,12 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.VimCommand{}); err != nil {
 		t.Fatalf("Register(vim) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.TerminalSetupCommand{}); err != nil {
+		t.Fatalf("Register(terminal-setup) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.KeybindingsCommand{}); err != nil {
+		t.Fatalf("Register(keybindings) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.PRCommentsCommand{}); err != nil {
 		t.Fatalf("Register(pr-comments) error = %v", err)
 	}
@@ -496,7 +502,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -516,6 +522,40 @@ func TestRunnerRunMemoryCommandReportsFallback(t *testing.T) {
 	want := "Memory file editing is not available in Claude Code Go yet. Memory file discovery, interactive selection, file creation, and editor launch remain unmigrated.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/memory) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunTerminalSetupCommandReportsFallback verifies /terminal-setup is routed through the shared registry and emits the stable guidance fallback.
+func TestRunnerRunTerminalSetupCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.TerminalSetupCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/terminal-setup"}); err != nil {
+		t.Fatalf("Run(/terminal-setup) error = %v", err)
+	}
+
+	want := "Terminal setup automation is not available in Claude Code Go yet. Shift+Enter shortcut installation, terminal-specific config writes, backup/restore, remote-session guidance, and shell completion setup remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/terminal-setup) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunKeybindingsCommandReportsFallback verifies /keybindings is routed through the shared registry and emits the stable guidance fallback.
+func TestRunnerRunKeybindingsCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.KeybindingsCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/keybindings"}); err != nil {
+		t.Fatalf("Run(/keybindings) error = %v", err)
+	}
+
+	want := "Keybindings file management is not available in Claude Code Go yet. Keybindings file discovery, template creation, file writes, and editor launch remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/keybindings) output = %q, want %q", got, want)
 	}
 }
 

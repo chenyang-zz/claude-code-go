@@ -207,6 +207,12 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("vim"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /vim command")
 	}
+	if _, ok := app.Runner.Commands.Get("terminal-setup"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /terminal-setup command")
+	}
+	if _, ok := app.Runner.Commands.Get("keybindings"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /keybindings command")
+	}
 	if _, ok := app.Runner.Commands.Get("pr-comments"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /pr-comments command")
 	}
@@ -246,8 +252,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 34 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 34", len(cmds))
+	if len(cmds) != 36 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 36", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -470,24 +476,38 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() thirty-first metadata = %#v, want vim metadata", got)
 	}
 	if got := cmds[31].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "terminal-setup",
+		Description: "Install Shift+Enter key binding for newlines",
+		Usage:       "/terminal-setup",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-second metadata = %#v, want terminal-setup metadata", got)
+	}
+	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "keybindings",
+		Description: "Open or create your keybindings configuration file",
+		Usage:       "/keybindings",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-third metadata = %#v, want keybindings metadata", got)
+	}
+	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "pr-comments",
 		Description: "Get comments from a GitHub pull request",
 		Usage:       "/pr-comments",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-second metadata = %#v, want pr-comments metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-fourth metadata = %#v, want pr-comments metadata", got)
 	}
-	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[34].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "security-review",
 		Description: "Complete a security review of the pending changes on the current branch",
 		Usage:       "/security-review",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-third metadata = %#v, want security-review metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-fifth metadata = %#v, want security-review metadata", got)
 	}
-	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[35].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-fourth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-sixth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

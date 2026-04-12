@@ -219,6 +219,12 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.TerminalSetupCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.KeybindingsCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.PRCommentsCommand{}); err != nil {
 		return nil, err
 	}
