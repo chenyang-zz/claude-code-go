@@ -7,6 +7,60 @@ import (
 	"testing"
 )
 
+// TestGlobalSettingsStoreSaveModelPreservesExistingFields verifies model updates keep unrelated settings content intact.
+func TestGlobalSettingsStoreSaveModelPreservesExistingFields(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"theme\": \"dark\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveModel(context.Background(), "claude-opus-4-1"); err != nil {
+		t.Fatalf("SaveModel() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"model\": \"claude-opus-4-1\",\n  \"theme\": \"dark\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
+// TestGlobalSettingsStoreSaveModelClearsOverride verifies saving the default model removes the explicit settings override.
+func TestGlobalSettingsStoreSaveModelClearsOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"model\": \"claude-opus-4-1\",\n  \"theme\": \"light\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveModel(context.Background(), ""); err != nil {
+		t.Fatalf("SaveModel() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"theme\": \"light\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
 // TestGlobalSettingsStoreSaveEditorModePreservesExistingFields verifies editorMode updates keep unrelated settings content intact.
 func TestGlobalSettingsStoreSaveEditorModePreservesExistingFields(t *testing.T) {
 	tempDir := t.TempDir()
@@ -50,6 +104,27 @@ func TestGlobalSettingsStoreSaveEditorModeCreatesFile(t *testing.T) {
 	}
 	got := string(data)
 	want := "{\n  \"editorMode\": \"normal\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
+// TestGlobalSettingsStoreSaveModelCreatesFile verifies the store can create a missing global settings file for model writes.
+func TestGlobalSettingsStoreSaveModelCreatesFile(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveModel(context.Background(), "claude-sonnet-4-5"); err != nil {
+		t.Fatalf("SaveModel() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"model\": \"claude-sonnet-4-5\"\n}\n"
 	if got != want {
 		t.Fatalf("settings content = %q, want %q", got, want)
 	}

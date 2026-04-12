@@ -64,6 +64,49 @@ func (s *GlobalSettingsStore) SaveEditorMode(ctx context.Context, mode string) e
 	return nil
 }
 
+// SaveModel writes the requested model override into the global settings file without dropping unrelated fields.
+func (s *GlobalSettingsStore) SaveModel(ctx context.Context, model string) error {
+	_ = ctx
+
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	document, err := s.loadDocument()
+	if err != nil {
+		return err
+	}
+
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		delete(document, "model")
+	} else {
+		document["model"] = trimmed
+	}
+
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
+		return fmt.Errorf("create global settings directory %s: %w", filepath.Dir(s.Path), err)
+	}
+
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode global settings %s: %w", s.Path, err)
+	}
+	encoded = append(encoded, '\n')
+
+	if err := os.WriteFile(s.Path, encoded, 0o644); err != nil {
+		return fmt.Errorf("write global settings %s: %w", s.Path, err)
+	}
+
+	logger.DebugCF("settings_config", "updated global model setting", map[string]any{
+		"path":         s.Path,
+		"model":        trimmed,
+		"cleared":      trimmed == "",
+		"has_override": trimmed != "",
+	})
+	return nil
+}
+
 // SaveTheme writes the normalized theme setting into the global settings file without dropping unrelated fields.
 func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error {
 	_ = ctx

@@ -120,6 +120,12 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.ConfigCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.ModelCommand{
+		Config: cfg,
+		Store:  globalSettingsStore,
+	}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.DoctorCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
