@@ -116,6 +116,9 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.CompactCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.MemoryCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(repl.NewResumeCommandAdapter(runner)); err != nil {
 		return nil, err
 	}
