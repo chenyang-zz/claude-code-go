@@ -448,6 +448,24 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		t.Fatalf("Register(session) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.FilesCommand{}); err != nil {
+		t.Fatalf("Register(files) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.CopyCommand{}); err != nil {
+		t.Fatalf("Register(copy) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.ExportCommand{}); err != nil {
+		t.Fatalf("Register(export) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.VersionCommand{}); err != nil {
+		t.Fatalf("Register(version) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.ReleaseNotesCommand{}); err != nil {
+		t.Fatalf("Register(release-notes) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.UpgradeCommand{}); err != nil {
+		t.Fatalf("Register(upgrade) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.ThemeCommand{}); err != nil {
 		t.Fatalf("Register(theme) error = %v", err)
 	}
@@ -469,7 +487,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/pr-comments - Get comments from a GitHub pull request\n/security-review - Complete a security review of the pending changes on the current branch\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -693,6 +711,56 @@ func TestRunnerRunExportCommandReportsFallback(t *testing.T) {
 	want := "Conversation export is not available in Claude Code Go yet.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/export) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunVersionCommandReportsBuildInfo verifies /version is routed through the shared registry and emits non-empty build metadata.
+func TestRunnerRunVersionCommandReportsBuildInfo(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.VersionCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/version"}); err != nil {
+		t.Fatalf("Run(/version) error = %v", err)
+	}
+
+	if strings.TrimSpace(buf.String()) == "" {
+		t.Fatal("Run(/version) output = empty, want non-empty version string")
+	}
+}
+
+// TestRunnerRunReleaseNotesCommandReportsFallback verifies /release-notes is routed through the shared registry and emits the stable changelog fallback.
+func TestRunnerRunReleaseNotesCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.ReleaseNotesCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/release-notes"}); err != nil {
+		t.Fatalf("Run(/release-notes) error = %v", err)
+	}
+
+	want := "Release notes fetching is not available in Claude Code Go yet. See the full changelog at: https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/release-notes) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunUpgradeCommandReportsFallback verifies /upgrade is routed through the shared registry and emits the stable upgrade fallback.
+func TestRunnerRunUpgradeCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.UpgradeCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/upgrade"}); err != nil {
+		t.Fatalf("Run(/upgrade) error = %v", err)
+	}
+
+	want := "Interactive upgrade flow is not available in Claude Code Go yet. Review Claude Max plans at https://claude.ai/upgrade/max. Browser launch, subscription detection, and post-upgrade login handoff remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/upgrade) output = %q, want %q", got, want)
 	}
 }
 

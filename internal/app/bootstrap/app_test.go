@@ -183,6 +183,15 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("export"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /export command")
 	}
+	if _, ok := app.Runner.Commands.Get("version"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /version command")
+	}
+	if _, ok := app.Runner.Commands.Get("release-notes"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /release-notes command")
+	}
+	if _, ok := app.Runner.Commands.Get("upgrade"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /upgrade command")
+	}
 	if _, ok := app.Runner.Commands.Get("theme"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /theme command")
 	}
@@ -228,8 +237,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 28 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 28", len(cmds))
+	if len(cmds) != 31 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 31", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -396,38 +405,59 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() twenty-third metadata = %#v, want export metadata", got)
 	}
 	if got := cmds[23].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "version",
+		Description: "Print the version this session is running (not what autoupdate downloaded)",
+		Usage:       "/version",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-fourth metadata = %#v, want version metadata", got)
+	}
+	if got := cmds[24].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "release-notes",
+		Description: "View release notes",
+		Usage:       "/release-notes",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-fifth metadata = %#v, want release-notes metadata", got)
+	}
+	if got := cmds[25].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "upgrade",
+		Description: "Upgrade to Max for higher rate limits and more Opus",
+		Usage:       "/upgrade",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-sixth metadata = %#v, want upgrade metadata", got)
+	}
+	if got := cmds[26].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "theme",
 		Description: "Change the theme",
 		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-fourth metadata = %#v, want theme metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-seventh metadata = %#v, want theme metadata", got)
 	}
-	if got := cmds[24].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[27].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-fifth metadata = %#v, want vim metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-eighth metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[25].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[28].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "pr-comments",
 		Description: "Get comments from a GitHub pull request",
 		Usage:       "/pr-comments",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-sixth metadata = %#v, want pr-comments metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-ninth metadata = %#v, want pr-comments metadata", got)
 	}
-	if got := cmds[26].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[29].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "security-review",
 		Description: "Complete a security review of the pending changes on the current branch",
 		Usage:       "/security-review",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-seventh metadata = %#v, want security-review metadata", got)
+		t.Fatalf("newCommandRegistry() thirtieth metadata = %#v, want security-review metadata", got)
 	}
-	if got := cmds[27].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[30].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-eighth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-first metadata = %#v, want seed-sessions metadata", got)
 	}
 }
