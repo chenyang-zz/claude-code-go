@@ -180,6 +180,15 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.FilesCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.CopyCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ExportCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.ThemeCommand{
 		Config: cfg,
 		Store:  globalSettingsStore,

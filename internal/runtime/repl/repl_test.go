@@ -645,6 +645,57 @@ func TestRunnerRunSessionCommandReportsRemoteFallback(t *testing.T) {
 	}
 }
 
+// TestRunnerRunFilesCommandReportsFallback verifies /files is routed through the shared registry and emits the stable file-context fallback.
+func TestRunnerRunFilesCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.FilesCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/files"}); err != nil {
+		t.Fatalf("Run(/files) error = %v", err)
+	}
+
+	want := "File context listing is not available in Claude Code Go yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/files) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunCopyCommandReportsFallback verifies /copy is routed through the shared registry and emits the stable clipboard fallback.
+func TestRunnerRunCopyCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.CopyCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/copy"}); err != nil {
+		t.Fatalf("Run(/copy) error = %v", err)
+	}
+
+	want := "Copying Claude's last response is not available in Claude Code Go yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/copy) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunExportCommandReportsFallback verifies /export is routed through the shared registry and emits the stable export fallback.
+func TestRunnerRunExportCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.ExportCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/export"}); err != nil {
+		t.Fatalf("Run(/export) error = %v", err)
+	}
+
+	want := "Conversation export is not available in Claude Code Go yet.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/export) output = %q, want %q", got, want)
+	}
+}
+
 // TestRunnerRunVimCommandPersistsEditorMode verifies /vim is routed through the shared registry and updates the stored mode.
 // TestRunnerRunThemeCommandPersistsTheme verifies /theme is routed through the shared registry and updates the stored theme.
 // TestRunnerRunModelCommandPersistsModel verifies /model is routed through the shared registry and updates the stored model.
