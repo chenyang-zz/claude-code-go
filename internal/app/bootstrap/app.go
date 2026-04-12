@@ -134,6 +134,21 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.FastCommand{
+		Config: cfg,
+		Store:  globalSettingsStore,
+	}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.EffortCommand{
+		Config: cfg,
+		Store:  globalSettingsStore,
+	}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.DoctorCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}

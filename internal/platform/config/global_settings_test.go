@@ -177,3 +177,111 @@ func TestGlobalSettingsStoreSaveThemeCreatesFile(t *testing.T) {
 		t.Fatalf("settings content = %q, want %q", got, want)
 	}
 }
+
+// TestGlobalSettingsStoreSaveEffortLevelPreservesExistingFields verifies effortLevel updates keep unrelated settings content intact.
+func TestGlobalSettingsStoreSaveEffortLevelPreservesExistingFields(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"model\": \"sonnet\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveEffortLevel(context.Background(), "high"); err != nil {
+		t.Fatalf("SaveEffortLevel() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"effortLevel\": \"high\",\n  \"model\": \"sonnet\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
+// TestGlobalSettingsStoreSaveEffortLevelClearsOverride verifies auto removes the explicit effort override.
+func TestGlobalSettingsStoreSaveEffortLevelClearsOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"effortLevel\": \"medium\",\n  \"theme\": \"light\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveEffortLevel(context.Background(), ""); err != nil {
+		t.Fatalf("SaveEffortLevel() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"theme\": \"light\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
+// TestGlobalSettingsStoreSaveFastModePreservesExistingFields verifies fastMode updates keep unrelated settings content intact.
+func TestGlobalSettingsStoreSaveFastModePreservesExistingFields(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"theme\": \"dark\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveFastMode(context.Background(), true); err != nil {
+		t.Fatalf("SaveFastMode() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"fastMode\": true,\n  \"theme\": \"dark\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}
+
+// TestGlobalSettingsStoreSaveFastModeClearsOverride verifies disabling fast mode removes the explicit settings key.
+func TestGlobalSettingsStoreSaveFastModeClearsOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	settingsPath := filepath.Join(tempDir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{\n  \"fastMode\": true,\n  \"theme\": \"light\"\n}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store := &GlobalSettingsStore{Path: settingsPath}
+	if err := store.SaveFastMode(context.Background(), false); err != nil {
+		t.Fatalf("SaveFastMode() error = %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	got := string(data)
+	want := "{\n  \"theme\": \"light\"\n}\n"
+	if got != want {
+		t.Fatalf("settings content = %q, want %q", got, want)
+	}
+}

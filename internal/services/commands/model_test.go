@@ -45,7 +45,7 @@ func TestModelCommandExecuteWithoutArgsReportsCurrentModel(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Current model: claude-sonnet-4-5 (default)\nRun /model <model> to persist a global model override, or /model default to restore the default.\nClaude Code Go does not provide the interactive model picker, model availability checks, or fast mode/effort controls yet."
+	want := "Current model: claude-sonnet-4-5 (default)\nRun /model <model> to persist a global model override, or /model default to restore the default.\nClaude Code Go does not provide the interactive model picker or model availability checks yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -64,7 +64,7 @@ func TestModelCommandExecutePersistsModel(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Model set to claude-opus-4-1. Claude Code Go stores the preference now, but the interactive model picker, model availability checks, and fast mode/effort controls are not implemented yet."
+	want := "Model set to claude-opus-4-1. Claude Code Go stores the preference now, but the interactive model picker and model availability checks are not implemented yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -89,7 +89,7 @@ func TestModelCommandExecuteRestoresDefault(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Model set to claude-sonnet-4-5 (default). Claude Code Go stores the preference now, but the interactive model picker, model availability checks, and fast mode/effort controls are not implemented yet."
+	want := "Model set to claude-sonnet-4-5 (default). Claude Code Go stores the preference now, but the interactive model picker and model availability checks are not implemented yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

@@ -23,22 +23,26 @@ func TestConfigCommandMetadataExposesSettingsAlias(t *testing.T) {
 func TestConfigCommandExecuteRendersResolvedConfig(t *testing.T) {
 	result, err := ConfigCommand{
 		Config: coreconfig.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4-5",
-			Theme:         "light",
-			EditorMode:    "vim",
-			ProjectPath:   "/repo",
-			ApprovalMode:  "default",
-			SessionDBPath: "/tmp/claude.db",
-			APIKey:        "secret",
-			APIBaseURL:    "https://example.invalid",
+			Provider:              "anthropic",
+			Model:                 "claude-sonnet-4-5",
+			EffortLevel:           "high",
+			HasEffortLevelSetting: true,
+			FastMode:              true,
+			HasFastModeSetting:    true,
+			Theme:                 "light",
+			EditorMode:            "vim",
+			ProjectPath:           "/repo",
+			ApprovalMode:          "default",
+			SessionDBPath:         "/tmp/claude.db",
+			APIKey:                "secret",
+			APIBaseURL:            "https://example.invalid",
 		},
 	}.Execute(context.Background(), command.Args{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Current configuration:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- Theme: light\n- Editor mode: vim\n- Project path: /repo\n- Approval mode: default\n- Session DB path: /tmp/claude.db\n- API key: configured\n- API base URL: https://example.invalid"
+	want := "Current configuration:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- Effort level: high\n- Fast mode: on\n- Theme: light\n- Editor mode: vim\n- Project path: /repo\n- Approval mode: default\n- Session DB path: /tmp/claude.db\n- API key: configured\n- API base URL: https://example.invalid"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

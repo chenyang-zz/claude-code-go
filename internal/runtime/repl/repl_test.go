@@ -412,6 +412,15 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.ModelCommand{}); err != nil {
 		t.Fatalf("Register(model) error = %v", err)
 	}
+	if err := registry.Register(servicecommands.FastCommand{}); err != nil {
+		t.Fatalf("Register(fast) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.EffortCommand{}); err != nil {
+		t.Fatalf("Register(effort) error = %v", err)
+	}
+	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
+		t.Fatalf("Register(output-style) error = %v", err)
+	}
 	if err := registry.Register(servicecommands.DoctorCommand{}); err != nil {
 		t.Fatalf("Register(doctor) error = %v", err)
 	}
@@ -454,7 +463,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/seed-sessions - Insert demo persisted sessions for /resume testing\nSend plain text without a leading slash to start a normal prompt.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run() output = %q, want %q", got, want)
 	}
@@ -614,7 +623,7 @@ func TestRunnerRunModelCommandPersistsModel(t *testing.T) {
 		t.Fatalf("Run(/model) error = %v", err)
 	}
 
-	want := "Model set to claude-opus-4-1. Claude Code Go stores the preference now, but the interactive model picker, model availability checks, and fast mode/effort controls are not implemented yet.\n"
+	want := "Model set to claude-opus-4-1. Claude Code Go stores the preference now, but the interactive model picker and model availability checks are not implemented yet.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/model) output = %q, want %q", got, want)
 	}
@@ -733,7 +742,7 @@ func TestRunnerRunSettingsAliasDispatchesConfig(t *testing.T) {
 		t.Fatalf("Run(/settings) error = %v", err)
 	}
 
-	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Theme: dark\n- Editor mode: normal\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
+	want := "Current configuration:\n- Provider: (not set)\n- Model: (not set)\n- Effort level: auto\n- Fast mode: off\n- Theme: dark\n- Editor mode: normal\n- Project path: (not set)\n- Approval mode: (not set)\n- Session DB path: (not set)\n- API key: missing\n- API base URL: default\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/settings) output = %q, want %q", got, want)
 	}

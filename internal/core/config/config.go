@@ -6,6 +6,14 @@ type Config struct {
 	ProjectPath string
 	// Model overrides the default model selection when provided.
 	Model string
+	// EffortLevel stores the persisted model effort preference when explicitly configured.
+	EffortLevel string
+	// HasEffortLevelSetting reports whether EffortLevel was explicitly set by the merged config sources.
+	HasEffortLevelSetting bool
+	// FastMode stores the persisted fast-mode preference when explicitly configured.
+	FastMode bool
+	// HasFastModeSetting reports whether FastMode was explicitly set by the merged config sources.
+	HasFastModeSetting bool
 	// Theme stores the persisted terminal theme preference.
 	Theme string
 	// EditorMode stores the persisted prompt editor keybinding mode.
@@ -44,6 +52,7 @@ type PermissionConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Model:        "claude-sonnet-4-5",
+		EffortLevel:  "",
 		Theme:        NormalizeThemeSetting(""),
 		EditorMode:   NormalizeEditorMode(""),
 		Provider:     "anthropic",
@@ -75,6 +84,14 @@ const (
 	EditorModeVim = "vim"
 	// EditorModeEmacs identifies the legacy source-compatible value that should normalize to normal mode.
 	EditorModeEmacs = "emacs"
+	// EffortLevelLow identifies the low persisted effort setting.
+	EffortLevelLow = "low"
+	// EffortLevelMedium identifies the medium persisted effort setting.
+	EffortLevelMedium = "medium"
+	// EffortLevelHigh identifies the high persisted effort setting.
+	EffortLevelHigh = "high"
+	// EffortLevelMax identifies the max persisted effort setting.
+	EffortLevelMax = "max"
 )
 
 var supportedThemeSettings = []string{
@@ -85,6 +102,13 @@ var supportedThemeSettings = []string{
 	ThemeSettingDarkDaltonized,
 	ThemeSettingLightANSI,
 	ThemeSettingDarkANSI,
+}
+
+var supportedEffortLevels = []string{
+	EffortLevelLow,
+	EffortLevelMedium,
+	EffortLevelHigh,
+	EffortLevelMax,
 }
 
 // SupportedThemeSettings returns the stable theme-setting values migrated in the Go host.
@@ -123,6 +147,36 @@ func NormalizeEditorMode(value string) string {
 		return EditorModeNormal
 	case EditorModeVim:
 		return EditorModeVim
+	default:
+		return value
+	}
+}
+
+// SupportedEffortLevels returns the stable persisted effort values migrated in the Go host.
+func SupportedEffortLevels() []string {
+	return append([]string(nil), supportedEffortLevels...)
+}
+
+// IsSupportedEffortLevel reports whether a string matches one of the migrated effort-setting values.
+func IsSupportedEffortLevel(value string) bool {
+	switch value {
+	case EffortLevelLow,
+		EffortLevelMedium,
+		EffortLevelHigh,
+		EffortLevelMax:
+		return true
+	default:
+		return false
+	}
+}
+
+// NormalizeEffortLevel folds empty values into the stable "auto" representation while preserving explicit enum values.
+func NormalizeEffortLevel(value string) string {
+	switch value {
+	case "":
+		return ""
+	case EffortLevelLow, EffortLevelMedium, EffortLevelHigh, EffortLevelMax:
+		return value
 	default:
 		return value
 	}

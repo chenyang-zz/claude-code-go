@@ -23,11 +23,13 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model         string `json:"model"`
-	Theme         string `json:"theme"`
-	EditorMode    string `json:"editorMode"`
-	Provider      string `json:"provider"`
-	SessionDBPath string `json:"sessionDbPath"`
+	Model         string  `json:"model"`
+	EffortLevel   *string `json:"effortLevel"`
+	FastMode      *bool   `json:"fastMode"`
+	Theme         string  `json:"theme"`
+	EditorMode    string  `json:"editorMode"`
+	Provider      string  `json:"provider"`
+	SessionDBPath string  `json:"sessionDbPath"`
 	Permissions   struct {
 		DefaultMode                  string   `json:"defaultMode"`
 		Allow                        []string `json:"allow"`
@@ -97,6 +99,9 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	logger.DebugCF("runtime_config", "loaded runtime config", map[string]any{
 		"provider":            cfg.Provider,
 		"model":               cfg.Model,
+		"effort_level":        cfg.EffortLevel,
+		"fast_mode":           cfg.FastMode,
+		"has_fast_mode":       cfg.HasFastModeSetting,
 		"theme":               cfg.Theme,
 		"editor_mode":         cfg.EditorMode,
 		"has_api_key":         cfg.APIKey != "",
@@ -135,12 +140,16 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 	}
 
 	return coreconfig.Config{
-		Model:         parsed.Model,
-		Theme:         coreconfig.NormalizeThemeSetting(parsed.Theme),
-		EditorMode:    coreconfig.NormalizeEditorMode(parsed.EditorMode),
-		Provider:      parsed.Provider,
-		ApprovalMode:  parsed.Permissions.DefaultMode,
-		SessionDBPath: parsed.SessionDBPath,
+		Model:                 parsed.Model,
+		EffortLevel:           readEffortLevel(parsed.EffortLevel),
+		HasEffortLevelSetting: parsed.EffortLevel != nil,
+		FastMode:              readFastMode(parsed.FastMode),
+		HasFastModeSetting:    parsed.FastMode != nil,
+		Theme:                 coreconfig.NormalizeThemeSetting(parsed.Theme),
+		EditorMode:            coreconfig.NormalizeEditorMode(parsed.EditorMode),
+		Provider:              parsed.Provider,
+		ApprovalMode:          parsed.Permissions.DefaultMode,
+		SessionDBPath:         parsed.SessionDBPath,
 		Permissions: coreconfig.PermissionConfig{
 			DefaultMode:                  parsed.Permissions.DefaultMode,
 			Allow:                        append([]string(nil), parsed.Permissions.Allow...),
@@ -150,6 +159,22 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
 		},
 	}, nil
+}
+
+// readEffortLevel normalizes one optional effort pointer into the runtime representation.
+func readEffortLevel(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return coreconfig.NormalizeEffortLevel(*value)
+}
+
+// readFastMode dereferences one optional fast-mode pointer into the runtime representation.
+func readFastMode(value *bool) bool {
+	if value == nil {
+		return false
+	}
+	return *value
 }
 
 // defaultSessionDBPath resolves the Go host's default SQLite location when a home directory is available.

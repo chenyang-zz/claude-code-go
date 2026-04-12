@@ -35,6 +35,8 @@ func (c ConfigCommand) Execute(ctx context.Context, args command.Args) (command.
 		"Current configuration:",
 		fmt.Sprintf("- Provider: %s", displayValue(c.Config.Provider)),
 		fmt.Sprintf("- Model: %s", displayValue(c.Config.Model)),
+		fmt.Sprintf("- Effort level: %s", renderEffortConfigValue(c.Config)),
+		fmt.Sprintf("- Fast mode: %s", renderFastModeConfigValue(c.Config)),
 		fmt.Sprintf("- Theme: %s", displayValue(coreconfig.NormalizeThemeSetting(c.Config.Theme))),
 		fmt.Sprintf("- Editor mode: %s", displayValue(coreconfig.NormalizeEditorMode(c.Config.EditorMode))),
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
@@ -47,6 +49,8 @@ func (c ConfigCommand) Execute(ctx context.Context, args command.Args) (command.
 	logger.DebugCF("commands", "rendered config command output", map[string]any{
 		"provider":            c.Config.Provider,
 		"model":               c.Config.Model,
+		"effort_level":        renderEffortConfigValue(c.Config),
+		"fast_mode":           renderFastModeConfigValue(c.Config),
 		"theme":               coreconfig.NormalizeThemeSetting(c.Config.Theme),
 		"editor_mode":         coreconfig.NormalizeEditorMode(c.Config.EditorMode),
 		"project_path":        c.Config.ProjectPath,
@@ -82,4 +86,20 @@ func baseURLValue(value string) string {
 		return "default"
 	}
 	return value
+}
+
+// renderEffortConfigValue formats the current effort configuration into one stable human-readable value.
+func renderEffortConfigValue(cfg coreconfig.Config) string {
+	if !cfg.HasEffortLevelSetting || strings.TrimSpace(cfg.EffortLevel) == "" {
+		return "auto"
+	}
+	return cfg.EffortLevel
+}
+
+// renderFastModeConfigValue formats the current fast-mode configuration into one stable human-readable value.
+func renderFastModeConfigValue(cfg coreconfig.Config) string {
+	if !cfg.HasFastModeSetting || !cfg.FastMode {
+		return "off"
+	}
+	return "on"
 }

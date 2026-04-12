@@ -7,12 +7,12 @@ import (
 
 // TestValidateSettingsContentAcceptsSupportedSubset verifies the migrated validator accepts the supported settings subset.
 func TestValidateSettingsContentAcceptsSupportedSubset(t *testing.T) {
-	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"theme\": \"auto\",\n  \"editorMode\": \"vim\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
+	result := ValidateSettingsContent("{\n  \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",\n  \"model\": \"sonnet\",\n  \"effortLevel\": \"high\",\n  \"fastMode\": true,\n  \"theme\": \"auto\",\n  \"editorMode\": \"vim\",\n  \"permissions\": {\n    \"allow\": [\"Read(*)\"],\n    \"deny\": [\"Bash(rm -rf /)\"],\n    \"ask\": [\"Write(*)\"]\n  }\n}\n")
 	if !result.IsValid {
 		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
 	}
-	if !strings.Contains(result.FullSchema, "\"permissions\"") || !strings.Contains(result.FullSchema, "\"editorMode\"") || !strings.Contains(result.FullSchema, "\"theme\"") {
-		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions, editorMode, and theme schema", result.FullSchema)
+	if !strings.Contains(result.FullSchema, "\"permissions\"") || !strings.Contains(result.FullSchema, "\"editorMode\"") || !strings.Contains(result.FullSchema, "\"theme\"") || !strings.Contains(result.FullSchema, "\"effortLevel\"") || !strings.Contains(result.FullSchema, "\"fastMode\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want permissions, editorMode, theme, effortLevel, and fastMode schema", result.FullSchema)
 	}
 }
 
@@ -82,5 +82,16 @@ func TestValidateSettingsContentRejectsUnsupportedTheme(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "- theme: Invalid value. Expected one of: \"auto\", \"dark\", \"light\", \"light-daltonized\", \"dark-daltonized\", \"light-ansi\", \"dark-ansi\"") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want theme enum error", result.Error)
+	}
+}
+
+// TestValidateSettingsContentRejectsUnsupportedEffort verifies effortLevel uses a stable enum allowlist.
+func TestValidateSettingsContentRejectsUnsupportedEffort(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"effortLevel\": \"turbo\"\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	if !strings.Contains(result.Error, "- effortLevel: Invalid value. Expected one of: \"low\", \"medium\", \"high\", \"max\"") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want effortLevel enum error", result.Error)
 	}
 }

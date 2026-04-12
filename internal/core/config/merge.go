@@ -7,6 +7,14 @@ func Merge(base, override Config) Config {
 	if override.Model != "" {
 		base.Model = override.Model
 	}
+	if override.HasEffortLevelSetting {
+		base.EffortLevel = NormalizeEffortLevel(override.EffortLevel)
+		base.HasEffortLevelSetting = true
+	}
+	if override.HasFastModeSetting {
+		base.FastMode = override.FastMode
+		base.HasFastModeSetting = true
+	}
 	if override.Theme != "" {
 		base.Theme = NormalizeThemeSetting(override.Theme)
 	}

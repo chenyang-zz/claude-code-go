@@ -107,6 +107,71 @@ func (s *GlobalSettingsStore) SaveModel(ctx context.Context, model string) error
 	return nil
 }
 
+// SaveEffortLevel writes the requested effort override into the global settings file without dropping unrelated fields.
+func (s *GlobalSettingsStore) SaveEffortLevel(ctx context.Context, effort string) error {
+	_ = ctx
+
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	normalized := coreconfig.NormalizeEffortLevel(strings.TrimSpace(effort))
+	if normalized != "" && !coreconfig.IsSupportedEffortLevel(normalized) {
+		return fmt.Errorf("unsupported effort level %q", effort)
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return err
+	}
+	if normalized == "" {
+		delete(document, "effortLevel")
+	} else {
+		document["effortLevel"] = normalized
+	}
+
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
+	}
+
+	logger.DebugCF("settings_config", "updated global effort setting", map[string]any{
+		"path":         s.Path,
+		"effort_level": normalized,
+		"cleared":      normalized == "",
+	})
+	return nil
+}
+
+// SaveFastMode writes the requested fast-mode preference into the global settings file without dropping unrelated fields.
+func (s *GlobalSettingsStore) SaveFastMode(ctx context.Context, enabled bool) error {
+	_ = ctx
+
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return err
+	}
+	if enabled {
+		document["fastMode"] = true
+	} else {
+		delete(document, "fastMode")
+	}
+
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
+	}
+
+	logger.DebugCF("settings_config", "updated global fast mode setting", map[string]any{
+		"path":      s.Path,
+		"fast_mode": enabled,
+		"cleared":   !enabled,
+	})
+	return nil
+}
+
 // SaveTheme writes the normalized theme setting into the global settings file without dropping unrelated fields.
 func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error {
 	_ = ctx
@@ -126,23 +191,31 @@ func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error
 	}
 	document["theme"] = normalized
 
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
-		return fmt.Errorf("create global settings directory %s: %w", filepath.Dir(s.Path), err)
-	}
-
-	encoded, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode global settings %s: %w", s.Path, err)
-	}
-	encoded = append(encoded, '\n')
-
-	if err := os.WriteFile(s.Path, encoded, 0o644); err != nil {
-		return fmt.Errorf("write global settings %s: %w", s.Path, err)
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
 	}
 
 	logger.DebugCF("settings_config", "updated global theme setting", map[string]any{
 		"path":  s.Path,
 		"theme": normalized,
 	})
+	return nil
+}
+
+// writeSettingsDocument encodes and writes one Claude Code settings document to disk.
+func writeSettingsDocument(path string, document map[string]any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create settings directory %s: %w", filepath.Dir(path), err)
+	}
+
+	encoded, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode settings %s: %w", path, err)
+	}
+	encoded = append(encoded, '\n')
+
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		return fmt.Errorf("write settings %s: %w", path, err)
+	}
 	return nil
 }

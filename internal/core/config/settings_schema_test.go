@@ -16,6 +16,8 @@ func TestSettingsSchemaStringIncludesExpandedFields(t *testing.T) {
 		`"sessionDbPath"`,
 		`"cleanupPeriodDays"`,
 		`"defaultShell"`,
+		`"effortLevel"`,
+		`"fastMode"`,
 		`"theme"`,
 		`"defaultMode"`,
 		`"additionalDirectories"`,
@@ -31,6 +33,8 @@ func TestValidateSettingsDocumentAcceptsExpandedSubset(t *testing.T) {
 	issues := ValidateSettingsDocument(map[string]any{
 		"apiKeyHelper":           "/tmp/auth.sh",
 		"sessionDbPath":          "/tmp/session.db",
+		"effortLevel":            "medium",
+		"fastMode":               true,
 		"theme":                  "dark",
 		"respectGitignore":       true,
 		"cleanupPeriodDays":      float64(30),
@@ -46,6 +50,22 @@ func TestValidateSettingsDocumentAcceptsExpandedSubset(t *testing.T) {
 	})
 	if len(issues) != 0 {
 		t.Fatalf("ValidateSettingsDocument() issues = %#v, want none", issues)
+	}
+}
+
+// TestValidateSettingsDocumentRejectsInvalidEffortLevel verifies invalid effort values produce a stable enum error.
+func TestValidateSettingsDocumentRejectsInvalidEffortLevel(t *testing.T) {
+	issues := ValidateSettingsDocument(map[string]any{
+		"effortLevel": "turbo",
+	})
+	if len(issues) != 1 {
+		t.Fatalf("ValidateSettingsDocument() issues = %#v, want 1 issue", issues)
+	}
+	if issues[0].Path != "effortLevel" {
+		t.Fatalf("ValidateSettingsDocument() path = %q, want effortLevel", issues[0].Path)
+	}
+	if issues[0].Message != `Invalid value. Expected one of: "low", "medium", "high", "max"` {
+		t.Fatalf("ValidateSettingsDocument() message = %q, want effort enum error", issues[0].Message)
 	}
 }
 

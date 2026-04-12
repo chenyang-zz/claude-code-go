@@ -41,7 +41,7 @@ func (c ModelCommand) Execute(ctx context.Context, args command.Args) (command.R
 	if requested == "" {
 		return command.Result{
 			Output: fmt.Sprintf(
-				"Current model: %s\nRun /model <model> to persist a global model override, or /model default to restore the default.\nClaude Code Go does not provide the interactive model picker, model availability checks, or fast mode/effort controls yet.",
+				"Current model: %s\nRun /model <model> to persist a global model override, or /model default to restore the default.\nClaude Code Go does not provide the interactive model picker or model availability checks yet.",
 				renderModelSetting(currentModel),
 			),
 		}, nil
@@ -76,7 +76,7 @@ func (c ModelCommand) Execute(ctx context.Context, args command.Args) (command.R
 
 	return command.Result{
 		Output: fmt.Sprintf(
-			"Model set to %s. Claude Code Go stores the preference now, but the interactive model picker, model availability checks, and fast mode/effort controls are not implemented yet.",
+			"Model set to %s. Claude Code Go stores the preference now, but the interactive model picker and model availability checks are not implemented yet.",
 			renderModelSetting(newModel),
 		),
 	}, nil

@@ -22,10 +22,10 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 		t.Fatalf("MkdirAll(home) error = %v", err)
 	}
 
-	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model","theme":"light","sessionDbPath":"/tmp/home-session.db","editorMode":"emacs"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","model":"home-model","effortLevel":"medium","fastMode":true,"theme":"light","sessionDbPath":"/tmp/home-session.db","editorMode":"emacs"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"defaultMode":"plan","allow":["Bash(ls)"],"deny":["Bash(rm -rf)"],"ask":["Edit(*)"],"additionalDirectories":["packages/app"],"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","effortLevel":"high","fastMode":false,"permissions":{"defaultMode":"plan","allow":["Bash(ls)"],"deny":["Bash(rm -rf)"],"ask":["Edit(*)"],"additionalDirectories":["packages/app"],"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(project settings) error = %v", err)
 	}
 
@@ -56,6 +56,12 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	}
 	if cfg.EditorMode != coreconfig.EditorModeNormal {
 		t.Fatalf("Load() editor mode = %q, want %q", cfg.EditorMode, coreconfig.EditorModeNormal)
+	}
+	if !cfg.HasEffortLevelSetting || cfg.EffortLevel != coreconfig.EffortLevelHigh {
+		t.Fatalf("Load() effort = %q (has=%v), want high with explicit setting", cfg.EffortLevel, cfg.HasEffortLevelSetting)
+	}
+	if !cfg.HasFastModeSetting || cfg.FastMode {
+		t.Fatalf("Load() fast mode = %v (has=%v), want explicit false project override", cfg.FastMode, cfg.HasFastModeSetting)
 	}
 	if cfg.ProjectPath != projectDir {
 		t.Fatalf("Load() project path = %q, want %q", cfg.ProjectPath, projectDir)

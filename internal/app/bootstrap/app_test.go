@@ -135,6 +135,15 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("model"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /model command")
 	}
+	if _, ok := app.Runner.Commands.Get("fast"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /fast command")
+	}
+	if _, ok := app.Runner.Commands.Get("effort"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /effort command")
+	}
+	if _, ok := app.Runner.Commands.Get("output-style"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /output-style command")
+	}
 	if _, ok := app.Runner.Commands.Get("doctor"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /doctor command")
 	}
@@ -204,8 +213,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 20 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 20", len(cmds))
+	if len(cmds) != 23 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 23", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -266,88 +275,109 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() eighth metadata = %#v, want model metadata", got)
 	}
 	if got := cmds[8].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "fast",
+		Description: "Toggle fast mode (Opus 4.6 only)",
+		Usage:       "/fast [on|off]",
+	}) {
+		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want fast metadata", got)
+	}
+	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "effort",
+		Description: "Set effort level for model usage",
+		Usage:       "/effort [low|medium|high|max|auto]",
+	}) {
+		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want effort metadata", got)
+	}
+	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "output-style",
+		Description: "Deprecated: use /config to change output style",
+		Usage:       "/output-style",
+	}) {
+		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want output-style metadata", got)
+	}
+	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "doctor",
 		Description: "Diagnose the current Claude Code Go host setup",
 		Usage:       "/doctor",
 	}) {
-		t.Fatalf("newCommandRegistry() ninth metadata = %#v, want doctor metadata", got)
+		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want doctor metadata", got)
 	}
-	if got := cmds[9].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "permissions",
 		Aliases:     []string{"allowed-tools"},
 		Description: "Manage allow & deny tool permission rules",
 		Usage:       "/permissions",
 	}) {
-		t.Fatalf("newCommandRegistry() tenth metadata = %#v, want permissions metadata", got)
+		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want permissions metadata", got)
 	}
-	if got := cmds[10].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "add-dir",
 		Description: "Add a new working directory",
 		Usage:       "/add-dir <path>",
 	}) {
-		t.Fatalf("newCommandRegistry() eleventh metadata = %#v, want add-dir metadata", got)
+		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want add-dir metadata", got)
 	}
-	if got := cmds[11].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "login",
 		Description: "Sign in with your Anthropic account",
 		Usage:       "/login",
 	}) {
-		t.Fatalf("newCommandRegistry() twelfth metadata = %#v, want login metadata", got)
+		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want login metadata", got)
 	}
-	if got := cmds[12].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "logout",
 		Description: "Sign out from your Anthropic account",
 		Usage:       "/logout",
 	}) {
-		t.Fatalf("newCommandRegistry() thirteenth metadata = %#v, want logout metadata", got)
+		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want logout metadata", got)
 	}
-	if got := cmds[13].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "cost",
 		Description: "Show the total cost and duration of the current session",
 		Usage:       "/cost",
 	}) {
-		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want cost metadata", got)
+		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want cost metadata", got)
 	}
-	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[17].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "status",
 		Description: "Show Claude Code status including version, model, account, API connectivity, and tool statuses",
 		Usage:       "/status",
 	}) {
-		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want status metadata", got)
+		t.Fatalf("newCommandRegistry() eighteenth metadata = %#v, want status metadata", got)
 	}
-	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
 		Usage:       "/mcp [enable|disable <server-name>]",
 	}) {
-		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want mcp metadata", got)
+		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want mcp metadata", got)
 	}
-	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[19].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
-		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want session metadata", got)
+		t.Fatalf("newCommandRegistry() twentieth metadata = %#v, want session metadata", got)
 	}
-	if got := cmds[17].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[20].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "theme",
 		Description: "Change the theme",
 		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
 	}) {
-		t.Fatalf("newCommandRegistry() eighteenth metadata = %#v, want theme metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-first metadata = %#v, want theme metadata", got)
 	}
-	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[21].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
-		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want vim metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-second metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[19].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[22].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() twentieth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() twenty-third metadata = %#v, want seed-sessions metadata", got)
 	}
 }

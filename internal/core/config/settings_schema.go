@@ -38,6 +38,9 @@ var (
 
 	// themeSettingValues stores the currently migrated terminal theme setting values.
 	themeSettingValues = SupportedThemeSettings()
+
+	// effortLevelValues stores the currently migrated persisted effort enum values.
+	effortLevelValues = SupportedEffortLevels()
 )
 
 // ValidationIssue describes one caller-facing settings validation failure.
@@ -64,6 +67,15 @@ func SettingsSchemaDocument() map[string]any {
 			"model": map[string]any{
 				"type":        "string",
 				"description": "Override the default model used by Claude Code",
+			},
+			"effortLevel": map[string]any{
+				"type":        "string",
+				"enum":        effortLevelValues,
+				"description": "Persisted effort level for supported models",
+			},
+			"fastMode": map[string]any{
+				"type":        "boolean",
+				"description": "Whether fast mode should persist across sessions",
 			},
 			"theme": map[string]any{
 				"type":        "string",
@@ -168,6 +180,14 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			}
 		case "model":
 			if issue, ok := validateStringField("model", objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "effortLevel":
+			if issue, ok := validateEnumField(key, objectValue[key], effortLevelValues); ok {
+				issues = append(issues, issue)
+			}
+		case "fastMode":
+			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
 			}
 		case "theme":
