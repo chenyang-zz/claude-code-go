@@ -77,12 +77,14 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	var globalSettingsStore *platformconfig.GlobalSettingsStore
 	var projectSettingsStore *platformconfig.ProjectSettingsStore
+	var localSettingsStore *platformconfig.LocalSettingsStore
 	if fileLoader, ok := loader.(*platformconfig.FileLoader); ok {
 		globalSettingsStore = platformconfig.NewGlobalSettingsStore(fileLoader.HomeDir)
 		projectSettingsStore = platformconfig.NewProjectSettingsStore(fileLoader.CWD)
+		localSettingsStore = platformconfig.NewLocalSettingsStore(fileLoader.CWD)
 	}
 
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, policy)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +103,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, policy *corepermission.FilesystemPolicy) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -155,11 +157,12 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.PermissionsCommand{Config: dereferenceConfig(cfg)}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.AddDirCommand{
-		Config: cfg,
-		Store:  projectSettingsStore,
-		Policy: policy,
-	}); err != nil {
+	_ = projectSettingsStore
+	if err := registry.Register(repl.NewAddDirCommandAdapter(runner, servicecommands.AddDirCommand{
+		Config:     cfg,
+		LocalStore: localSettingsStore,
+		Policy:     policy,
+	})); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.LoginCommand{Config: dereferenceConfig(cfg)}); err != nil {

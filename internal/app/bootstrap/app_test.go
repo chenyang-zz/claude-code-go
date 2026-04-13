@@ -285,7 +285,7 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil)
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}

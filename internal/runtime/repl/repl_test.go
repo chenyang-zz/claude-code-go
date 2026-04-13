@@ -427,7 +427,7 @@ func TestRunnerRunHelpCommandListsRegisteredCommands(t *testing.T) {
 	if err := registry.Register(servicecommands.PermissionsCommand{}); err != nil {
 		t.Fatalf("Register(permissions) error = %v", err)
 	}
-	if err := registry.Register(servicecommands.AddDirCommand{}); err != nil {
+	if err := registry.Register(NewAddDirCommandAdapter(runner, servicecommands.AddDirCommand{})); err != nil {
 		t.Fatalf("Register(add-dir) error = %v", err)
 	}
 	if err := registry.Register(servicecommands.LoginCommand{}); err != nil {
@@ -1087,6 +1087,7 @@ func TestRunnerRunAddDirCommandPersistsDirectory(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.Input = strings.NewReader("2\n")
 
 	rootDir := t.TempDir()
 	projectDir := filepath.Join(rootDir, "project")
@@ -1104,17 +1105,17 @@ func TestRunnerRunAddDirCommandPersistsDirectory(t *testing.T) {
 		t.Fatalf("NewFilesystemPolicy() error = %v", err)
 	}
 	cfg := &coreconfig.Config{ProjectPath: projectDir}
-	registerSlashCommands(t, runner, servicecommands.AddDirCommand{
-		Config: cfg,
-		Store:  store,
-		Policy: policy,
-	})
+	registerSlashCommands(t, runner, NewAddDirCommandAdapter(runner, servicecommands.AddDirCommand{
+		Config:     cfg,
+		LocalStore: store,
+		Policy:     policy,
+	}))
 
 	if err := runner.Run(context.Background(), []string{"/add-dir", "../shared"}); err != nil {
 		t.Fatalf("Run(/add-dir) error = %v", err)
 	}
 
-	want := "Added " + extraDir + " as a working directory. Claude Code Go persists it to project settings now, but the interactive add-dir flow and session-only directory mode are not implemented yet.\n"
+	want := "Directory: " + extraDir + "\nChoose how to add this working directory:\n1. Add for this session only\n2. Add and save to local settings\nSelect 1 or 2, or press Enter to cancel.\nAdded " + extraDir + " as a working directory and saved it to local settings. Use /permissions to review the active workspace scope.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/add-dir) output = %q, want %q", got, want)
 	}
@@ -1123,6 +1124,48 @@ func TestRunnerRunAddDirCommandPersistsDirectory(t *testing.T) {
 	}
 	if got := policy.CheckReadPermissionForTool(context.Background(), "file_read", filepath.Join(extraDir, "README.md"), projectDir).Decision; got != corepermission.DecisionAllow {
 		t.Fatalf("policy decision = %q, want allow", got)
+	}
+}
+
+// TestRunnerRunAddDirCommandWithoutArgsAddsSessionDirectory verifies bare /add-dir can read a path and choose session-only scope.
+func TestRunnerRunAddDirCommandWithoutArgsAddsSessionDirectory(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+
+	rootDir := t.TempDir()
+	projectDir := filepath.Join(rootDir, "project")
+	extraDir := filepath.Join(rootDir, "shared")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	runner.Input = strings.NewReader("../shared\n1\n")
+
+	store := &stubAdditionalDirectoryStore{}
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+	cfg := &coreconfig.Config{ProjectPath: projectDir}
+	registerSlashCommands(t, runner, NewAddDirCommandAdapter(runner, servicecommands.AddDirCommand{
+		Config:     cfg,
+		LocalStore: store,
+		Policy:     policy,
+	}))
+
+	if err := runner.Run(context.Background(), []string{"/add-dir"}); err != nil {
+		t.Fatalf("Run(/add-dir) error = %v", err)
+	}
+
+	want := "Enter a directory path to add, or press Enter to cancel.\nDirectory: " + extraDir + "\nChoose how to add this working directory:\n1. Add for this session only\n2. Add and save to local settings\nSelect 1 or 2, or press Enter to cancel.\nAdded " + extraDir + " as a working directory for this session. Use /permissions to review the active workspace scope.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/add-dir) output = %q, want %q", got, want)
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("saved directories = %#v, want none for session-only path", store.saved)
 	}
 }
 

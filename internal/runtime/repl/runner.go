@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -43,6 +44,10 @@ type Runner struct {
 	AutoSave *runtimesession.AutoSave
 	// Input reads one-off interactive replies such as `/resume` picker selections.
 	Input io.Reader
+	// inputSource tracks which reader the buffered interactive reader was built from.
+	inputSource io.Reader
+	// inputReader reuses buffered stdin reads across multi-step interactive commands.
+	inputReader *bufio.Reader
 	// WorktreeLister resolves same-repo worktree membership for cross-project resume decisions.
 	WorktreeLister WorktreeLister
 }

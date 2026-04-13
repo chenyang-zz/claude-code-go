@@ -37,7 +37,7 @@ func TestAddDirCommandMetadata(t *testing.T) {
 	}
 }
 
-// TestAddDirCommandExecutePersistsDirectory verifies /add-dir validates and persists one explicit directory while widening read scope.
+// TestAddDirCommandExecutePersistsDirectory verifies /add-dir validates and remembers one explicit directory while widening read scope.
 func TestAddDirCommandExecutePersistsDirectory(t *testing.T) {
 	rootDir := t.TempDir()
 	projectDir := filepath.Join(rootDir, "project")
@@ -57,16 +57,16 @@ func TestAddDirCommandExecutePersistsDirectory(t *testing.T) {
 	cfg := &coreconfig.Config{ProjectPath: projectDir}
 
 	result, err := AddDirCommand{
-		Config: cfg,
-		Store:  store,
-		Policy: policy,
+		Config:     cfg,
+		LocalStore: store,
+		Policy:     policy,
 	}.Execute(context.Background(), command.Args{RawLine: "../shared/app"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
 	wantPath := extraDir
-	wantOutput := "Added " + wantPath + " as a working directory. Claude Code Go persists it to project settings now, but the interactive add-dir flow and session-only directory mode are not implemented yet."
+	wantOutput := "Added " + wantPath + " as a working directory and saved it to local settings. Use /permissions to review the active workspace scope."
 	if result.Output != wantOutput {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, wantOutput)
 	}
@@ -108,7 +108,7 @@ func TestAddDirCommandExecuteRejectsAlreadyAccessibleDirectory(t *testing.T) {
 				AdditionalDirectories: []string{"docs"},
 			},
 		},
-		Store: &recordingAdditionalDirectoryStore{},
+		LocalStore: &recordingAdditionalDirectoryStore{},
 	}.Execute(context.Background(), command.Args{RawLine: "docs"})
 	if err == nil {
 		t.Fatal("Execute() error = nil, want already accessible error")
@@ -127,8 +127,8 @@ func TestAddDirCommandExecuteRejectsFilePath(t *testing.T) {
 	}
 
 	_, err := AddDirCommand{
-		Config: &coreconfig.Config{ProjectPath: projectDir},
-		Store:  &recordingAdditionalDirectoryStore{},
+		Config:     &coreconfig.Config{ProjectPath: projectDir},
+		LocalStore: &recordingAdditionalDirectoryStore{},
 	}.Execute(context.Background(), command.Args{RawLine: "README.md"})
 	if err == nil {
 		t.Fatal("Execute() error = nil, want non-directory error")
@@ -136,5 +136,41 @@ func TestAddDirCommandExecuteRejectsFilePath(t *testing.T) {
 	want := "README.md is not a directory. Did you mean to add the parent directory " + projectDir + "?"
 	if err.Error() != want {
 		t.Fatalf("Execute() error = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestAddDirCommandApplyDirectorySessionOnly verifies session-only additions widen runtime scope without persisting to local settings.
+func TestAddDirCommandApplyDirectorySessionOnly(t *testing.T) {
+	projectDir := t.TempDir()
+	extraDir := filepath.Join(projectDir, "docs")
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	store := &recordingAdditionalDirectoryStore{}
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+	cfg := &coreconfig.Config{ProjectPath: projectDir}
+
+	result, err := AddDirCommand{
+		Config:     cfg,
+		LocalStore: store,
+		Policy:     policy,
+	}.ApplyDirectory(context.Background(), extraDir, AddDirDestinationSession)
+	if err != nil {
+		t.Fatalf("ApplyDirectory() error = %v", err)
+	}
+
+	want := "Added " + extraDir + " as a working directory for this session. Use /permissions to review the active workspace scope."
+	if result.Output != want {
+		t.Fatalf("ApplyDirectory() output = %q, want %q", result.Output, want)
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("saved directories = %#v, want none for session-only", store.saved)
+	}
+	if got := policy.CheckReadPermissionForTool(context.Background(), "file_read", filepath.Join(extraDir, "README.md"), projectDir).Decision; got != corepermission.DecisionAllow {
+		t.Fatalf("policy decision = %q, want allow", got)
 	}
 }

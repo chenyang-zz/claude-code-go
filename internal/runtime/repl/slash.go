@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 )
 
 // IsSlashCommand reports whether the input starts with a slash-prefixed command token.
@@ -27,9 +28,20 @@ type renameCommandAdapter struct {
 	runner *Runner
 }
 
+// addDirCommandAdapter keeps the interactive `/add-dir` runtime path available through the shared command registry.
+type addDirCommandAdapter struct {
+	runner *Runner
+	cmd    servicecommands.AddDirCommand
+}
+
 // NewRenameCommandAdapter exposes the existing `/rename` flow through the shared command registry.
 func NewRenameCommandAdapter(runner *Runner) command.Command {
 	return renameCommandAdapter{runner: runner}
+}
+
+// NewAddDirCommandAdapter exposes the interactive `/add-dir` flow through the shared command registry.
+func NewAddDirCommandAdapter(runner *Runner, cmd servicecommands.AddDirCommand) command.Command {
+	return addDirCommandAdapter{runner: runner, cmd: cmd}
 }
 
 // Metadata describes the minimum slash descriptor exposed for /resume.
@@ -59,4 +71,14 @@ func (c renameCommandAdapter) Metadata() command.Metadata {
 // Execute forwards `/rename` handling back into the runner session-title flow.
 func (c renameCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	return command.Result{}, c.runner.runRenameCommand(ctx, args.RawLine)
+}
+
+// Metadata describes the minimum slash descriptor exposed for `/add-dir`.
+func (c addDirCommandAdapter) Metadata() command.Metadata {
+	return c.cmd.Metadata()
+}
+
+// Execute forwards `/add-dir` handling back into the runner text interaction flow.
+func (c addDirCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
+	return command.Result{}, c.runner.runAddDirCommand(ctx, c.cmd, args.RawLine)
 }

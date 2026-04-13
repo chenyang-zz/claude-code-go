@@ -114,12 +114,13 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 
 // settingsPaths returns the supported global-to-project settings lookup order.
 func (l *FileLoader) settingsPaths() []string {
-	paths := make([]string, 0, 2)
+	paths := make([]string, 0, 3)
 	if l.HomeDir != "" {
 		paths = append(paths, filepath.Join(l.HomeDir, ".claude", "settings.json"))
 	}
 	if l.CWD != "" {
 		paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.json"))
+		paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.local.json"))
 	}
 	return paths
 }

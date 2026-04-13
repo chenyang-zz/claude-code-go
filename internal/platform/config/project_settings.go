@@ -11,6 +11,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
+type settingsFileWriteRequest struct {
+	Path      string
+	Directory string
+	LogKey    string
+}
+
 // ProjectSettingsStore updates the repository-scoped Claude Code settings file while preserving unrelated fields.
 type ProjectSettingsStore struct {
 	// Path stores the absolute project settings JSON path.
@@ -29,18 +35,26 @@ func NewProjectSettingsStore(projectDir string) *ProjectSettingsStore {
 
 // AddAdditionalDirectory appends one extra working directory into permissions.additionalDirectories without dropping unrelated fields.
 func (s *ProjectSettingsStore) AddAdditionalDirectory(ctx context.Context, directory string) error {
+	return addAdditionalDirectoryToSettingsFile(ctx, settingsFileWriteRequest{
+		Path:      s.Path,
+		Directory: directory,
+		LogKey:    "updated project additional directories",
+	})
+}
+
+func addAdditionalDirectoryToSettingsFile(ctx context.Context, request settingsFileWriteRequest) error {
 	_ = ctx
 
-	if s == nil || strings.TrimSpace(s.Path) == "" {
-		return fmt.Errorf("project settings path is not configured")
+	if strings.TrimSpace(request.Path) == "" {
+		return fmt.Errorf("settings path is not configured")
 	}
 
-	trimmed := strings.TrimSpace(directory)
+	trimmed := strings.TrimSpace(request.Directory)
 	if trimmed == "" {
 		return fmt.Errorf("additional directory is empty")
 	}
 
-	document, err := loadSettingsDocument(s.Path)
+	document, err := loadSettingsDocument(request.Path)
 	if err != nil {
 		return err
 	}
@@ -57,22 +71,22 @@ func (s *ProjectSettingsStore) AddAdditionalDirectory(ctx context.Context, direc
 	}
 	permissions["additionalDirectories"] = existing
 
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
-		return fmt.Errorf("create project settings directory %s: %w", filepath.Dir(s.Path), err)
+	if err := os.MkdirAll(filepath.Dir(request.Path), 0o755); err != nil {
+		return fmt.Errorf("create settings directory %s: %w", filepath.Dir(request.Path), err)
 	}
 
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode project settings %s: %w", s.Path, err)
+		return fmt.Errorf("encode settings %s: %w", request.Path, err)
 	}
 	encoded = append(encoded, '\n')
 
-	if err := os.WriteFile(s.Path, encoded, 0o644); err != nil {
-		return fmt.Errorf("write project settings %s: %w", s.Path, err)
+	if err := os.WriteFile(request.Path, encoded, 0o644); err != nil {
+		return fmt.Errorf("write settings %s: %w", request.Path, err)
 	}
 
-	logger.DebugCF("settings_config", "updated project additional directories", map[string]any{
-		"path":      s.Path,
+	logger.DebugCF("settings_config", request.LogKey, map[string]any{
+		"path":      request.Path,
 		"directory": trimmed,
 		"dir_count": len(existing),
 		"persisted": true,

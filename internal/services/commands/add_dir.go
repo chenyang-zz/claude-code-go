@@ -15,18 +15,28 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// AdditionalDirectoryStore persists project-scoped additional working directories for slash commands.
+// AddDirDestination records whether one added directory should live only in-memory or be remembered in local settings.
+type AddDirDestination string
+
+const (
+	// AddDirDestinationSession keeps the directory only for the current process session.
+	AddDirDestinationSession AddDirDestination = "session"
+	// AddDirDestinationLocalSettings persists the directory into `.claude/settings.local.json`.
+	AddDirDestinationLocalSettings AddDirDestination = "localSettings"
+)
+
+// AdditionalDirectoryStore persists remembered working directories for slash commands.
 type AdditionalDirectoryStore interface {
-	// AddAdditionalDirectory writes one extra working directory into project settings.
+	// AddAdditionalDirectory writes one extra working directory into the configured settings destination.
 	AddAdditionalDirectory(ctx context.Context, directory string) error
 }
 
-// AddDirCommand exposes the minimum text-only /add-dir flow before the interactive picker exists in the Go host.
+// AddDirCommand exposes the minimum text-only `/add-dir` behavior and shared directory-application helpers.
 type AddDirCommand struct {
 	// Config carries the resolved runtime configuration snapshot used to derive current working-directory coverage.
 	Config *coreconfig.Config
-	// Store persists extra working directories into project settings.
-	Store AdditionalDirectoryStore
+	// LocalStore persists remembered directories into local settings.
+	LocalStore AdditionalDirectoryStore
 	// Policy widens the active read permission roots so the new directory becomes usable immediately.
 	Policy *corepermission.FilesystemPolicy
 }
@@ -46,10 +56,15 @@ func (c AddDirCommand) Execute(ctx context.Context, args command.Args) (command.
 	if requested == "" {
 		return command.Result{}, fmt.Errorf("usage: %s", c.Metadata().Usage)
 	}
-	if c.Store == nil {
-		return command.Result{}, fmt.Errorf("project settings storage is not configured")
+	absolutePath, err := c.ResolveDirectory(requested)
+	if err != nil {
+		return command.Result{}, err
 	}
+	return c.ApplyDirectory(ctx, absolutePath, AddDirDestinationLocalSettings)
+}
 
+// ResolveDirectory validates one requested directory path and returns the stable absolute path used for later permission updates.
+func (c AddDirCommand) ResolveDirectory(requested string) (string, error) {
 	projectPath := ""
 	if c.Config != nil {
 		projectPath = c.Config.ProjectPath
@@ -57,32 +72,51 @@ func (c AddDirCommand) Execute(ctx context.Context, args command.Args) (command.
 
 	absolutePath, err := platformfs.ExpandPath(requested, projectPath)
 	if err != nil {
-		return command.Result{}, fmt.Errorf("expand add-dir path %q: %w", requested, err)
+		return "", fmt.Errorf("expand add-dir path %q: %w", requested, err)
 	}
 
 	info, err := os.Stat(absolutePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return command.Result{}, fmt.Errorf("path %s was not found", absolutePath)
+			return "", fmt.Errorf("path %s was not found", absolutePath)
 		}
-		return command.Result{}, fmt.Errorf("stat add-dir path %s: %w", absolutePath, err)
+		return "", fmt.Errorf("stat add-dir path %s: %w", absolutePath, err)
 	}
 	if !info.IsDir() {
-		return command.Result{}, fmt.Errorf("%s is not a directory. Did you mean to add the parent directory %s?", requested, filepath.Dir(absolutePath))
+		return "", fmt.Errorf("%s is not a directory. Did you mean to add the parent directory %s?", requested, filepath.Dir(absolutePath))
 	}
 
 	workingRoots, err := addDirWorkingRoots(projectPath, c.Config)
 	if err != nil {
-		return command.Result{}, err
+		return "", err
 	}
 	for _, root := range workingRoots {
 		if addDirPathWithinRoot(root, absolutePath) {
-			return command.Result{}, fmt.Errorf("%s is already accessible within the existing working directory %s", requested, root)
+			return "", fmt.Errorf("%s is already accessible within the existing working directory %s", requested, root)
 		}
 	}
+	return absolutePath, nil
+}
 
-	if err := c.Store.AddAdditionalDirectory(ctx, absolutePath); err != nil {
-		return command.Result{}, err
+// ApplyDirectory expands the active permission scope and optionally persists the directory based on the chosen destination.
+func (c AddDirCommand) ApplyDirectory(ctx context.Context, absolutePath string, destination AddDirDestination) (command.Result, error) {
+	projectPath := ""
+	if c.Config != nil {
+		projectPath = c.Config.ProjectPath
+	}
+
+	switch destination {
+	case AddDirDestinationSession:
+		// Session-only directories intentionally stay in-memory.
+	case AddDirDestinationLocalSettings:
+		if c.LocalStore == nil {
+			return command.Result{}, fmt.Errorf("local settings storage is not configured")
+		}
+		if err := c.LocalStore.AddAdditionalDirectory(ctx, absolutePath); err != nil {
+			return command.Result{}, err
+		}
+	default:
+		return command.Result{}, fmt.Errorf("unsupported add-dir destination %q", destination)
 	}
 
 	if c.Config != nil && !addDirContainsString(c.Config.Permissions.AdditionalDirectories, absolutePath) {
@@ -96,11 +130,16 @@ func (c AddDirCommand) Execute(ctx context.Context, args command.Args) (command.
 		"directory":                   absolutePath,
 		"project_path":                projectPath,
 		"additional_directory_count":  len(c.currentAdditionalDirectories()),
+		"destination":                 string(destination),
 		"policy_read_root_configured": c.Policy != nil,
 	})
 
+	message := fmt.Sprintf("Added %s as a working directory for this session. Use /permissions to review the active workspace scope.", absolutePath)
+	if destination == AddDirDestinationLocalSettings {
+		message = fmt.Sprintf("Added %s as a working directory and saved it to local settings. Use /permissions to review the active workspace scope.", absolutePath)
+	}
 	return command.Result{
-		Output: fmt.Sprintf("Added %s as a working directory. Claude Code Go persists it to project settings now, but the interactive add-dir flow and session-only directory mode are not implemented yet.", absolutePath),
+		Output: message,
 	}, nil
 }
 

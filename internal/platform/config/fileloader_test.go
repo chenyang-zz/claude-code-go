@@ -148,6 +148,37 @@ func TestFileLoaderLoadProjectEditorModeOverridesHome(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadLocalSettingsOverrideProject verifies project-local settings.local.json overrides repository settings for migrated fields.
+func TestFileLoaderLoadLocalSettingsOverrideProject(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","permissions":{"additionalDirectories":["packages/shared"]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), []byte(`{"model":"local-model","permissions":{"additionalDirectories":["packages/local"]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(local settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "local-model" {
+		t.Fatalf("Load() model = %q, want local-model", cfg.Model)
+	}
+	if len(cfg.Permissions.AdditionalDirectories) != 1 || cfg.Permissions.AdditionalDirectories[0] != "packages/local" {
+		t.Fatalf("Load() permissions.additionalDirectories = %#v, want packages/local", cfg.Permissions.AdditionalDirectories)
+	}
+}
+
 // TestFileLoaderLoadDefaultsSessionDBPath verifies the loader derives a stable default session DB path from the home directory.
 func TestFileLoaderLoadDefaultsSessionDBPath(t *testing.T) {
 	tempDir := t.TempDir()
