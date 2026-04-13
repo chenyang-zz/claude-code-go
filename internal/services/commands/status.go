@@ -3,17 +3,38 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
+
+// APIConnectivityProbeResult stores the caller-facing outcome of one provider connectivity probe.
+type APIConnectivityProbeResult struct {
+	// Summary is the rendered line body inserted into the /status output.
+	Summary string
+}
+
+// APIConnectivityProber defines the minimum provider-side connectivity probe used by /status.
+type APIConnectivityProber interface {
+	// Probe checks whether the configured provider endpoint is reachable enough for a status summary.
+	Probe(ctx context.Context, cfg coreconfig.Config) APIConnectivityProbeResult
+}
 
 // StatusCommand renders a minimum host status summary for the current Go CLI runtime.
 type StatusCommand struct {
 	// Config carries the already-resolved runtime configuration snapshot.
 	Config coreconfig.Config
+	// ToolRegistry exposes the currently wired tool set for host status summaries.
+	ToolRegistry coretool.Registry
+	// APIProbe performs provider-specific connectivity checks when available.
+	APIProbe APIConnectivityProber
+	// Stat inspects local filesystem paths so tests can provide stable storage diagnostics.
+	Stat func(string) (os.FileInfo, error)
 }
 
 // Metadata returns the canonical slash descriptor for /status.
@@ -27,37 +48,97 @@ func (c StatusCommand) Metadata() command.Metadata {
 
 // Execute summarizes the stable local status signals that are currently available in the Go host.
 func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
-	_ = ctx
 	_ = args
 
+	apiProbe := c.apiConnectivityStatus(ctx)
+	toolSummary, toolCount := statusToolSummary(c.ToolRegistry)
 	lines := []string{
 		"Status summary:",
 		fmt.Sprintf("- Provider: %s", displayValue(c.Config.Provider)),
 		fmt.Sprintf("- Model: %s", displayValue(c.Config.Model)),
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
-		fmt.Sprintf("- Session storage: %s", statusSessionStorage(c.Config.SessionDBPath)),
+		fmt.Sprintf("- Session storage: %s", c.sessionStorageStatus()),
 		fmt.Sprintf("- Account auth: %s", statusAccountAuth(c.Config.APIKey)),
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
-		"- API connectivity check: not available in Claude Code Go yet",
-		"- Tool status checks: not available in Claude Code Go yet",
+		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
+		fmt.Sprintf("- Tool status checks: %s", toolSummary),
 		"- Settings status UI: not available in Claude Code Go yet",
 	}
 
 	logger.DebugCF("commands", "rendered status command output", map[string]any{
-		"provider":              c.Config.Provider,
-		"model":                 c.Config.Model,
-		"project_path":          c.Config.ProjectPath,
-		"approval_mode":         c.Config.ApprovalMode,
-		"has_api_key":           c.Config.APIKey != "",
-		"has_session_db_path":   c.Config.SessionDBPath != "",
-		"api_connectivity_live": false,
-		"tool_status_live":      false,
+		"provider":            c.Config.Provider,
+		"model":               c.Config.Model,
+		"project_path":        c.Config.ProjectPath,
+		"approval_mode":       c.Config.ApprovalMode,
+		"has_api_key":         c.Config.APIKey != "",
+		"has_session_db_path": c.Config.SessionDBPath != "",
+		"api_connectivity":    apiProbe.Summary,
+		"tool_count":          toolCount,
 	})
 
 	return command.Result{
 		Output: strings.Join(lines, "\n"),
 	}, nil
+}
+
+// sessionStorageStatus reports whether the configured session persistence path is locally usable.
+func (c StatusCommand) sessionStorageStatus() string {
+	path := strings.TrimSpace(c.Config.SessionDBPath)
+	if path == "" {
+		return "not configured"
+	}
+
+	statFn := c.Stat
+	if statFn == nil {
+		statFn = os.Stat
+	}
+
+	if _, err := statFn(path); err == nil {
+		return fmt.Sprintf("%s (present)", path)
+	}
+
+	parent := filepath.Dir(path)
+	if _, err := statFn(parent); err == nil {
+		return fmt.Sprintf("%s (not created yet; parent directory exists)", path)
+	}
+
+	return fmt.Sprintf("%s (parent directory missing)", path)
+}
+
+// apiConnectivityStatus renders the provider-specific connectivity outcome or a stable fallback.
+func (c StatusCommand) apiConnectivityStatus(ctx context.Context) APIConnectivityProbeResult {
+	if strings.TrimSpace(c.Config.APIKey) == "" {
+		return APIConnectivityProbeResult{
+			Summary: "skipped (missing API key)",
+		}
+	}
+	if c.APIProbe == nil {
+		return APIConnectivityProbeResult{
+			Summary: fmt.Sprintf("not supported for provider %s", displayValue(c.Config.Provider)),
+		}
+	}
+	return c.APIProbe.Probe(ctx, c.Config)
+}
+
+// statusToolSummary reports the currently wired tool registry in one stable text line.
+func statusToolSummary(registry coretool.Registry) (string, int) {
+	if registry == nil {
+		return "no tools registered", 0
+	}
+
+	registered := registry.List()
+	names := make([]string, 0, len(registered))
+	for _, item := range registered {
+		if item == nil {
+			continue
+		}
+		names = append(names, item.Name())
+	}
+	if len(names) == 0 {
+		return "no tools registered", 0
+	}
+	return fmt.Sprintf("%d registered (%s)", len(names), strings.Join(names, ", ")), len(names)
 }
 
 // statusSessionStorage reports whether session persistence is configured without probing the filesystem.

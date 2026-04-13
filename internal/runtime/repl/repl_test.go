@@ -860,7 +860,7 @@ func TestRunnerRunStatusCommandReportsFallback(t *testing.T) {
 		t.Fatalf("Run(/status) error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing API key; interactive account status is not available\n- API base URL: default\n- API connectivity check: not available in Claude Code Go yet\n- Tool status checks: not available in Claude Code Go yet\n- Settings status UI: not available in Claude Code Go yet\n"
+	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing API key; interactive account status is not available\n- API base URL: default\n- API connectivity check: skipped (missing API key)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/status) output = %q, want %q", got, want)
 	}

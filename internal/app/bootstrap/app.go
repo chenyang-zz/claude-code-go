@@ -174,7 +174,15 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.StatusCommand{Config: dereferenceConfig(cfg)}); err != nil {
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy)...)
+	if err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.StatusCommand{
+		Config:       dereferenceConfig(cfg),
+		ToolRegistry: statusToolRegistry.Tools,
+		APIProbe:     buildStatusProbe(cfg),
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
@@ -314,6 +322,20 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
+	}
+}
+
+// buildStatusProbe selects the provider-specific connectivity probe used by /status.
+func buildStatusProbe(cfg *coreconfig.Config) servicecommands.APIConnectivityProber {
+	if cfg == nil {
+		return nil
+	}
+
+	switch cfg.Provider {
+	case "", "anthropic":
+		return anthropic.NewStatusProbe(anthropic.StatusProbeConfig{})
+	default:
+		return nil
 	}
 }
 
