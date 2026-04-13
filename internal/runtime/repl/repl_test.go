@@ -764,6 +764,57 @@ func TestRunnerRunSecurityReviewCommandReportsPluginNotice(t *testing.T) {
 	}
 }
 
+// TestRunnerRunAgentsCommandReportsFallback verifies /agents is routed through the shared registry and emits the stable settings fallback.
+func TestRunnerRunAgentsCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.AgentsCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/agents"}); err != nil {
+		t.Fatalf("Run(/agents) error = %v", err)
+	}
+
+	want := "Agent configuration is not available in Claude Code Go yet. Agent menus, team configuration editing, and interactive agent management flows remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/agents) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunPluginCommandReportsFallback verifies /plugin is routed through the shared registry and emits the stable settings fallback.
+func TestRunnerRunPluginCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.PluginCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/plugin"}); err != nil {
+		t.Fatalf("Run(/plugin) error = %v", err)
+	}
+
+	want := "Plugin management is not available in Claude Code Go yet. Plugin settings, marketplace browsing, trust prompts, marketplace management, and interactive plugin management flows remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/plugin) output = %q, want %q", got, want)
+	}
+}
+
+// TestRunnerRunHooksCommandReportsFallback verifies /hooks is routed through the shared registry and emits the stable settings fallback.
+func TestRunnerRunHooksCommandReportsFallback(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.HooksCommand{})
+
+	if err := runner.Run(context.Background(), []string{"/hooks"}); err != nil {
+		t.Fatalf("Run(/hooks) error = %v", err)
+	}
+
+	want := "Hook configuration is not available in Claude Code Go yet. Tool event hook menus, hook rule editing, and interactive hook configuration flows remain unmigrated.\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("Run(/hooks) output = %q, want %q", got, want)
+	}
+}
+
 // TestRunnerRunLogoutCommandReportsFallback verifies /logout is routed through the shared registry and emits the stable logout fallback.
 func TestRunnerRunLogoutCommandReportsFallback(t *testing.T) {
 	var buf bytes.Buffer

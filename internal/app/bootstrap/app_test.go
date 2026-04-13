@@ -243,6 +243,21 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("security-review"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /security-review command")
 	}
+	if _, ok := app.Runner.Commands.Get("agents"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /agents command")
+	}
+	if _, ok := app.Runner.Commands.Get("plugin"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /plugin command")
+	}
+	if _, ok := app.Runner.Commands.Get("plugins"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /plugins alias")
+	}
+	if _, ok := app.Runner.Commands.Get("marketplace"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /marketplace alias")
+	}
+	if _, ok := app.Runner.Commands.Get("hooks"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /hooks command")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -276,8 +291,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 42 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 42", len(cmds))
+	if len(cmds) != 45 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 45", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -572,10 +587,32 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() forty-first metadata = %#v, want security-review metadata", got)
 	}
 	if got := cmds[41].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "agents",
+		Description: "Manage agent configurations",
+		Usage:       "/agents",
+	}) {
+		t.Fatalf("newCommandRegistry() forty-second metadata = %#v, want agents metadata", got)
+	}
+	if got := cmds[42].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "plugin",
+		Aliases:     []string{"plugins", "marketplace"},
+		Description: "Manage Claude Code plugins",
+		Usage:       "/plugin [subcommand]",
+	}) {
+		t.Fatalf("newCommandRegistry() forty-third metadata = %#v, want plugin metadata", got)
+	}
+	if got := cmds[43].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "hooks",
+		Description: "View hook configurations for tool events",
+		Usage:       "/hooks",
+	}) {
+		t.Fatalf("newCommandRegistry() forty-fourth metadata = %#v, want hooks metadata", got)
+	}
+	if got := cmds[44].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-second metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() forty-fifth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

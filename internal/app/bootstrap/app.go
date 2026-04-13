@@ -249,6 +249,15 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.SecurityReviewCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.AgentsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.PluginCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.HooksCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
 		ProjectPath: dereferenceConfig(cfg).ProjectPath,
