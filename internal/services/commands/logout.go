@@ -30,13 +30,20 @@ func (c LogoutCommand) Execute(ctx context.Context, args command.Args) (command.
 	_ = args
 
 	usingAPIKey := strings.TrimSpace(c.Config.APIKey) != ""
+	usingAuthToken := strings.TrimSpace(c.Config.AuthToken) != ""
 	logger.DebugCF("commands", "rendered logout command fallback output", map[string]any{
-		"using_api_key": usingAPIKey,
+		"using_api_key":    usingAPIKey,
+		"using_auth_token": usingAuthToken,
 	})
 
 	if usingAPIKey {
 		return command.Result{
 			Output: "Claude Code Go is using configured API key authentication. Remove the API key from settings or environment variables to sign out.",
+		}, nil
+	}
+	if usingAuthToken {
+		return command.Result{
+			Output: "Claude Code Go is using configured auth token authentication. Remove the auth token from settings or environment variables to sign out.",
 		}, nil
 	}
 

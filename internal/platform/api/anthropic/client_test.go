@@ -77,6 +77,36 @@ func TestClientStreamReadsTextDelta(t *testing.T) {
 	}
 }
 
+// TestClientStreamUsesAuthToken verifies Anthropic account auth uses a Bearer header when no API key is configured.
+func TestClientStreamUsesAuthToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("authorization"); got != "Bearer auth-token" {
+			t.Fatalf("authorization = %q, want Bearer auth-token", got)
+		}
+		if got := r.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("x-api-key = %q, want empty when using auth token", got)
+		}
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		AuthToken:  "auth-token",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	for range stream {
+	}
+}
+
 // TestClientStreamMapsToolLoopMessages verifies assistant tool_use and user tool_result history are preserved in the Anthropic request body.
 func TestClientStreamMapsToolLoopMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -26,13 +26,14 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model         string  `json:"model"`
-	EffortLevel   *string `json:"effortLevel"`
-	FastMode      *bool   `json:"fastMode"`
-	Theme         string  `json:"theme"`
-	EditorMode    string  `json:"editorMode"`
-	Provider      string  `json:"provider"`
-	SessionDBPath string  `json:"sessionDbPath"`
+	Model         string            `json:"model"`
+	EffortLevel   *string           `json:"effortLevel"`
+	FastMode      *bool             `json:"fastMode"`
+	Theme         string            `json:"theme"`
+	EditorMode    string            `json:"editorMode"`
+	Provider      string            `json:"provider"`
+	SessionDBPath string            `json:"sessionDbPath"`
+	Env           map[string]string `json:"env"`
 	Permissions   struct {
 		DefaultMode                  string   `json:"defaultMode"`
 		Allow                        []string `json:"allow"`
@@ -94,17 +95,19 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		cfg = coreconfig.Merge(cfg, flagCfg)
 	}
 
-	envProvider := strings.TrimSpace(l.LookupEnv("CLAUDE_CODE_PROVIDER"))
+	envLookup := l.runtimeEnvLookup(cfg.Env)
+	envProvider := strings.TrimSpace(envLookup("CLAUDE_CODE_PROVIDER"))
 	activeProvider := firstNonEmpty(envProvider, cfg.Provider)
 	envCfg := coreconfig.Config{
-		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
-		Theme:         l.LookupEnv("CLAUDE_CODE_THEME"),
-		EditorMode:    l.LookupEnv("CLAUDE_CODE_EDITOR_MODE"),
+		Model:         envLookup("CLAUDE_CODE_MODEL"),
+		Theme:         envLookup("CLAUDE_CODE_THEME"),
+		EditorMode:    envLookup("CLAUDE_CODE_EDITOR_MODE"),
 		Provider:      envProvider,
-		APIKey:        l.lookupAPIKey(activeProvider),
-		APIBaseURL:    l.lookupAPIBaseURL(activeProvider),
-		ApprovalMode:  l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
-		SessionDBPath: l.LookupEnv("CLAUDE_CODE_SESSION_DB_PATH"),
+		APIKey:        l.lookupAPIKey(activeProvider, envLookup),
+		AuthToken:     l.lookupAuthToken(activeProvider, envLookup),
+		APIBaseURL:    l.lookupAPIBaseURL(activeProvider, envLookup),
+		ApprovalMode:  envLookup("CLAUDE_CODE_APPROVAL_MODE"),
+		SessionDBPath: envLookup("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
 	cfg = coreconfig.Merge(cfg, envCfg)
 
@@ -114,14 +117,28 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		"effort_level":        cfg.EffortLevel,
 		"fast_mode":           cfg.FastMode,
 		"has_fast_mode":       cfg.HasFastModeSetting,
+		"settings_env_count":  len(cfg.Env),
 		"theme":               cfg.Theme,
 		"editor_mode":         cfg.EditorMode,
 		"has_api_key":         cfg.APIKey != "",
+		"has_auth_token":      cfg.AuthToken != "",
 		"api_base_url":        cfg.APIBaseURL,
 		"has_session_db_path": cfg.SessionDBPath != "",
 	})
 
 	return cfg, nil
+}
+
+// runtimeEnvLookup resolves environment variables from merged settings.env first, then falls back to the host environment.
+func (l *FileLoader) runtimeEnvLookup(settingsEnv map[string]string) func(string) string {
+	return func(key string) string {
+		if settingsEnv != nil {
+			if value, ok := settingsEnv[key]; ok {
+				return value
+			}
+		}
+		return l.LookupEnv(key)
+	}
 }
 
 // settingsPaths returns the supported global-to-project settings lookup order.
@@ -187,6 +204,7 @@ func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) 
 	}
 
 	return coreconfig.Config{
+		Env:                   cloneStringMap(parsed.Env),
 		Model:                 parsed.Model,
 		EffortLevel:           readEffortLevel(parsed.EffortLevel),
 		HasEffortLevelSetting: parsed.EffortLevel != nil,
@@ -206,6 +224,18 @@ func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) 
 			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
 		},
 	}, nil
+}
+
+// cloneStringMap copies one string map so later merges cannot mutate decoded settings data.
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // readEffortLevel normalizes one optional effort pointer into the runtime representation.
@@ -233,43 +263,51 @@ func (l *FileLoader) defaultSessionDBPath() string {
 }
 
 // lookupAPIKey resolves the provider-specific credential environment variable for the active runtime provider.
-func (l *FileLoader) lookupAPIKey(provider string) string {
-	if value := l.LookupEnv("CLAUDE_CODE_API_KEY"); value != "" {
+func (l *FileLoader) lookupAPIKey(provider string, lookup func(string) string) string {
+	if value := lookup("CLAUDE_CODE_API_KEY"); value != "" {
 		return value
 	}
 
 	switch coreconfig.NormalizeProvider(provider) {
 	case coreconfig.ProviderAnthropic:
-		return l.LookupEnv("ANTHROPIC_API_KEY")
+		return lookup("ANTHROPIC_API_KEY")
 	case coreconfig.ProviderOpenAICompatible:
-		return l.LookupEnv("OPENAI_API_KEY")
+		return lookup("OPENAI_API_KEY")
 	case coreconfig.ProviderGLM:
 		return firstNonEmpty(
-			l.LookupEnv("GLM_API_KEY"),
-			l.LookupEnv("ZHIPUAI_API_KEY"),
-			l.LookupEnv("OPENAI_API_KEY"),
+			lookup("GLM_API_KEY"),
+			lookup("ZHIPUAI_API_KEY"),
+			lookup("OPENAI_API_KEY"),
 		)
 	default:
 		return ""
 	}
 }
 
+// lookupAuthToken resolves the Anthropic bearer token used by first-party account auth.
+func (l *FileLoader) lookupAuthToken(provider string, lookup func(string) string) string {
+	if coreconfig.NormalizeProvider(provider) != coreconfig.ProviderAnthropic {
+		return ""
+	}
+	return lookup("ANTHROPIC_AUTH_TOKEN")
+}
+
 // lookupAPIBaseURL resolves the provider-specific base URL override environment variable for the active runtime provider.
-func (l *FileLoader) lookupAPIBaseURL(provider string) string {
-	if value := l.LookupEnv("CLAUDE_CODE_API_BASE_URL"); value != "" {
+func (l *FileLoader) lookupAPIBaseURL(provider string, lookup func(string) string) string {
+	if value := lookup("CLAUDE_CODE_API_BASE_URL"); value != "" {
 		return value
 	}
 
 	switch coreconfig.NormalizeProvider(provider) {
 	case coreconfig.ProviderAnthropic:
-		return l.LookupEnv("ANTHROPIC_BASE_URL")
+		return lookup("ANTHROPIC_BASE_URL")
 	case coreconfig.ProviderOpenAICompatible:
-		return l.LookupEnv("OPENAI_BASE_URL")
+		return lookup("OPENAI_BASE_URL")
 	case coreconfig.ProviderGLM:
 		return firstNonEmpty(
-			l.LookupEnv("GLM_BASE_URL"),
-			l.LookupEnv("ZHIPUAI_BASE_URL"),
-			l.LookupEnv("OPENAI_BASE_URL"),
+			lookup("GLM_BASE_URL"),
+			lookup("ZHIPUAI_BASE_URL"),
+			lookup("OPENAI_BASE_URL"),
 		)
 	default:
 		return ""

@@ -29,7 +29,24 @@ func TestLoginCommandExecuteWithoutAPIKey(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key in settings or environment variables instead."
+	want := "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key or auth token in settings or environment variables instead."
+	if result.Output != want {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+}
+
+// TestLoginCommandExecuteWithAuthToken verifies /login acknowledges configured auth token authentication.
+func TestLoginCommandExecuteWithAuthToken(t *testing.T) {
+	result, err := LoginCommand{
+		Config: coreconfig.Config{
+			AuthToken: "auth-token",
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Claude Code Go is using configured auth token authentication. Interactive account switching is not supported yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

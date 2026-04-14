@@ -103,14 +103,38 @@ func TestStatusCommandExecute(t *testing.T) {
 	}
 }
 
-// TestStatusCommandExecuteWithoutAPIKey verifies /status keeps the missing-account fallback stable.
-func TestStatusCommandExecuteWithoutAPIKey(t *testing.T) {
+// TestStatusCommandExecuteWithAuthToken verifies /status treats Anthropic auth token authentication as configured.
+func TestStatusCommandExecuteWithAuthToken(t *testing.T) {
+	result, err := StatusCommand{
+		Config: coreconfig.Config{
+			Provider:    "anthropic",
+			AuthToken:   "auth-token",
+			ProjectPath: "/repo/project",
+		},
+		APIProbe: stubStatusProbe{
+			result: APIConnectivityProbeResult{
+				Summary: "reachable (HTTP 401 from /v1/messages)",
+			},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Status summary:\n- Provider: anthropic\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: Auth token configured; interactive account status is not available\n- API base URL: default\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	if result.Output != want {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+}
+
+// TestStatusCommandExecuteWithoutCredential verifies /status keeps the missing-account fallback stable.
+func TestStatusCommandExecuteWithoutCredential(t *testing.T) {
 	result, err := StatusCommand{}.Execute(context.Background(), command.Args{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing API key; interactive account status is not available\n- API base URL: default\n- API connectivity check: skipped (missing API key)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing auth credential; interactive account status is not available\n- API base URL: default\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

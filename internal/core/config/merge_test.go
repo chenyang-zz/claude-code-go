@@ -9,6 +9,11 @@ import (
 func TestMergeOverlaysPermissionConfig(t *testing.T) {
 	base := Config{
 		ApprovalMode: "default",
+		Env: map[string]string{
+			"HOME_ONLY": "1",
+			"SHARED":    "base",
+		},
+		AuthToken: "base-token",
 		Permissions: PermissionConfig{
 			DefaultMode:           "default",
 			Allow:                 []string{"Bash(ls)"},
@@ -18,6 +23,11 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 
 	override := Config{
 		ApprovalMode: "plan",
+		Env: map[string]string{
+			"SHARED": "override",
+			"LOCAL":  "1",
+		},
+		AuthToken: "override-token",
 		Permissions: PermissionConfig{
 			DefaultMode:                  "plan",
 			Deny:                         []string{"Bash(rm -rf)"},
@@ -30,6 +40,12 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 	got := Merge(base, override)
 	want := Config{
 		ApprovalMode: "plan",
+		Env: map[string]string{
+			"HOME_ONLY": "1",
+			"SHARED":    "override",
+			"LOCAL":     "1",
+		},
+		AuthToken: "override-token",
 		Permissions: PermissionConfig{
 			DefaultMode:                  "plan",
 			Allow:                        []string{"Bash(ls)"},

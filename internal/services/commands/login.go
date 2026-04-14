@@ -30,8 +30,10 @@ func (c LoginCommand) Execute(ctx context.Context, args command.Args) (command.R
 	_ = args
 
 	usingAPIKey := strings.TrimSpace(c.Config.APIKey) != ""
+	usingAuthToken := strings.TrimSpace(c.Config.AuthToken) != ""
 	logger.DebugCF("commands", "rendered login command fallback output", map[string]any{
-		"using_api_key": usingAPIKey,
+		"using_api_key":    usingAPIKey,
+		"using_auth_token": usingAuthToken,
 	})
 
 	if usingAPIKey {
@@ -39,8 +41,13 @@ func (c LoginCommand) Execute(ctx context.Context, args command.Args) (command.R
 			Output: "Claude Code Go is using configured API key authentication. Interactive account switching is not supported yet.",
 		}, nil
 	}
+	if usingAuthToken {
+		return command.Result{
+			Output: "Claude Code Go is using configured auth token authentication. Interactive account switching is not supported yet.",
+		}, nil
+	}
 
 	return command.Result{
-		Output: "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key in settings or environment variables instead.",
+		Output: "Interactive Anthropic account login is not supported in Claude Code Go yet. Configure an API key or auth token in settings or environment variables instead.",
 	}, nil
 }

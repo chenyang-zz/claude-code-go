@@ -35,6 +35,23 @@ func TestLogoutCommandExecuteWithoutAPIKey(t *testing.T) {
 	}
 }
 
+// TestLogoutCommandExecuteWithAuthToken verifies /logout acknowledges configured auth token authentication has no interactive logout flow.
+func TestLogoutCommandExecuteWithAuthToken(t *testing.T) {
+	result, err := LogoutCommand{
+		Config: coreconfig.Config{
+			AuthToken: "auth-token",
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Claude Code Go is using configured auth token authentication. Remove the auth token from settings or environment variables to sign out."
+	if result.Output != want {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+}
+
 // TestLogoutCommandExecuteWithAPIKey verifies /logout acknowledges configuration-based authentication has no interactive logout flow.
 func TestLogoutCommandExecuteWithAPIKey(t *testing.T) {
 	result, err := LogoutCommand{

@@ -21,6 +21,8 @@ const defaultBaseURL = "https://api.anthropic.com"
 type Config struct {
 	// APIKey carries the Anthropic credential.
 	APIKey string
+	// AuthToken carries the Anthropic bearer token when first-party account auth is used.
+	AuthToken string
 	// BaseURL optionally overrides the default Anthropic API host.
 	BaseURL string
 	// HTTPClient allows tests to inject a local transport.
@@ -31,6 +33,8 @@ type Config struct {
 type Client struct {
 	// apiKey stores the request credential.
 	apiKey string
+	// authToken stores the bearer token credential when first-party account auth is used.
+	authToken string
 	// baseURL stores the API host root.
 	baseURL string
 	// httpClient performs HTTP requests.
@@ -116,6 +120,7 @@ func NewClient(cfg Config) *Client {
 
 	return &Client{
 		apiKey:     cfg.APIKey,
+		authToken:  cfg.AuthToken,
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: httpClient,
 	}
@@ -123,8 +128,8 @@ func NewClient(cfg Config) *Client {
 
 // Stream opens one Anthropic streaming request and converts SSE payloads into model events.
 func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
-	if c.apiKey == "" {
-		return nil, fmt.Errorf("missing ANTHROPIC_API_KEY")
+	if c.apiKey == "" && c.authToken == "" {
+		return nil, fmt.Errorf("missing Anthropic auth credential")
 	}
 
 	body, err := json.Marshal(messagesRequest{
@@ -145,7 +150,12 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("accept", "text/event-stream")
-	httpReq.Header.Set("x-api-key", c.apiKey)
+	if c.apiKey != "" {
+		httpReq.Header.Set("x-api-key", c.apiKey)
+	}
+	if c.authToken != "" {
+		httpReq.Header.Set("authorization", "Bearer "+c.authToken)
+	}
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
 	logger.DebugCF("anthropic_client", "starting anthropic stream", map[string]any{

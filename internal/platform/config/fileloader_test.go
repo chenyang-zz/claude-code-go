@@ -362,3 +362,113 @@ func TestFileLoaderLoadFlagSettingsRejectsMissingFile(t *testing.T) {
 		t.Fatalf("Load() error = %q, want read settings file error", err.Error())
 	}
 }
+
+// TestFileLoaderLoadSettingsEnvOverridesRuntimeConfig verifies merged settings.env participates in env-derived runtime config resolution.
+func TestFileLoaderLoadSettingsEnvOverridesRuntimeConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","env":{"CLAUDE_CODE_MODEL":"home-env-model","ANTHROPIC_API_KEY":"home-key","PATH":"/home/bin","SHARED":"home"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"provider":"openai-compatible","env":{"OPENAI_API_KEY":"project-key","SHARED":"project"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), []byte(`{"provider":"openai-compatible","env":{"CLAUDE_CODE_MODEL":"local-env-model","LOCAL_ONLY":"1"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(local settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(key string) string {
+		switch key {
+		case "CLAUDE_CODE_MODEL":
+			return "host-model"
+		case "OPENAI_API_KEY":
+			return "host-openai-key"
+		case "PATH":
+			return "/usr/bin"
+		default:
+			return ""
+		}
+	})
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "local-env-model" {
+		t.Fatalf("Load() model = %q, want local-env-model", cfg.Model)
+	}
+	if cfg.Provider != coreconfig.ProviderOpenAICompatible {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderOpenAICompatible)
+	}
+	if cfg.APIKey != "project-key" {
+		t.Fatalf("Load() api key = %q, want project-key", cfg.APIKey)
+	}
+	if cfg.Env["PATH"] != "/home/bin" {
+		t.Fatalf("Load() env PATH = %q, want /home/bin", cfg.Env["PATH"])
+	}
+	if cfg.Env["SHARED"] != "project" {
+		t.Fatalf("Load() env SHARED = %q, want project", cfg.Env["SHARED"])
+	}
+	if cfg.Env["LOCAL_ONLY"] != "1" {
+		t.Fatalf("Load() env LOCAL_ONLY = %q, want 1", cfg.Env["LOCAL_ONLY"])
+	}
+}
+
+// TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv verifies `--settings` env entries merge after on-disk settings.
+func TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","env":{"CLAUDE_CODE_PROVIDER":"anthropic","ANTHROPIC_API_KEY":"disk-key"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.FlagSettingsValue = `{"provider":"anthropic","env":{"CLAUDE_CODE_PROVIDER":"glm","GLM_API_KEY":"flag-glm-key"}}`
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Provider != coreconfig.ProviderGLM {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderGLM)
+	}
+	if cfg.APIKey != "flag-glm-key" {
+		t.Fatalf("Load() api key = %q, want flag-glm-key", cfg.APIKey)
+	}
+}
+
+// TestFileLoaderLoadAnthropicAuthToken verifies the loader resolves ANTHROPIC_AUTH_TOKEN for the Anthropic provider.
+func TestFileLoaderLoadAnthropicAuthToken(t *testing.T) {
+	loader := NewFileLoader(t.TempDir(), t.TempDir(), func(key string) string {
+		switch key {
+		case "ANTHROPIC_AUTH_TOKEN":
+			return "test-auth-token"
+		default:
+			return ""
+		}
+	})
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.AuthToken != "test-auth-token" {
+		t.Fatalf("Load() auth token = %q, want test-auth-token", cfg.AuthToken)
+	}
+}

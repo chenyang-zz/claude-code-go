@@ -35,6 +35,32 @@ func TestStatusProbeProbeReportsReachable(t *testing.T) {
 	}
 }
 
+// TestStatusProbeProbeUsesAuthToken verifies the Anthropic status probe can authenticate with a bearer token.
+func TestStatusProbeProbeUsesAuthToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("authorization"); got != "Bearer auth-token" {
+			t.Fatalf("authorization = %q, want Bearer auth-token", got)
+		}
+		if got := r.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("x-api-key = %q, want empty when using auth token", got)
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	probe := NewStatusProbe(StatusProbeConfig{
+		HTTPClient: server.Client(),
+	})
+	result := probe.Probe(context.Background(), coreconfig.Config{
+		AuthToken:  "auth-token",
+		APIBaseURL: server.URL,
+	})
+
+	if result.Summary != "reachable (HTTP 401 from /v1/messages)" {
+		t.Fatalf("Probe() summary = %q, want reachable HTTP summary", result.Summary)
+	}
+}
+
 // TestStatusProbeProbeReportsNetworkFailure verifies the probe returns one stable unreachable summary on transport errors.
 func TestStatusProbeProbeReportsNetworkFailure(t *testing.T) {
 	probe := NewStatusProbe(StatusProbeConfig{

@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -73,6 +74,39 @@ func (e stubEngine) Run(ctx context.Context, req conversation.RunRequest) (event
 }
 
 var _ engine.Engine = stubEngine{}
+
+// TestNewAppWithDependenciesAppliesSettingsEnv verifies bootstrap writes merged settings.env into the current process.
+func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
+	const envKey = "CLAUDE_CODE_BOOTSTRAP_ENV_TEST"
+	t.Setenv(envKey, "host")
+
+	loader := stubLoader{
+		cfg: coreconfig.Config{
+			Provider: "anthropic",
+			Model:    "claude-sonnet-4-5",
+			Env: map[string]string{
+				envKey: "settings",
+			},
+		},
+	}
+
+	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+		if got := os.Getenv(envKey); got != "settings" {
+			t.Fatalf("engineFactory observed %s = %q, want settings", envKey, got)
+		}
+		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+		if err != nil {
+			return nil, nil, err
+		}
+		return stubEngine{}, policy, nil
+	})
+	if err != nil {
+		t.Fatalf("NewAppWithDependencies() error = %v", err)
+	}
+	if got := os.Getenv(envKey); got != "settings" {
+		t.Fatalf("process env %s = %q, want settings", envKey, got)
+	}
+}
 
 // TestNewAppWithDependenciesLoadsConfig verifies bootstrap wires the runner from resolved config and selected engine.
 func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {

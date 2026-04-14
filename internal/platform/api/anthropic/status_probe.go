@@ -58,7 +58,12 @@ func (p *StatusProbe) Probe(ctx context.Context, cfg coreconfig.Config) servicec
 			Summary: fmt.Sprintf("failed to build request (%v)", err),
 		}
 	}
-	req.Header.Set("x-api-key", cfg.APIKey)
+	if cfg.APIKey != "" {
+		req.Header.Set("x-api-key", cfg.APIKey)
+	}
+	if cfg.AuthToken != "" {
+		req.Header.Set("authorization", "Bearer "+cfg.AuthToken)
+	}
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	resp, err := p.httpClient.Do(req)

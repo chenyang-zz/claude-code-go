@@ -59,7 +59,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
 		fmt.Sprintf("- Session storage: %s", c.sessionStorageStatus()),
-		fmt.Sprintf("- Account auth: %s", statusAccountAuth(c.Config.APIKey)),
+		fmt.Sprintf("- Account auth: %s", statusAccountAuth(c.Config)),
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
 		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),
@@ -72,6 +72,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		"project_path":        c.Config.ProjectPath,
 		"approval_mode":       c.Config.ApprovalMode,
 		"has_api_key":         c.Config.APIKey != "",
+		"has_auth_token":      c.Config.AuthToken != "",
 		"has_session_db_path": c.Config.SessionDBPath != "",
 		"api_connectivity":    apiProbe.Summary,
 		"tool_count":          toolCount,
@@ -108,9 +109,9 @@ func (c StatusCommand) sessionStorageStatus() string {
 
 // apiConnectivityStatus renders the provider-specific connectivity outcome or a stable fallback.
 func (c StatusCommand) apiConnectivityStatus(ctx context.Context) APIConnectivityProbeResult {
-	if strings.TrimSpace(c.Config.APIKey) == "" {
+	if missingStatusCredential(c.Config) {
 		return APIConnectivityProbeResult{
-			Summary: "skipped (missing API key)",
+			Summary: "skipped (missing auth credential)",
 		}
 	}
 	if c.APIProbe == nil {
@@ -150,9 +151,20 @@ func statusSessionStorage(path string) string {
 }
 
 // statusAccountAuth reports the stable authentication state currently visible to the Go host.
-func statusAccountAuth(apiKey string) string {
-	if strings.TrimSpace(apiKey) == "" {
-		return "missing API key; interactive account status is not available"
+func statusAccountAuth(cfg coreconfig.Config) string {
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		return "API key configured; interactive account status is not available"
 	}
-	return "API key configured; interactive account status is not available"
+	if strings.TrimSpace(cfg.AuthToken) != "" {
+		return "Auth token configured; interactive account status is not available"
+	}
+	return "missing auth credential; interactive account status is not available"
+}
+
+// missingStatusCredential reports whether the current provider lacks the minimum credential needed for /status probing.
+func missingStatusCredential(cfg coreconfig.Config) bool {
+	if coreconfig.NormalizeProvider(cfg.Provider) == coreconfig.ProviderAnthropic {
+		return strings.TrimSpace(cfg.APIKey) == "" && strings.TrimSpace(cfg.AuthToken) == ""
+	}
+	return strings.TrimSpace(cfg.APIKey) == ""
 }

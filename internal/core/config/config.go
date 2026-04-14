@@ -4,6 +4,8 @@ package config
 type Config struct {
 	// ProjectPath identifies the current workspace path used for project-scoped runtime behavior.
 	ProjectPath string
+	// Env stores the merged settings-sourced environment variables that should apply to the runtime process.
+	Env map[string]string
 	// Model overrides the default model selection when provided.
 	Model string
 	// EffortLevel stores the persisted model effort preference when explicitly configured.
@@ -22,6 +24,8 @@ type Config struct {
 	Provider string
 	// APIKey carries the credential required by the selected provider.
 	APIKey string
+	// AuthToken carries the Anthropic bearer token used by first-party account auth.
+	AuthToken string
 	// APIBaseURL optionally overrides the provider API endpoint.
 	APIBaseURL string
 	// ApprovalMode controls the runtime approval behavior.
@@ -57,6 +61,7 @@ func DefaultConfig() Config {
 		EditorMode:   NormalizeEditorMode(""),
 		Provider:     ProviderAnthropic,
 		ApprovalMode: "default",
+		Env:          map[string]string{},
 		Permissions: PermissionConfig{
 			DefaultMode: "default",
 		},

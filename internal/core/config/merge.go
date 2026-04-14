@@ -4,6 +4,7 @@ func Merge(base, override Config) Config {
 	if override.ProjectPath != "" {
 		base.ProjectPath = override.ProjectPath
 	}
+	base.Env = mergeStringMap(base.Env, override.Env)
 	if override.Model != "" {
 		base.Model = override.Model
 	}
@@ -27,6 +28,9 @@ func Merge(base, override Config) Config {
 	if override.APIKey != "" {
 		base.APIKey = override.APIKey
 	}
+	if override.AuthToken != "" {
+		base.AuthToken = override.AuthToken
+	}
 	if override.APIBaseURL != "" {
 		base.APIBaseURL = override.APIBaseURL
 	}
@@ -38,6 +42,22 @@ func Merge(base, override Config) Config {
 	}
 	base.Permissions = mergePermissionConfig(base.Permissions, override.Permissions)
 	return base
+}
+
+// mergeStringMap overlays override keys onto base while preserving untouched entries.
+func mergeStringMap(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]string, len(base)+len(override))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range override {
+		merged[key] = value
+	}
+	return merged
 }
 
 // mergePermissionConfig overlays one minimal permission configuration onto another.

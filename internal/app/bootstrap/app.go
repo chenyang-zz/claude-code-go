@@ -59,6 +59,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	if err != nil {
 		return nil, err
 	}
+	applyRuntimeEnvironment(cfg.Env)
 
 	eng, policy, err := engineFactory(cfg)
 	if err != nil {
@@ -318,6 +319,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 	case coreconfig.ProviderAnthropic:
 		client := anthropic.NewClient(anthropic.Config{
 			APIKey:     cfg.APIKey,
+			AuthToken:  cfg.AuthToken,
 			BaseURL:    cfg.APIBaseURL,
 			HTTPClient: nil,
 		})
@@ -343,6 +345,24 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// applyRuntimeEnvironment writes merged settings-sourced environment variables into the current process.
+func applyRuntimeEnvironment(values map[string]string) {
+	if len(values) == 0 {
+		return
+	}
+	for key, value := range values {
+		if err := os.Setenv(key, value); err != nil {
+			logger.WarnCF("bootstrap", "failed to set runtime environment variable", map[string]any{
+				"key":   key,
+				"error": err.Error(),
+			})
+		}
+	}
+	logger.DebugCF("bootstrap", "applied runtime environment variables", map[string]any{
+		"count": len(values),
+	})
 }
 
 // buildStatusProbe selects the provider-specific connectivity probe used by /status.
