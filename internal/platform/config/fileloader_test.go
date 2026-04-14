@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
@@ -253,5 +254,111 @@ func TestFileLoaderLoadGLMEnvFallback(t *testing.T) {
 	}
 	if cfg.APIBaseURL != "https://glm.example.com" {
 		t.Fatalf("Load() api base url = %q, want https://glm.example.com", cfg.APIBaseURL)
+	}
+}
+
+// TestFileLoaderLoadFlagSettingsJSONOverridesFiles verifies `--settings` inline JSON merges after on-disk settings and before env.
+func TestFileLoaderLoadFlagSettingsJSONOverridesFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model","theme":"light"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model","provider":"anthropic"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(key string) string {
+		switch key {
+		case "CLAUDE_CODE_THEME":
+			return "dark-ansi"
+		default:
+			return ""
+		}
+	})
+	loader.FlagSettingsValue = `{"model":"flag-model","provider":"openai-compatible","permissions":{"defaultMode":"plan"}}`
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "flag-model" {
+		t.Fatalf("Load() model = %q, want flag-model", cfg.Model)
+	}
+	if cfg.Provider != coreconfig.ProviderOpenAICompatible {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderOpenAICompatible)
+	}
+	if cfg.Permissions.DefaultMode != "plan" {
+		t.Fatalf("Load() permissions.defaultMode = %q, want plan", cfg.Permissions.DefaultMode)
+	}
+	if cfg.Theme != coreconfig.ThemeSettingDarkANSI {
+		t.Fatalf("Load() theme = %q, want env dark-ansi override", cfg.Theme)
+	}
+}
+
+// TestFileLoaderLoadFlagSettingsFile verifies `--settings` can point at one additional settings file resolved from the working directory.
+func TestFileLoaderLoadFlagSettingsFile(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	flagPath := filepath.Join(projectDir, "extra-settings.json")
+	if err := os.WriteFile(flagPath, []byte(`{"model":"flag-file-model","provider":"glm"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(flag settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.FlagSettingsValue = "./extra-settings.json"
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "flag-file-model" {
+		t.Fatalf("Load() model = %q, want flag-file-model", cfg.Model)
+	}
+	if cfg.Provider != coreconfig.ProviderGLM {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderGLM)
+	}
+}
+
+// TestFileLoaderLoadFlagSettingsRejectsInvalidJSON verifies malformed inline JSON reports a stable parse error.
+func TestFileLoaderLoadFlagSettingsRejectsInvalidJSON(t *testing.T) {
+	loader := NewFileLoader(t.TempDir(), t.TempDir(), func(string) string { return "" })
+	loader.FlagSettingsValue = `{"model":}`
+
+	_, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid inline JSON error")
+	}
+	if !strings.Contains(err.Error(), "parse settings file --settings inline JSON") {
+		t.Fatalf("Load() error = %q, want inline JSON parse error", err.Error())
+	}
+}
+
+// TestFileLoaderLoadFlagSettingsRejectsMissingFile verifies nonexistent `--settings` files fail before env/config wiring continues.
+func TestFileLoaderLoadFlagSettingsRejectsMissingFile(t *testing.T) {
+	loader := NewFileLoader(t.TempDir(), t.TempDir(), func(string) string { return "" })
+	loader.FlagSettingsValue = "./missing-settings.json"
+
+	_, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("Load() error = nil, want missing flag settings file error")
+	}
+	if !strings.Contains(err.Error(), "read settings file") {
+		t.Fatalf("Load() error = %q, want read settings file error", err.Error())
 	}
 }

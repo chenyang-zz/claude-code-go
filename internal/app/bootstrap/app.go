@@ -39,11 +39,17 @@ type App struct {
 
 // NewApp builds the production app wiring from the default config loader.
 func NewApp() (*App, error) {
-	loader, err := platformconfig.NewDefaultFileLoader()
+	return NewAppFromLoader(func() (*platformconfig.FileLoader, error) {
+		return platformconfig.NewDefaultFileLoader()
+	})
+}
+
+// NewAppFromLoader builds the production app wiring from one explicit default loader factory.
+func NewAppFromLoader(factory func() (*platformconfig.FileLoader, error)) (*App, error) {
+	loader, err := factory()
 	if err != nil {
 		return nil, err
 	}
-
 	return NewAppWithDependencies(loader, DefaultEngineFactory)
 }
 

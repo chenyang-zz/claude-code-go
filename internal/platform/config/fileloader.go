@@ -21,6 +21,8 @@ type FileLoader struct {
 	HomeDir string
 	// LookupEnv resolves environment variables so tests can supply stable inputs.
 	LookupEnv func(string) string
+	// FlagSettingsValue carries one optional `--settings` CLI override that should merge after on-disk settings and before env.
+	FlagSettingsValue string
 }
 
 type settingsFile struct {
@@ -84,18 +86,23 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		}
 		cfg = coreconfig.Merge(cfg, fileCfg)
 	}
+	if strings.TrimSpace(l.FlagSettingsValue) != "" {
+		flagCfg, err := l.loadFlagSettings(l.FlagSettingsValue)
+		if err != nil {
+			return coreconfig.Config{}, err
+		}
+		cfg = coreconfig.Merge(cfg, flagCfg)
+	}
 
-	envProvider := firstNonEmpty(
-		coreconfig.NormalizeProvider(l.LookupEnv("CLAUDE_CODE_PROVIDER")),
-		coreconfig.NormalizeProvider(cfg.Provider),
-	)
+	envProvider := strings.TrimSpace(l.LookupEnv("CLAUDE_CODE_PROVIDER"))
+	activeProvider := firstNonEmpty(envProvider, cfg.Provider)
 	envCfg := coreconfig.Config{
 		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
 		Theme:         l.LookupEnv("CLAUDE_CODE_THEME"),
 		EditorMode:    l.LookupEnv("CLAUDE_CODE_EDITOR_MODE"),
 		Provider:      envProvider,
-		APIKey:        l.lookupAPIKey(envProvider),
-		APIBaseURL:    l.lookupAPIBaseURL(envProvider),
+		APIKey:        l.lookupAPIKey(activeProvider),
+		APIBaseURL:    l.lookupAPIBaseURL(activeProvider),
 		ApprovalMode:  l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
 		SessionDBPath: l.LookupEnv("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
@@ -140,9 +147,43 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 		return coreconfig.Config{}, fmt.Errorf("read settings file %s: %w", path, err)
 	}
 
+	return parseSettingsConfig(data, path)
+}
+
+// loadFlagSettings resolves one `--settings` value as either inline JSON or an additional settings file.
+func (l *FileLoader) loadFlagSettings(value string) (coreconfig.Config, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return coreconfig.Config{}, fmt.Errorf("parse --settings: empty value")
+	}
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		logger.DebugCF("runtime_config", "loading flag settings from inline json", map[string]any{
+			"source": "flag_json",
+		})
+		return parseSettingsConfig([]byte(trimmed), "--settings inline JSON")
+	}
+
+	path := trimmed
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(l.CWD, path)
+	}
+	path = filepath.Clean(path)
+	logger.DebugCF("runtime_config", "loading flag settings from file", map[string]any{
+		"source": "flag_file",
+		"path":   path,
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return coreconfig.Config{}, fmt.Errorf("read settings file %s: %w", path, err)
+	}
+	return parseSettingsConfig(data, path)
+}
+
+// parseSettingsConfig unmarshals the migrated settings subset and normalizes it into the runtime config model.
+func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) {
 	var parsed settingsFile
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		return coreconfig.Config{}, fmt.Errorf("parse settings file %s: %w", path, err)
+		return coreconfig.Config{}, fmt.Errorf("parse settings file %s: %w", source, err)
 	}
 
 	return coreconfig.Config{
