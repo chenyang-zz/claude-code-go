@@ -55,7 +55,7 @@ func DefaultConfig() Config {
 		EffortLevel:  "",
 		Theme:        NormalizeThemeSetting(""),
 		EditorMode:   NormalizeEditorMode(""),
-		Provider:     "anthropic",
+		Provider:     ProviderAnthropic,
 		ApprovalMode: "default",
 		Permissions: PermissionConfig{
 			DefaultMode: "default",

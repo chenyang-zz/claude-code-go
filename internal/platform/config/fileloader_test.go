@@ -224,3 +224,34 @@ func TestFileLoaderLoadProjectSettingsOverrideSessionDBPath(t *testing.T) {
 		t.Fatalf("Load() session db path = %q, want /tmp/project-session.db", cfg.SessionDBPath)
 	}
 }
+
+// TestFileLoaderLoadGLMEnvFallback verifies the loader resolves GLM-specific environment variables through the provider alias.
+func TestFileLoaderLoadGLMEnvFallback(t *testing.T) {
+	loader := NewFileLoader(t.TempDir(), t.TempDir(), func(key string) string {
+		switch key {
+		case "CLAUDE_CODE_PROVIDER":
+			return "zhipuai"
+		case "GLM_API_KEY":
+			return "glm-key"
+		case "ZHIPUAI_BASE_URL":
+			return "https://glm.example.com"
+		default:
+			return ""
+		}
+	})
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Provider != coreconfig.ProviderGLM {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderGLM)
+	}
+	if cfg.APIKey != "glm-key" {
+		t.Fatalf("Load() api key = %q, want glm-key", cfg.APIKey)
+	}
+	if cfg.APIBaseURL != "https://glm.example.com" {
+		t.Fatalf("Load() api base url = %q, want https://glm.example.com", cfg.APIBaseURL)
+	}
+}

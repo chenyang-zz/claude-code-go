@@ -22,7 +22,7 @@ func Merge(base, override Config) Config {
 		base.EditorMode = NormalizeEditorMode(override.EditorMode)
 	}
 	if override.Provider != "" {
-		base.Provider = override.Provider
+		base.Provider = NormalizeProvider(override.Provider)
 	}
 	if override.APIKey != "" {
 		base.APIKey = override.APIKey

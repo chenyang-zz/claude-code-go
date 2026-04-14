@@ -11,6 +11,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 )
@@ -280,6 +281,46 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 	}
 	if runtime.ApprovalService == nil {
 		t.Fatal("DefaultEngineFactory() approval service = nil, want injected service")
+	}
+}
+
+// TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime verifies bootstrap can wire the OpenAI-compatible provider.
+func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
+	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+		Provider:     coreconfig.ProviderOpenAICompatible,
+		Model:        "gpt-5",
+		ApprovalMode: approval.ModeBypassPermissions,
+	})
+	if err != nil {
+		t.Fatalf("DefaultEngineFactory() error = %v", err)
+	}
+
+	runtime, ok := eng.(*engine.Runtime)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+	}
+	if _, ok := runtime.Client.(*openai.Client); !ok {
+		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)
+	}
+}
+
+// TestDefaultEngineFactoryBuildsGLMRuntime verifies bootstrap routes the GLM alias through the OpenAI-compatible runtime.
+func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
+	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+		Provider:     coreconfig.ProviderGLM,
+		Model:        "glm-4.5",
+		ApprovalMode: approval.ModeBypassPermissions,
+	})
+	if err != nil {
+		t.Fatalf("DefaultEngineFactory() error = %v", err)
+	}
+
+	runtime, ok := eng.(*engine.Runtime)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+	}
+	if _, ok := runtime.Client.(*openai.Client); !ok {
+		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)
 	}
 }
 

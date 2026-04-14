@@ -11,6 +11,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
@@ -307,9 +308,22 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
 
-	switch cfg.Provider {
-	case "", "anthropic":
+	switch coreconfig.NormalizeProvider(cfg.Provider) {
+	case coreconfig.ProviderAnthropic:
 		client := anthropic.NewClient(anthropic.Config{
+			APIKey:     cfg.APIKey,
+			BaseURL:    cfg.APIBaseURL,
+			HTTPClient: nil,
+		})
+		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.ApprovalService = approval.NewPromptingService(
+			cfg.ApprovalMode,
+			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
+		)
+		return runtime, policy, nil
+	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
+		client := openai.NewClient(openai.Config{
+			Provider:   cfg.Provider,
 			APIKey:     cfg.APIKey,
 			BaseURL:    cfg.APIBaseURL,
 			HTTPClient: nil,
@@ -331,9 +345,13 @@ func buildStatusProbe(cfg *coreconfig.Config) servicecommands.APIConnectivityPro
 		return nil
 	}
 
-	switch cfg.Provider {
-	case "", "anthropic":
+	switch coreconfig.NormalizeProvider(cfg.Provider) {
+	case coreconfig.ProviderAnthropic:
 		return anthropic.NewStatusProbe(anthropic.StatusProbeConfig{})
+	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
+		return openai.NewStatusProbe(openai.StatusProbeConfig{
+			Provider: cfg.Provider,
+		})
 	default:
 		return nil
 	}

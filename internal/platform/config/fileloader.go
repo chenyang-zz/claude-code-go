@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -84,13 +85,17 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		cfg = coreconfig.Merge(cfg, fileCfg)
 	}
 
+	envProvider := firstNonEmpty(
+		coreconfig.NormalizeProvider(l.LookupEnv("CLAUDE_CODE_PROVIDER")),
+		coreconfig.NormalizeProvider(cfg.Provider),
+	)
 	envCfg := coreconfig.Config{
 		Model:         l.LookupEnv("CLAUDE_CODE_MODEL"),
 		Theme:         l.LookupEnv("CLAUDE_CODE_THEME"),
 		EditorMode:    l.LookupEnv("CLAUDE_CODE_EDITOR_MODE"),
-		Provider:      l.LookupEnv("CLAUDE_CODE_PROVIDER"),
-		APIKey:        l.LookupEnv("ANTHROPIC_API_KEY"),
-		APIBaseURL:    l.LookupEnv("ANTHROPIC_BASE_URL"),
+		Provider:      envProvider,
+		APIKey:        l.lookupAPIKey(envProvider),
+		APIBaseURL:    l.lookupAPIBaseURL(envProvider),
 		ApprovalMode:  l.LookupEnv("CLAUDE_CODE_APPROVAL_MODE"),
 		SessionDBPath: l.LookupEnv("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
@@ -148,7 +153,7 @@ func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
 		HasFastModeSetting:    parsed.FastMode != nil,
 		Theme:                 coreconfig.NormalizeThemeSetting(parsed.Theme),
 		EditorMode:            coreconfig.NormalizeEditorMode(parsed.EditorMode),
-		Provider:              parsed.Provider,
+		Provider:              coreconfig.NormalizeProvider(parsed.Provider),
 		ApprovalMode:          parsed.Permissions.DefaultMode,
 		SessionDBPath:         parsed.SessionDBPath,
 		Permissions: coreconfig.PermissionConfig{
@@ -184,4 +189,58 @@ func (l *FileLoader) defaultSessionDBPath() string {
 		return ""
 	}
 	return filepath.Join(l.HomeDir, DefaultSessionDBRelativePath)
+}
+
+// lookupAPIKey resolves the provider-specific credential environment variable for the active runtime provider.
+func (l *FileLoader) lookupAPIKey(provider string) string {
+	if value := l.LookupEnv("CLAUDE_CODE_API_KEY"); value != "" {
+		return value
+	}
+
+	switch coreconfig.NormalizeProvider(provider) {
+	case coreconfig.ProviderAnthropic:
+		return l.LookupEnv("ANTHROPIC_API_KEY")
+	case coreconfig.ProviderOpenAICompatible:
+		return l.LookupEnv("OPENAI_API_KEY")
+	case coreconfig.ProviderGLM:
+		return firstNonEmpty(
+			l.LookupEnv("GLM_API_KEY"),
+			l.LookupEnv("ZHIPUAI_API_KEY"),
+			l.LookupEnv("OPENAI_API_KEY"),
+		)
+	default:
+		return ""
+	}
+}
+
+// lookupAPIBaseURL resolves the provider-specific base URL override environment variable for the active runtime provider.
+func (l *FileLoader) lookupAPIBaseURL(provider string) string {
+	if value := l.LookupEnv("CLAUDE_CODE_API_BASE_URL"); value != "" {
+		return value
+	}
+
+	switch coreconfig.NormalizeProvider(provider) {
+	case coreconfig.ProviderAnthropic:
+		return l.LookupEnv("ANTHROPIC_BASE_URL")
+	case coreconfig.ProviderOpenAICompatible:
+		return l.LookupEnv("OPENAI_BASE_URL")
+	case coreconfig.ProviderGLM:
+		return firstNonEmpty(
+			l.LookupEnv("GLM_BASE_URL"),
+			l.LookupEnv("ZHIPUAI_BASE_URL"),
+			l.LookupEnv("OPENAI_BASE_URL"),
+		)
+	default:
+		return ""
+	}
+}
+
+// firstNonEmpty returns the first non-empty string from left to right.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
