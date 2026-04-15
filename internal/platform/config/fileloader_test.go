@@ -472,3 +472,71 @@ func TestFileLoaderLoadAnthropicAuthToken(t *testing.T) {
 		t.Fatalf("Load() auth token = %q, want test-auth-token", cfg.AuthToken)
 	}
 }
+
+// TestFileLoaderLoadSettingSourcesFilter verifies the loader only reads the disk-backed settings sources enabled by `--setting-sources`.
+func TestFileLoaderLoadSettingSourcesFilter(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), []byte(`{"model":"local-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(local settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.AllowedSettingSources = []SettingSource{SettingSourceProjectSettings}
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "project-model" {
+		t.Fatalf("Load() model = %q, want project-model", cfg.Model)
+	}
+}
+
+// TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings verifies disabling disk-backed settings does not suppress `--settings` overrides.
+func TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.AllowedSettingSources = []SettingSource{}
+	loader.FlagSettingsValue = `{"model":"flag-model"}`
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "flag-model" {
+		t.Fatalf("Load() model = %q, want flag-model", cfg.Model)
+	}
+}

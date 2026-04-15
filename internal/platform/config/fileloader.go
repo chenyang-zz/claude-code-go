@@ -23,6 +23,8 @@ type FileLoader struct {
 	LookupEnv func(string) string
 	// FlagSettingsValue carries one optional `--settings` CLI override that should merge after on-disk settings and before env.
 	FlagSettingsValue string
+	// AllowedSettingSources optionally restricts which disk-backed settings files participate in config loading.
+	AllowedSettingSources []SettingSource
 }
 
 type settingsFile struct {
@@ -144,14 +146,34 @@ func (l *FileLoader) runtimeEnvLookup(settingsEnv map[string]string) func(string
 // settingsPaths returns the supported global-to-project settings lookup order.
 func (l *FileLoader) settingsPaths() []string {
 	paths := make([]string, 0, 3)
-	if l.HomeDir != "" {
-		paths = append(paths, filepath.Join(l.HomeDir, ".claude", "settings.json"))
-	}
-	if l.CWD != "" {
-		paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.json"))
-		paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.local.json"))
+	for _, source := range l.allowedSettingSources() {
+		switch source {
+		case SettingSourceUserSettings:
+			if l.HomeDir != "" {
+				paths = append(paths, filepath.Join(l.HomeDir, ".claude", "settings.json"))
+			}
+		case SettingSourceProjectSettings:
+			if l.CWD != "" {
+				paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.json"))
+			}
+		case SettingSourceLocalSettings:
+			if l.CWD != "" {
+				paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.local.json"))
+			}
+		}
 	}
 	return paths
+}
+
+// allowedSettingSources resolves the explicit CLI source filter or falls back to the default disk-backed source order.
+func (l *FileLoader) allowedSettingSources() []SettingSource {
+	if l == nil || l.AllowedSettingSources == nil {
+		return DefaultSettingSources()
+	}
+
+	allowed := make([]SettingSource, len(l.AllowedSettingSources))
+	copy(allowed, l.AllowedSettingSources)
+	return allowed
 }
 
 // loadSettingsFile extracts the minimal runtime fields currently consumed by the Go host.

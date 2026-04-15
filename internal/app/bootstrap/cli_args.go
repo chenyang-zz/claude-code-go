@@ -11,6 +11,10 @@ import (
 type EarlyCLIOptions struct {
 	// SettingsValue stores one optional `--settings` override captured from CLI args.
 	SettingsValue string
+	// SettingSources restricts which disk-backed settings files should be loaded when `--setting-sources` is present.
+	SettingSources []platformconfig.SettingSource
+	// HasSettingSources reports whether `--setting-sources` was explicitly provided, including the empty-string case.
+	HasSettingSources bool
 }
 
 // ParseEarlyCLIOptions removes bootstrap-time flags from one argv slice and returns the remaining runtime args.
@@ -32,6 +36,28 @@ func ParseEarlyCLIOptions(args []string) (EarlyCLIOptions, []string, error) {
 			if options.SettingsValue == "" {
 				options.SettingsValue = strings.TrimPrefix(current, "--settings=")
 			}
+		case current == "--setting-sources":
+			if index+1 >= len(args) {
+				return EarlyCLIOptions{}, nil, fmt.Errorf("missing value for --setting-sources")
+			}
+			index++
+			if !options.HasSettingSources {
+				sources, err := platformconfig.ParseSettingSourcesFlag(args[index])
+				if err != nil {
+					return EarlyCLIOptions{}, nil, err
+				}
+				options.SettingSources = sources
+				options.HasSettingSources = true
+			}
+		case strings.HasPrefix(current, "--setting-sources="):
+			if !options.HasSettingSources {
+				sources, err := platformconfig.ParseSettingSourcesFlag(strings.TrimPrefix(current, "--setting-sources="))
+				if err != nil {
+					return EarlyCLIOptions{}, nil, err
+				}
+				options.SettingSources = sources
+				options.HasSettingSources = true
+			}
 		default:
 			filtered = append(filtered, args[index])
 		}
@@ -51,6 +77,9 @@ func NewAppFromArgs(args []string) (*App, []string, error) {
 		return nil, nil, err
 	}
 	loader.FlagSettingsValue = options.SettingsValue
+	if options.HasSettingSources {
+		loader.AllowedSettingSources = options.SettingSources
+	}
 
 	app, err := NewAppWithDependencies(loader, DefaultEngineFactory)
 	if err != nil {
