@@ -1,5 +1,10 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Config stores the minimal runtime configuration currently consumed by the Go host.
 type Config struct {
 	// ProjectPath identifies the current workspace path used for project-scoped runtime behavior.
@@ -32,8 +37,22 @@ type Config struct {
 	ApprovalMode string
 	// SessionDBPath points at the session persistence database when enabled.
 	SessionDBPath string
+	// RemoteSession stores the minimum remote-mode context surfaced by bootstrap.
+	RemoteSession RemoteSessionConfig
 	// Permissions stores the migrated read-only permission settings surfaced to slash commands.
 	Permissions PermissionConfig
+}
+
+// RemoteSessionConfig stores the minimum runtime context needed by the Go host's remote-mode surfaces.
+type RemoteSessionConfig struct {
+	// Enabled reports whether bootstrap accepted `--remote` for this process.
+	Enabled bool
+	// SessionID identifies the synthesized remote session associated with the process.
+	SessionID string
+	// URL stores the browser-visible remote session URL consumed by `/session`.
+	URL string
+	// InitialPrompt preserves the optional `--remote` description for future runtime wiring.
+	InitialPrompt string
 }
 
 // PermissionConfig stores the minimal migrated permission settings used for runtime summaries.
@@ -55,17 +74,29 @@ type PermissionConfig struct {
 // DefaultConfig returns the minimum configuration required by the single-turn text runtime.
 func DefaultConfig() Config {
 	return Config{
-		Model:        "claude-sonnet-4-5",
-		EffortLevel:  "",
-		Theme:        NormalizeThemeSetting(""),
-		EditorMode:   NormalizeEditorMode(""),
-		Provider:     ProviderAnthropic,
-		ApprovalMode: "default",
-		Env:          map[string]string{},
+		Model:         "claude-sonnet-4-5",
+		EffortLevel:   "",
+		Theme:         NormalizeThemeSetting(""),
+		EditorMode:    NormalizeEditorMode(""),
+		Provider:      ProviderAnthropic,
+		ApprovalMode:  "default",
+		Env:           map[string]string{},
+		RemoteSession: RemoteSessionConfig{},
 		Permissions: PermissionConfig{
 			DefaultMode: "default",
 		},
 	}
+}
+
+const remoteSessionBaseURL = "https://claude.ai"
+
+// BuildRemoteSessionURL converts one session id into the minimum claude.ai session URL used by `/session`.
+func BuildRemoteSessionURL(sessionID string) string {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/code/%s?m=0", remoteSessionBaseURL, trimmed)
 }
 
 const (

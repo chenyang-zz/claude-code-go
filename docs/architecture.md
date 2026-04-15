@@ -71,7 +71,6 @@ claude-code-go/
 │       ├── console/
 │       ├── jsonout/
 │       └── tui/
-├── migrations/
 ├── pkg/
 │   └── sdk/
 ├── scripts/

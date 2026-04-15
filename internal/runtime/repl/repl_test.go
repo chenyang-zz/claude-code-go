@@ -900,6 +900,28 @@ func TestRunnerRunSessionCommandReportsRemoteFallback(t *testing.T) {
 	}
 }
 
+// TestRunnerRunSessionCommandRendersRemoteSession verifies slash dispatch can render the injected remote session context.
+func TestRunnerRunSessionCommandRendersRemoteSession(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	registerSlashCommands(t, runner, servicecommands.SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+	})
+
+	if err := runner.Run(context.Background(), []string{"/session"}); err != nil {
+		t.Fatalf("Run(/session) error = %v", err)
+	}
+
+	if got := buf.String(); !strings.Contains(got, "Open in browser: https://claude.ai/code/session_test123?m=0\n") {
+		t.Fatalf("Run(/session) output = %q, want remote session url", got)
+	}
+}
+
 // TestRunnerRunFilesCommandReportsFallback verifies /files is routed through the shared registry and emits the stable file-context fallback.
 func TestRunnerRunFilesCommandReportsFallback(t *testing.T) {
 	var buf bytes.Buffer

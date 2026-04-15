@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -36,6 +37,8 @@ type Runner struct {
 	Commands command.Registry
 	// ProjectPath identifies the current workspace used for project-scoped session recovery.
 	ProjectPath string
+	// RemoteSession stores the minimum remote-mode context injected during bootstrap.
+	RemoteSession coreconfig.RemoteSessionConfig
 	// SessionID identifies the current logical CLI session.
 	SessionID string
 	// SessionManager restores previously persisted conversation history when available.

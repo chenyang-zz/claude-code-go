@@ -44,6 +44,42 @@ func TestParseEarlyCLIOptionsSupportsEqualsSyntax(t *testing.T) {
 	}
 }
 
+// TestParseEarlyCLIOptionsStripsRemoteFlag verifies `--remote` is consumed before normal REPL parsing.
+func TestParseEarlyCLIOptionsStripsRemoteFlag(t *testing.T) {
+	options, runArgs, err := ParseEarlyCLIOptions([]string{"--remote", "ship the fix", "/session"})
+	if err != nil {
+		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+	}
+
+	if !options.RemoteEnabled {
+		t.Fatal("ParseEarlyCLIOptions() RemoteEnabled = false, want true")
+	}
+	if options.RemoteDescription != "ship the fix" {
+		t.Fatalf("ParseEarlyCLIOptions() RemoteDescription = %q, want ship the fix", options.RemoteDescription)
+	}
+	if len(runArgs) != 1 || runArgs[0] != "/session" {
+		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [/session]", runArgs)
+	}
+}
+
+// TestParseEarlyCLIOptionsKeepsSlashCommandAfterRemoteFlag verifies `/session` can still be invoked directly in remote mode.
+func TestParseEarlyCLIOptionsKeepsSlashCommandAfterRemoteFlag(t *testing.T) {
+	options, runArgs, err := ParseEarlyCLIOptions([]string{"--remote", "/session"})
+	if err != nil {
+		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+	}
+
+	if !options.RemoteEnabled {
+		t.Fatal("ParseEarlyCLIOptions() RemoteEnabled = false, want true")
+	}
+	if options.RemoteDescription != "" {
+		t.Fatalf("ParseEarlyCLIOptions() RemoteDescription = %q, want empty", options.RemoteDescription)
+	}
+	if len(runArgs) != 1 || runArgs[0] != "/session" {
+		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [/session]", runArgs)
+	}
+}
+
 // TestParseEarlyCLIOptionsRejectsMissingValue verifies `--settings` without a following value fails early.
 func TestParseEarlyCLIOptionsRejectsMissingValue(t *testing.T) {
 	_, _, err := ParseEarlyCLIOptions([]string{"--settings"})
@@ -160,5 +196,51 @@ func TestNewAppFromArgsAppliesSettingSourcesFilter(t *testing.T) {
 
 	if app.Config.Model != "project-model" {
 		t.Fatalf("NewAppFromArgs() model = %q, want project-model", app.Config.Model)
+	}
+}
+
+// TestNewAppFromArgsInjectsRemoteSession verifies bootstrap synthesizes minimum remote-session context when `--remote` is provided.
+func TestNewAppFromArgsInjectsRemoteSession(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	t.Setenv("HOME", homeDir)
+	t.Setenv("PWD", projectDir)
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+
+	previousWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("Chdir(project) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previousWD)
+	})
+
+	app, runArgs, err := NewAppFromArgs([]string{"--remote", "/session"})
+	if err != nil {
+		t.Fatalf("NewAppFromArgs() error = %v", err)
+	}
+
+	if !app.Config.RemoteSession.Enabled {
+		t.Fatal("NewAppFromArgs() remote session enabled = false, want true")
+	}
+	if app.Config.RemoteSession.SessionID == "" {
+		t.Fatal("NewAppFromArgs() remote session id = empty, want synthesized value")
+	}
+	if app.Config.RemoteSession.URL == "" {
+		t.Fatal("NewAppFromArgs() remote session url = empty, want synthesized value")
+	}
+	if app.Runner.RemoteSession.URL != app.Config.RemoteSession.URL {
+		t.Fatalf("NewAppFromArgs() runner remote session url = %q, want %q", app.Runner.RemoteSession.URL, app.Config.RemoteSession.URL)
+	}
+	if len(runArgs) != 1 || runArgs[0] != "/session" {
+		t.Fatalf("NewAppFromArgs() run args = %#v, want [/session]", runArgs)
 	}
 }

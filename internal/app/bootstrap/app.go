@@ -69,6 +69,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
+	runner.RemoteSession = cfg.RemoteSession
 	runner.Input = os.Stdin
 	runner.WorktreeLister = platformgit.NewClient()
 
@@ -102,6 +103,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		"provider":            cfg.Provider,
 		"model":               cfg.Model,
 		"has_session_db_path": cfg.SessionDBPath != "",
+		"remote_mode":         cfg.RemoteSession.Enabled,
 	})
 
 	return &App{
@@ -196,7 +198,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.SessionCommand{}); err != nil {
+	if err := registry.Register(servicecommands.SessionCommand{RemoteSession: cfg.RemoteSession}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.BranchCommand{}); err != nil {

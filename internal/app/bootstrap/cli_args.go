@@ -1,9 +1,12 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 )
 
@@ -15,6 +18,10 @@ type EarlyCLIOptions struct {
 	SettingSources []platformconfig.SettingSource
 	// HasSettingSources reports whether `--setting-sources` was explicitly provided, including the empty-string case.
 	HasSettingSources bool
+	// RemoteEnabled reports whether `--remote` was explicitly provided.
+	RemoteEnabled bool
+	// RemoteDescription stores the optional `--remote` description consumed during bootstrap parsing.
+	RemoteDescription string
 }
 
 // ParseEarlyCLIOptions removes bootstrap-time flags from one argv slice and returns the remaining runtime args.
@@ -24,6 +31,19 @@ func ParseEarlyCLIOptions(args []string) (EarlyCLIOptions, []string, error) {
 	for index := 0; index < len(args); index++ {
 		current := strings.TrimSpace(args[index])
 		switch {
+		case current == "--remote":
+			options.RemoteEnabled = true
+			if index+1 < len(args) && shouldConsumeRemoteDescription(args[index+1]) {
+				index++
+				if options.RemoteDescription == "" {
+					options.RemoteDescription = args[index]
+				}
+			}
+		case strings.HasPrefix(current, "--remote="):
+			options.RemoteEnabled = true
+			if options.RemoteDescription == "" {
+				options.RemoteDescription = strings.TrimPrefix(current, "--remote=")
+			}
 		case current == "--settings":
 			if index+1 >= len(args) {
 				return EarlyCLIOptions{}, nil, fmt.Errorf("missing value for --settings")
@@ -65,6 +85,18 @@ func ParseEarlyCLIOptions(args []string) (EarlyCLIOptions, []string, error) {
 	return options, filtered, nil
 }
 
+// shouldConsumeRemoteDescription reports whether one CLI token should be consumed as the optional `--remote` description.
+func shouldConsumeRemoteDescription(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "/") {
+		return false
+	}
+	return true
+}
+
 // NewAppFromArgs builds the production app after consuming the bootstrap-time CLI flags that affect config loading.
 func NewAppFromArgs(args []string) (*App, []string, error) {
 	options, runArgs, err := ParseEarlyCLIOptions(args)
@@ -81,9 +113,38 @@ func NewAppFromArgs(args []string) (*App, []string, error) {
 		loader.AllowedSettingSources = options.SettingSources
 	}
 
-	app, err := NewAppWithDependencies(loader, DefaultEngineFactory)
+	app, err := NewAppWithDependencies(earlyOptionsLoader{
+		base:    loader,
+		options: options,
+	}, DefaultEngineFactory)
 	if err != nil {
 		return nil, nil, err
 	}
 	return app, runArgs, nil
+}
+
+// earlyOptionsLoader applies bootstrap-time CLI choices onto the resolved runtime config before the app is wired.
+type earlyOptionsLoader struct {
+	base    coreconfig.Loader
+	options EarlyCLIOptions
+}
+
+// Load resolves the underlying config and injects any bootstrap-time remote session context.
+func (l earlyOptionsLoader) Load(ctx context.Context) (coreconfig.Config, error) {
+	cfg, err := l.base.Load(ctx)
+	if err != nil {
+		return coreconfig.Config{}, err
+	}
+	if !l.options.RemoteEnabled {
+		return cfg, nil
+	}
+
+	sessionID := fmt.Sprintf("session_%s", strings.ReplaceAll(uuid.NewString(), "-", ""))
+	cfg.RemoteSession = coreconfig.RemoteSessionConfig{
+		Enabled:       true,
+		SessionID:     sessionID,
+		URL:           coreconfig.BuildRemoteSessionURL(sessionID),
+		InitialPrompt: l.options.RemoteDescription,
+	}
+	return cfg, nil
 }
