@@ -46,6 +46,30 @@ func Merge(base, override Config) Config {
 	if override.APIBaseURLSource != "" {
 		base.APIBaseURLSource = override.APIBaseURLSource
 	}
+	if override.ProxyURL != "" {
+		base.ProxyURL = override.ProxyURL
+	}
+	if override.ProxySource != "" {
+		base.ProxySource = override.ProxySource
+	}
+	if override.AdditionalCACertsPath != "" {
+		base.AdditionalCACertsPath = override.AdditionalCACertsPath
+	}
+	if override.AdditionalCACertsSource != "" {
+		base.AdditionalCACertsSource = override.AdditionalCACertsSource
+	}
+	if override.MTLSClientCertPath != "" {
+		base.MTLSClientCertPath = override.MTLSClientCertPath
+	}
+	if override.MTLSClientCertSource != "" {
+		base.MTLSClientCertSource = override.MTLSClientCertSource
+	}
+	if override.MTLSClientKeyPath != "" {
+		base.MTLSClientKeyPath = override.MTLSClientKeyPath
+	}
+	if override.MTLSClientKeySource != "" {
+		base.MTLSClientKeySource = override.MTLSClientKeySource
+	}
 	if override.ApprovalMode != "" {
 		base.ApprovalMode = override.ApprovalMode
 	}

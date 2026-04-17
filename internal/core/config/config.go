@@ -41,6 +41,22 @@ type Config struct {
 	AuthTokenSource string
 	// APIBaseURLSource stores the environment key that supplied the effective API base URL override.
 	APIBaseURLSource string
+	// ProxyURL stores the effective outbound proxy URL resolved from runtime environment variables.
+	ProxyURL string
+	// ProxySource stores the environment key that supplied the effective outbound proxy URL.
+	ProxySource string
+	// AdditionalCACertsPath stores the optional CA bundle path appended to the runtime trust store.
+	AdditionalCACertsPath string
+	// AdditionalCACertsSource stores the environment key that supplied AdditionalCACertsPath.
+	AdditionalCACertsSource string
+	// MTLSClientCertPath stores the optional client certificate path used for outbound mTLS.
+	MTLSClientCertPath string
+	// MTLSClientCertSource stores the environment key that supplied MTLSClientCertPath.
+	MTLSClientCertSource string
+	// MTLSClientKeyPath stores the optional client private key path used for outbound mTLS.
+	MTLSClientKeyPath string
+	// MTLSClientKeySource stores the environment key that supplied MTLSClientKeyPath.
+	MTLSClientKeySource string
 	// ApprovalMode controls the runtime approval behavior.
 	ApprovalMode string
 	// SessionDBPath points at the session persistence database when enabled.

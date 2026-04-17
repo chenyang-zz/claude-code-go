@@ -115,19 +115,31 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	apiKey, apiKeySource := l.lookupAPIKey(activeProvider, envLookupWithSource)
 	authToken, authTokenSource := l.lookupAuthToken(activeProvider, envLookupWithSource)
 	apiBaseURL, apiBaseURLSource := l.lookupAPIBaseURL(activeProvider, envLookupWithSource)
+	proxyURL, proxySource := firstResolvedEnvValue(envLookupWithSource, "https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY")
+	additionalCACertsPath, additionalCACertsSource := envLookupWithSource("NODE_EXTRA_CA_CERTS")
+	mtlsClientCertPath, mtlsClientCertSource := envLookupWithSource("CLAUDE_CODE_CLIENT_CERT")
+	mtlsClientKeyPath, mtlsClientKeySource := envLookupWithSource("CLAUDE_CODE_CLIENT_KEY")
 	envCfg := coreconfig.Config{
-		Model:            envLookup("CLAUDE_CODE_MODEL"),
-		Theme:            envLookup("CLAUDE_CODE_THEME"),
-		EditorMode:       envLookup("CLAUDE_CODE_EDITOR_MODE"),
-		Provider:         envProvider,
-		APIKey:           apiKey,
-		AuthToken:        authToken,
-		APIBaseURL:       apiBaseURL,
-		APIKeySource:     apiKeySource,
-		AuthTokenSource:  authTokenSource,
-		APIBaseURLSource: apiBaseURLSource,
-		ApprovalMode:     envLookup("CLAUDE_CODE_APPROVAL_MODE"),
-		SessionDBPath:    envLookup("CLAUDE_CODE_SESSION_DB_PATH"),
+		Model:                   envLookup("CLAUDE_CODE_MODEL"),
+		Theme:                   envLookup("CLAUDE_CODE_THEME"),
+		EditorMode:              envLookup("CLAUDE_CODE_EDITOR_MODE"),
+		Provider:                envProvider,
+		APIKey:                  apiKey,
+		AuthToken:               authToken,
+		APIBaseURL:              apiBaseURL,
+		APIKeySource:            apiKeySource,
+		AuthTokenSource:         authTokenSource,
+		APIBaseURLSource:        apiBaseURLSource,
+		ProxyURL:                proxyURL,
+		ProxySource:             proxySource,
+		AdditionalCACertsPath:   additionalCACertsPath,
+		AdditionalCACertsSource: additionalCACertsSource,
+		MTLSClientCertPath:      mtlsClientCertPath,
+		MTLSClientCertSource:    mtlsClientCertSource,
+		MTLSClientKeyPath:       mtlsClientKeyPath,
+		MTLSClientKeySource:     mtlsClientKeySource,
+		ApprovalMode:            envLookup("CLAUDE_CODE_APPROVAL_MODE"),
+		SessionDBPath:           envLookup("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
 	cfg = coreconfig.Merge(cfg, envCfg)
 
@@ -147,6 +159,18 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	})
 
 	return cfg, nil
+}
+
+// firstResolvedEnvValue returns the first configured environment variable together with its source label.
+func firstResolvedEnvValue(lookup func(string) (string, string), keys ...string) (string, string) {
+	for _, key := range keys {
+		value, source := lookup(key)
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		return value, source
+	}
+	return "", ""
 }
 
 // runtimeEnvLookup resolves environment variables from merged settings.env first, then falls back to the host environment.

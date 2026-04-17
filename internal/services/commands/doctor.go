@@ -44,6 +44,7 @@ func (c DoctorCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
 		fmt.Sprintf("- Session DB: %s", c.sessionDBDiagnosis()),
 	}
+	lines = append(lines, transportDiagnosticLines(c.Config)...)
 
 	logger.DebugCF("commands", "rendered doctor command output", map[string]any{
 		"provider":            c.Config.Provider,
@@ -52,6 +53,10 @@ func (c DoctorCommand) Execute(ctx context.Context, args command.Args) (command.
 		"approval_mode":       c.Config.ApprovalMode,
 		"has_api_key":         c.Config.APIKey != "",
 		"has_session_db_path": c.Config.SessionDBPath != "",
+		"has_proxy":           c.Config.ProxyURL != "",
+		"has_extra_ca":        c.Config.AdditionalCACertsPath != "",
+		"has_mtls_cert":       c.Config.MTLSClientCertPath != "",
+		"has_mtls_key":        c.Config.MTLSClientKeyPath != "",
 	})
 
 	return command.Result{

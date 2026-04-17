@@ -643,3 +643,44 @@ func TestFileLoaderLoadTracksSettingsEnvCredentialSource(t *testing.T) {
 		t.Fatalf("Load() loaded setting sources = %#v, want [userSettings]", cfg.LoadedSettingSources)
 	}
 }
+
+// TestFileLoaderLoadTracksTransportDiagnostics verifies proxy and TLS diagnostics are surfaced from runtime environment resolution.
+func TestFileLoaderLoadTracksTransportDiagnostics(t *testing.T) {
+	loader := NewFileLoader(t.TempDir(), t.TempDir(), func(key string) string {
+		switch key {
+		case "https_proxy":
+			return "http://lowercase-proxy.internal:8080"
+		case "HTTPS_PROXY":
+			return "http://uppercase-proxy.internal:8080"
+		case "NODE_EXTRA_CA_CERTS":
+			return "/etc/ssl/custom.pem"
+		case "CLAUDE_CODE_CLIENT_CERT":
+			return "/etc/ssl/client.pem"
+		case "CLAUDE_CODE_CLIENT_KEY":
+			return "/etc/ssl/client-key.pem"
+		default:
+			return ""
+		}
+	})
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.ProxyURL != "http://lowercase-proxy.internal:8080" {
+		t.Fatalf("Load() proxy url = %q, want lowercase proxy", cfg.ProxyURL)
+	}
+	if cfg.ProxySource != "https_proxy" {
+		t.Fatalf("Load() proxy source = %q, want https_proxy", cfg.ProxySource)
+	}
+	if cfg.AdditionalCACertsPath != "/etc/ssl/custom.pem" {
+		t.Fatalf("Load() additional ca certs path = %q, want /etc/ssl/custom.pem", cfg.AdditionalCACertsPath)
+	}
+	if cfg.MTLSClientCertPath != "/etc/ssl/client.pem" {
+		t.Fatalf("Load() mTLS client cert path = %q, want /etc/ssl/client.pem", cfg.MTLSClientCertPath)
+	}
+	if cfg.MTLSClientKeyPath != "/etc/ssl/client-key.pem" {
+		t.Fatalf("Load() mTLS client key path = %q, want /etc/ssl/client-key.pem", cfg.MTLSClientKeyPath)
+	}
+}

@@ -66,10 +66,13 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Auth token source: %s", statusCredentialSource(c.Config.AuthTokenSource)),
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
 		fmt.Sprintf("- API base URL source: %s", statusBaseURLSource(c.Config)),
+	}
+	lines = append(lines, transportDiagnosticLines(c.Config)...)
+	lines = append(lines,
 		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),
 		"- Settings status UI: not available in Claude Code Go yet",
-	}
+	)
 
 	logger.DebugCF("commands", "rendered status command output", map[string]any{
 		"provider":            c.Config.Provider,
@@ -79,6 +82,10 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		"has_api_key":         c.Config.APIKey != "",
 		"has_auth_token":      c.Config.AuthToken != "",
 		"has_session_db_path": c.Config.SessionDBPath != "",
+		"has_proxy":           c.Config.ProxyURL != "",
+		"has_extra_ca":        c.Config.AdditionalCACertsPath != "",
+		"has_mtls_cert":       c.Config.MTLSClientCertPath != "",
+		"has_mtls_key":        c.Config.MTLSClientKeyPath != "",
 		"settings_sources":    strings.Join(c.Config.LoadedSettingSources, ","),
 		"api_connectivity":    apiProbe.Summary,
 		"tool_count":          toolCount,

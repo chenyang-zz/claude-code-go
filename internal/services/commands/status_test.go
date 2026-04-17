@@ -78,14 +78,18 @@ func TestStatusCommandExecute(t *testing.T) {
 
 	result, err := StatusCommand{
 		Config: coreconfig.Config{
-			Provider:             "anthropic",
-			Model:                "claude-sonnet-4-5",
-			ProjectPath:          "/repo/project",
-			ApprovalMode:         "default",
-			SessionDBPath:        "/tmp/sessions.db",
-			LoadedSettingSources: []string{"userSettings", "projectSettings", "localSettings"},
-			APIKey:               "test-key",
-			APIKeySource:         "ANTHROPIC_API_KEY",
+			Provider:              "anthropic",
+			Model:                 "claude-sonnet-4-5",
+			ProjectPath:           "/repo/project",
+			ApprovalMode:          "default",
+			SessionDBPath:         "/tmp/sessions.db",
+			LoadedSettingSources:  []string{"userSettings", "projectSettings", "localSettings"},
+			APIKey:                "test-key",
+			APIKeySource:          "ANTHROPIC_API_KEY",
+			ProxyURL:              "http://proxy.internal:8080",
+			AdditionalCACertsPath: "/etc/ssl/custom.pem",
+			MTLSClientCertPath:    "/etc/ssl/client.pem",
+			MTLSClientKeyPath:     "/etc/ssl/client-key.pem",
 		},
 		ToolRegistry: toolRegistry,
 		APIProbe: stubStatusProbe{
@@ -99,7 +103,7 @@ func TestStatusCommandExecute(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

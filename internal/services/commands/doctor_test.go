@@ -33,11 +33,15 @@ func TestDoctorCommandExecuteRendersLocalDiagnostics(t *testing.T) {
 
 	result, err := DoctorCommand{
 		Config: coreconfig.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4-5",
-			ProjectPath:   "/repo",
-			ApprovalMode:  "default",
-			SessionDBPath: "/tmp/claude.db",
+			Provider:              "anthropic",
+			Model:                 "claude-sonnet-4-5",
+			ProjectPath:           "/repo",
+			ApprovalMode:          "default",
+			SessionDBPath:         "/tmp/claude.db",
+			ProxyURL:              "http://proxy.internal:8080",
+			AdditionalCACertsPath: "/etc/ssl/custom.pem",
+			MTLSClientCertPath:    "/etc/ssl/client.pem",
+			MTLSClientKeyPath:     "/etc/ssl/client-key.pem",
 		},
 		Stat: statFn,
 	}.Execute(context.Background(), command.Args{})
@@ -45,7 +49,7 @@ func TestDoctorCommandExecuteRendersLocalDiagnostics(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Doctor summary:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- API key: missing\n- API base URL: default\n- Project path: /repo\n- Approval mode: default\n- Session DB: /tmp/claude.db (not created yet; parent directory exists)"
+	want := "Doctor summary:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- API key: missing\n- API base URL: default\n- Project path: /repo\n- Approval mode: default\n- Session DB: /tmp/claude.db (not created yet; parent directory exists)\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
