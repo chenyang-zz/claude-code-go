@@ -82,11 +82,13 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	cfg.ProjectPath = l.CWD
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
-	for _, path := range l.settingsPaths() {
-		fileCfg, err := l.loadSettingsFile(path)
+	sourceEnvs := map[SettingSource]map[string]string{}
+	for _, candidate := range l.settingsPathCandidates() {
+		fileCfg, err := l.loadSettingsFile(candidate.Path)
 		if err != nil {
 			return coreconfig.Config{}, err
 		}
+		sourceEnvs[candidate.Source] = cloneStringMap(fileCfg.Env)
 		cfg = coreconfig.Merge(cfg, fileCfg)
 	}
 	if strings.TrimSpace(l.FlagSettingsValue) != "" {
@@ -94,8 +96,10 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		if err != nil {
 			return coreconfig.Config{}, err
 		}
+		sourceEnvs[SettingSourceFlagSettings] = cloneStringMap(flagCfg.Env)
 		cfg = coreconfig.Merge(cfg, flagCfg)
 	}
+	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")))
 
 	envLookup := l.runtimeEnvLookup(cfg.Env)
 	envProvider := strings.TrimSpace(envLookup("CLAUDE_CODE_PROVIDER"))
@@ -143,22 +147,39 @@ func (l *FileLoader) runtimeEnvLookup(settingsEnv map[string]string) func(string
 	}
 }
 
-// settingsPaths returns the supported global-to-project settings lookup order.
-func (l *FileLoader) settingsPaths() []string {
-	paths := make([]string, 0, 3)
+// settingsPathCandidate couples one settings source identifier with its on-disk path.
+type settingsPathCandidate struct {
+	// Source identifies which logical settings layer one file belongs to.
+	Source SettingSource
+	// Path stores the concrete settings file path that should be loaded for the source.
+	Path string
+}
+
+// settingsPathCandidates returns the supported global-to-project settings lookup order together with their logical source identifiers.
+func (l *FileLoader) settingsPathCandidates() []settingsPathCandidate {
+	paths := make([]settingsPathCandidate, 0, 3)
 	for _, source := range l.allowedSettingSources() {
 		switch source {
 		case SettingSourceUserSettings:
 			if l.HomeDir != "" {
-				paths = append(paths, filepath.Join(l.HomeDir, ".claude", "settings.json"))
+				paths = append(paths, settingsPathCandidate{
+					Source: source,
+					Path:   filepath.Join(l.HomeDir, ".claude", "settings.json"),
+				})
 			}
 		case SettingSourceProjectSettings:
 			if l.CWD != "" {
-				paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.json"))
+				paths = append(paths, settingsPathCandidate{
+					Source: source,
+					Path:   filepath.Join(l.CWD, ".claude", "settings.json"),
+				})
 			}
 		case SettingSourceLocalSettings:
 			if l.CWD != "" {
-				paths = append(paths, filepath.Join(l.CWD, ".claude", "settings.local.json"))
+				paths = append(paths, settingsPathCandidate{
+					Source: source,
+					Path:   filepath.Join(l.CWD, ".claude", "settings.local.json"),
+				})
 			}
 		}
 	}
@@ -344,4 +365,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// isTruthySettingEnv reports whether one host environment variable should enable a boolean runtime guard.
+func isTruthySettingEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

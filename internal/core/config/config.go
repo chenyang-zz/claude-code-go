@@ -9,7 +9,7 @@ import (
 type Config struct {
 	// ProjectPath identifies the current workspace path used for project-scoped runtime behavior.
 	ProjectPath string
-	// Env stores the merged settings-sourced environment variables that should apply to the runtime process.
+	// Env stores the filtered settings-sourced environment variables that remain eligible for runtime config resolution and bootstrap application.
 	Env map[string]string
 	// Model overrides the default model selection when provided.
 	Model string

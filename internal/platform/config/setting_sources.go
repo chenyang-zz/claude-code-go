@@ -15,6 +15,8 @@ const (
 	SettingSourceProjectSettings SettingSource = "projectSettings"
 	// SettingSourceLocalSettings identifies the gitignored `.claude/settings.local.json` source.
 	SettingSourceLocalSettings SettingSource = "localSettings"
+	// SettingSourceFlagSettings identifies the explicit `--settings` CLI override source.
+	SettingSourceFlagSettings SettingSource = "flagSettings"
 )
 
 // DefaultSettingSources returns the default on-disk settings source order used when no CLI filter is provided.

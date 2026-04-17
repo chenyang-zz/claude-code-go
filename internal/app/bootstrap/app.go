@@ -349,7 +349,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 	}
 }
 
-// applyRuntimeEnvironment writes merged settings-sourced environment variables into the current process.
+// applyRuntimeEnvironment writes the filtered settings-sourced runtime environment variables into the current process.
 func applyRuntimeEnvironment(values map[string]string) {
 	if len(values) == 0 {
 		return
