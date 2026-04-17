@@ -33,7 +33,7 @@ func (r *Runner) runResumeCommand(ctx context.Context, body string, forkSession 
 }
 
 func (r *Runner) resumeSessionWithPrompt(ctx context.Context, sessionID string, prompt string, forkSession bool) error {
-	snapshot, err := r.SessionManager.Resume(ctx, sessionID)
+	recovered, err := r.SessionManager.Recover(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, coresession.ErrSessionNotFound) {
 			return r.Renderer.RenderLine(fmt.Sprintf("Session %s was not found.", sessionID))
@@ -42,23 +42,25 @@ func (r *Runner) resumeSessionWithPrompt(ctx context.Context, sessionID string, 
 	}
 
 	if forkSession {
-		snapshot, err = r.forkSnapshot(ctx, snapshot)
+		recovered.Snapshot, err = r.forkSnapshot(ctx, recovered.Snapshot)
 		if err != nil {
 			return err
 		}
 	}
 
-	r.SessionID = snapshot.Session.ID
-	if snapshot.Session.ProjectPath != "" {
-		r.ProjectPath = snapshot.Session.ProjectPath
+	r.SessionID = recovered.Snapshot.Session.ID
+	if recovered.Snapshot.Session.ProjectPath != "" {
+		r.ProjectPath = recovered.Snapshot.Session.ProjectPath
 	}
 	logger.DebugCF("repl", "resumed session from slash command", map[string]any{
-		"session_id":    r.SessionID,
-		"fork_session":  forkSession,
-		"project_path":  r.ProjectPath,
-		"message_count": len(snapshot.Session.Messages),
+		"session_id":         r.SessionID,
+		"fork_session":       forkSession,
+		"project_path":       r.ProjectPath,
+		"message_count":      len(recovered.Snapshot.Session.Messages),
+		"interruption_kind":  recovered.State.Kind,
+		"needs_continuation": recovered.State.NeedsContinuation,
 	})
-	return r.runPrompt(ctx, conversation.History{Messages: snapshot.Session.Messages}, prompt)
+	return r.runPrompt(ctx, conversation.History{Messages: recovered.Snapshot.Session.Messages}, prompt)
 }
 
 func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error {

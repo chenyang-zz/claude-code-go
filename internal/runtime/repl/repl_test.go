@@ -2038,6 +2038,76 @@ func TestRunnerRunResumeRestoresSessionAndRunsPrompt(t *testing.T) {
 	}
 }
 
+// TestRunnerRunResumeRecoversInterruptedTurn verifies explicit /resume consumes cleaned recovery history instead of replaying unresolved tool_use blocks.
+func TestRunnerRunResumeRecoversInterruptedTurn(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "continued reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{
+						Role: message.RoleAssistant,
+						Content: []message.ContentPart{
+							message.TextPart("Running search"),
+						},
+					},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("resume prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("continued reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		loadResult: coresession.Session{
+			ID: "session-2",
+			Messages: []message.Message{
+				{
+					Role: message.RoleAssistant,
+					Content: []message.ContentPart{
+						message.TextPart("Running search"),
+						message.ToolUsePart("tool-1", "grep", map[string]any{"pattern": "TODO"}),
+					},
+				},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.SessionManager = manager
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "session-2", "resume", "prompt"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(eng.lastRequest.Messages) != 2 {
+		t.Fatalf("Run() request message count = %d, want 2", len(eng.lastRequest.Messages))
+	}
+	if len(eng.lastRequest.Messages[0].Content) != 1 {
+		t.Fatalf("Run() recovered content = %#v, want unresolved tool_use removed", eng.lastRequest.Messages[0].Content)
+	}
+	if eng.lastRequest.Messages[0].Content[0].Type != "text" || eng.lastRequest.Messages[0].Content[0].Text != "Running search" {
+		t.Fatalf("Run() recovered first message = %#v, want cleaned assistant text", eng.lastRequest.Messages[0])
+	}
+	if eng.lastRequest.Messages[1].Content[0].Text != "resume prompt" {
+		t.Fatalf("Run() request last message = %#v, want resume prompt", eng.lastRequest.Messages[1])
+	}
+}
+
 // TestRunnerRunResumeSessionNotFound verifies /resume reports a stable error when the target session does not exist.
 func TestRunnerRunResumeSessionNotFound(t *testing.T) {
 	var buf bytes.Buffer
@@ -2276,6 +2346,80 @@ func TestRunnerRunContinueRequiresExistingSession(t *testing.T) {
 	}
 	if got := buf.String(); got != continueNotFoundMessage+"\n" {
 		t.Fatalf("Run() output = %q, want continue missing-session error", got)
+	}
+}
+
+// TestRunnerRunContinueRecoversInterruptedTurn verifies explicit --continue consumes cleaned latest-session recovery history.
+func TestRunnerRunContinueRecoversInterruptedTurn(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "continued reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{
+						Role: message.RoleAssistant,
+						Content: []message.ContentPart{
+							message.TextPart("Running search"),
+						},
+					},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("follow-up")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("continued reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		latestResult: coresession.Session{
+			ID:          "session-latest",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{
+					Role: message.RoleAssistant,
+					Content: []message.ContentPart{
+						message.TextPart("Running search"),
+						message.ToolUsePart("tool-1", "grep", map[string]any{"pattern": "TODO"}),
+					},
+				},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionManager = manager
+
+	if err := runner.Run(context.Background(), []string{"--continue", "follow-up"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID != "session-latest" {
+		t.Fatalf("Run() request.SessionID = %q, want session-latest", eng.lastRequest.SessionID)
+	}
+	if len(eng.lastRequest.Messages) != 2 {
+		t.Fatalf("Run() request message count = %d, want 2", len(eng.lastRequest.Messages))
+	}
+	if len(eng.lastRequest.Messages[0].Content) != 1 {
+		t.Fatalf("Run() recovered content = %#v, want unresolved tool_use removed", eng.lastRequest.Messages[0].Content)
+	}
+	if eng.lastRequest.Messages[0].Content[0].Type != "text" || eng.lastRequest.Messages[0].Content[0].Text != "Running search" {
+		t.Fatalf("Run() recovered first message = %#v, want cleaned assistant text", eng.lastRequest.Messages[0])
+	}
+	if eng.lastRequest.Messages[1].Content[0].Text != "follow-up" {
+		t.Fatalf("Run() request last message = %#v, want follow-up", eng.lastRequest.Messages[1])
 	}
 }
 
