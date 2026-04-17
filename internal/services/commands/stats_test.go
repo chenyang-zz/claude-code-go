@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 )
 
 // TestStatsCommandMetadata verifies /stats is exposed with the expected canonical descriptor.
@@ -29,5 +30,32 @@ func TestStatsCommandExecute(t *testing.T) {
 	}
 	if result.Output != statsCommandFallback {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, statsCommandFallback)
+	}
+}
+
+// TestStatsCommandExecuteAnthropicSnapshot verifies /stats renders one live Anthropic quota snapshot when available.
+func TestStatsCommandExecuteAnthropicSnapshot(t *testing.T) {
+	result, err := StatsCommand{
+		Config: coreconfig.Config{
+			Provider: coreconfig.ProviderAnthropic,
+			APIKey:   "test-key",
+		},
+		Probe: stubUsageLimitsProber{
+			snapshot: UsageLimitsSnapshot{
+				Supported:     true,
+				Available:     true,
+				Status:        "rejected",
+				RateLimitType: "five_hour",
+				ResetsAt:      1760000000,
+				OverageStatus: "rejected",
+				Summary:       "reachable (HTTP 429 from /v1/messages)",
+			},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output == statsCommandFallback {
+		t.Fatalf("Execute() output = fallback, want Anthropic quota snapshot")
 	}
 }

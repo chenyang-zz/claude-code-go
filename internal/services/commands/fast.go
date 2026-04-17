@@ -22,6 +22,8 @@ type FastCommand struct {
 	Config *coreconfig.Config
 	// Store persists the updated fast-mode setting into global settings.
 	Store FastModeStore
+	// Probe performs provider-specific quota checks when available.
+	Probe UsageLimitsProber
 }
 
 // Metadata returns the canonical slash descriptor for /fast.
@@ -39,11 +41,15 @@ func (c FastCommand) Execute(ctx context.Context, args command.Args) (command.Re
 	current := currentFastModeValue(c.Config)
 
 	if requested == "" {
+		output := fmt.Sprintf(
+			"Fast mode is currently %s.\nRun /fast on to persist fast mode, or /fast off to clear it.\nClaude Code Go does not provide the interactive fast-mode picker, subscription gating, model auto-switching, or cooldown and quota handling yet.",
+			renderFastModeState(current),
+		)
+		if snapshot, ok := c.snapshot(ctx); ok {
+			output = fmt.Sprintf("%s\nCurrent Anthropic quota snapshot: %s.\nCurrent Anthropic extra usage snapshot: %s.", output, formatQuotaStatusLine(snapshot), formatOverageLine(snapshot))
+		}
 		return command.Result{
-			Output: fmt.Sprintf(
-				"Fast mode is currently %s.\nRun /fast on to persist fast mode, or /fast off to clear it.\nClaude Code Go does not provide the interactive fast-mode picker, subscription gating, model auto-switching, or cooldown and quota handling yet.",
-				renderFastModeState(current),
-			),
+			Output: output,
 		}, nil
 	}
 	if len(args.Raw) != 1 {
@@ -80,6 +86,17 @@ func (c FastCommand) Execute(ctx context.Context, args command.Args) (command.Re
 	return command.Result{
 		Output: "Fast mode disabled. Claude Code Go clears the persisted preference now, but the interactive fast-mode picker, subscription gating, model auto-switching, and cooldown/quota handling are not implemented yet.",
 	}, nil
+}
+
+// snapshot probes the current provider when fast-mode quota observation is supported in the Go host.
+func (c FastCommand) snapshot(ctx context.Context) (UsageLimitsSnapshot, bool) {
+	if c.Config == nil || coreconfig.NormalizeProvider(c.Config.Provider) != coreconfig.ProviderAnthropic {
+		return UsageLimitsSnapshot{}, false
+	}
+	if missingUsageCredential(*c.Config) || c.Probe == nil {
+		return UsageLimitsSnapshot{}, false
+	}
+	return c.Probe.ProbeUsage(ctx, *c.Config), true
 }
 
 // currentFastModeValue returns the resolved fast-mode preference from the runtime snapshot.

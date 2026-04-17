@@ -51,6 +51,35 @@ func TestFastCommandExecuteWithoutArgsReportsCurrentState(t *testing.T) {
 	}
 }
 
+// TestFastCommandExecuteWithoutArgsAnthropicSnapshot verifies /fast surfaces the current Anthropic quota snapshot when available.
+func TestFastCommandExecuteWithoutArgsAnthropicSnapshot(t *testing.T) {
+	result, err := FastCommand{
+		Config: &coreconfig.Config{
+			Provider:           coreconfig.ProviderAnthropic,
+			APIKey:             "test-key",
+			FastMode:           true,
+			HasFastModeSetting: true,
+		},
+		Probe: stubUsageLimitsProber{
+			snapshot: UsageLimitsSnapshot{
+				Supported:             true,
+				Available:             true,
+				Status:                "allowed_warning",
+				RateLimitType:         "seven_day_opus",
+				ResetsAt:              1760000000,
+				OverageStatus:         "allowed",
+				OverageDisabledReason: "",
+			},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output == "" || result.Output == "Fast mode is currently ON.\nRun /fast on to persist fast mode, or /fast off to clear it.\nClaude Code Go does not provide the interactive fast-mode picker, subscription gating, model auto-switching, or cooldown and quota handling yet." {
+		t.Fatalf("Execute() output = %q, want quota snapshot appendix", result.Output)
+	}
+}
+
 // TestFastCommandExecuteEnablesFastMode verifies /fast on persists the setting and updates the in-memory config snapshot.
 func TestFastCommandExecuteEnablesFastMode(t *testing.T) {
 	cfg := &coreconfig.Config{}

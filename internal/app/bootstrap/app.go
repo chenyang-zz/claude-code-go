@@ -149,6 +149,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.FastCommand{
 		Config: cfg,
 		Store:  globalSettingsStore,
+		Probe:  buildUsageLimitsProbe(cfg),
 	}); err != nil {
 		return nil, err
 	}
@@ -237,13 +238,22 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.UpgradeCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.UsageCommand{}); err != nil {
+	if err := registry.Register(servicecommands.UsageCommand{
+		Config: dereferenceConfig(cfg),
+		Probe:  buildUsageLimitsProbe(cfg),
+	}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.StatsCommand{}); err != nil {
+	if err := registry.Register(servicecommands.StatsCommand{
+		Config: dereferenceConfig(cfg),
+		Probe:  buildUsageLimitsProbe(cfg),
+	}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.ExtraUsageCommand{}); err != nil {
+	if err := registry.Register(servicecommands.ExtraUsageCommand{
+		Config: dereferenceConfig(cfg),
+		Probe:  buildUsageLimitsProbe(cfg),
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.ThemeCommand{
@@ -380,6 +390,20 @@ func buildStatusProbe(cfg *coreconfig.Config) servicecommands.APIConnectivityPro
 		return openai.NewStatusProbe(openai.StatusProbeConfig{
 			Provider: cfg.Provider,
 		})
+	default:
+		return nil
+	}
+}
+
+// buildUsageLimitsProbe selects the provider-specific quota probe used by usage-related slash commands.
+func buildUsageLimitsProbe(cfg *coreconfig.Config) servicecommands.UsageLimitsProber {
+	if cfg == nil {
+		return nil
+	}
+
+	switch coreconfig.NormalizeProvider(cfg.Provider) {
+	case coreconfig.ProviderAnthropic:
+		return anthropic.NewQuotaProbe(anthropic.QuotaProbeConfig{})
 	default:
 		return nil
 	}
