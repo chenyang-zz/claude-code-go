@@ -201,17 +201,20 @@ func (r *Runner) restoreHistory(ctx context.Context, explicitContinue bool, fork
 		}
 	}
 
-	if r.SessionID == "" && r.ProjectPath != "" {
-		snapshot, err := r.SessionManager.ResumeLatest(ctx, r.ProjectPath)
+	if r.SessionID != "" {
+		recovered, err := r.SessionManager.Recover(ctx, r.SessionID)
 		if err == nil {
-			r.SessionID = snapshot.Session.ID
-			logger.DebugCF("repl", "restored latest session history for turn", map[string]any{
-				"session_id":    r.sessionID(),
-				"project_path":  r.ProjectPath,
-				"message_count": len(snapshot.Session.Messages),
-				"resumed":       snapshot.Resumed,
-			})
-			return conversation.History{Messages: snapshot.Session.Messages}, nil
+			return r.consumeRecoveredSnapshot("restore_session", recovered, false)
+		}
+		if !errors.Is(err, coresession.ErrSessionNotFound) {
+			return conversation.History{}, err
+		}
+	}
+
+	if r.SessionID == "" && r.ProjectPath != "" {
+		recovered, err := r.SessionManager.RecoverLatest(ctx, r.ProjectPath)
+		if err == nil {
+			return r.consumeRecoveredSnapshot("restore_latest", recovered, false)
 		}
 		if !errors.Is(err, coresession.ErrSessionNotFound) {
 			return conversation.History{}, err
@@ -253,20 +256,35 @@ func (r *Runner) restoreContinueHistory(ctx context.Context, forkSession bool) (
 			return conversation.History{}, false, err
 		}
 	}
+	history, err := r.consumeRecoveredSnapshot("restore_continue", recovered, forkSession)
+	if err != nil {
+		return conversation.History{}, false, err
+	}
+	return history, true, nil
+}
 
+// consumeRecoveredSnapshot normalizes one recovered snapshot into the runnable history consumed by the next prompt.
+func (r *Runner) consumeRecoveredSnapshot(action string, recovered runtimesession.RecoveredSnapshot, forkSession bool) (conversation.History, error) {
 	r.SessionID = recovered.Snapshot.Session.ID
 	if recovered.Snapshot.Session.ProjectPath != "" {
 		r.ProjectPath = recovered.Snapshot.Session.ProjectPath
 	}
-	logger.DebugCF("repl", "restored explicit continue session history for turn", map[string]any{
-		"session_id":         r.SessionID,
-		"project_path":       r.ProjectPath,
-		"message_count":      len(recovered.Snapshot.Session.Messages),
-		"fork_session":       forkSession,
-		"interruption_kind":  recovered.State.Kind,
-		"needs_continuation": recovered.State.NeedsContinuation,
+
+	history := conversation.History{
+		Messages: runtimesession.RunnableRecoveredMessages(recovered.Snapshot.Session.Messages, recovered.State),
+	}
+	logger.DebugCF("repl", "prepared recovered session history for turn", map[string]any{
+		"action":               action,
+		"session_id":           r.SessionID,
+		"project_path":         r.ProjectPath,
+		"message_count":        len(recovered.Snapshot.Session.Messages),
+		"prepared_count":       len(history.Messages),
+		"fork_session":         forkSession,
+		"interruption_kind":    recovered.State.Kind,
+		"needs_continuation":   recovered.State.NeedsContinuation,
+		"history_ends_on_user": len(history.Messages) > 0 && history.Messages[len(history.Messages)-1].Role == message.RoleUser,
 	})
-	return conversation.History{Messages: recovered.Snapshot.Session.Messages}, true, nil
+	return history, nil
 }
 
 func (r *Runner) forkSnapshot(ctx context.Context, snapshot coresession.Snapshot) (coresession.Snapshot, error) {

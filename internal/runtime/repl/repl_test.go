@@ -2094,8 +2094,8 @@ func TestRunnerRunResumeRecoversInterruptedTurn(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	if len(eng.lastRequest.Messages) != 2 {
-		t.Fatalf("Run() request message count = %d, want 2", len(eng.lastRequest.Messages))
+	if len(eng.lastRequest.Messages) != 4 {
+		t.Fatalf("Run() request message count = %d, want 4", len(eng.lastRequest.Messages))
 	}
 	if len(eng.lastRequest.Messages[0].Content) != 1 {
 		t.Fatalf("Run() recovered content = %#v, want unresolved tool_use removed", eng.lastRequest.Messages[0].Content)
@@ -2103,8 +2103,14 @@ func TestRunnerRunResumeRecoversInterruptedTurn(t *testing.T) {
 	if eng.lastRequest.Messages[0].Content[0].Type != "text" || eng.lastRequest.Messages[0].Content[0].Text != "Running search" {
 		t.Fatalf("Run() recovered first message = %#v, want cleaned assistant text", eng.lastRequest.Messages[0])
 	}
-	if eng.lastRequest.Messages[1].Content[0].Text != "resume prompt" {
-		t.Fatalf("Run() request last message = %#v, want resume prompt", eng.lastRequest.Messages[1])
+	if eng.lastRequest.Messages[1].Role != message.RoleUser || eng.lastRequest.Messages[1].Content[0].Text != runtimesession.ContinuationPrompt {
+		t.Fatalf("Run() continuation message = %#v, want synthetic continuation prompt", eng.lastRequest.Messages[1])
+	}
+	if eng.lastRequest.Messages[2].Role != message.RoleAssistant || eng.lastRequest.Messages[2].Content[0].Text != runtimesession.NoResponseRequestedPrompt {
+		t.Fatalf("Run() assistant sentinel = %#v, want no-response sentinel", eng.lastRequest.Messages[2])
+	}
+	if eng.lastRequest.Messages[3].Content[0].Text != "resume prompt" {
+		t.Fatalf("Run() request last message = %#v, want resume prompt", eng.lastRequest.Messages[3])
 	}
 }
 
@@ -2208,6 +2214,66 @@ func TestRunnerRunRestoresAndAutosavesHistory(t *testing.T) {
 	}
 	if len(repo.saved[0].Messages) != 4 {
 		t.Fatalf("autosave saved message count = %d, want 4", len(repo.saved[0].Messages))
+	}
+}
+
+// TestRunnerRunRecoversInterruptedCurrentSession verifies default prompt execution routes existing session IDs through the recovery consumer.
+func TestRunnerRunRecoversInterruptedCurrentSession(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "new reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart(runtimesession.NoResponseRequestedPrompt)}},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("new prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("new reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		loadResult: coresession.Session{
+			ID: "session-1",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.SessionID = "session-1"
+	runner.SessionManager = manager
+
+	if err := runner.Run(context.Background(), []string{"new", "prompt"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(eng.lastRequest.Messages) != 3 {
+		t.Fatalf("Run() request message count = %d, want 3", len(eng.lastRequest.Messages))
+	}
+	if eng.lastRequest.Messages[0].Role != message.RoleUser || eng.lastRequest.Messages[0].Content[0].Text != "old prompt" {
+		t.Fatalf("Run() recovered first message = %#v, want old prompt", eng.lastRequest.Messages[0])
+	}
+	if eng.lastRequest.Messages[1].Role != message.RoleAssistant || eng.lastRequest.Messages[1].Content[0].Text != runtimesession.NoResponseRequestedPrompt {
+		t.Fatalf("Run() assistant sentinel = %#v, want no-response sentinel", eng.lastRequest.Messages[1])
+	}
+	if eng.lastRequest.Messages[2].Role != message.RoleUser || eng.lastRequest.Messages[2].Content[0].Text != "new prompt" {
+		t.Fatalf("Run() request last message = %#v, want new prompt", eng.lastRequest.Messages[2])
 	}
 }
 
@@ -2409,8 +2475,8 @@ func TestRunnerRunContinueRecoversInterruptedTurn(t *testing.T) {
 	if eng.lastRequest.SessionID != "session-latest" {
 		t.Fatalf("Run() request.SessionID = %q, want session-latest", eng.lastRequest.SessionID)
 	}
-	if len(eng.lastRequest.Messages) != 2 {
-		t.Fatalf("Run() request message count = %d, want 2", len(eng.lastRequest.Messages))
+	if len(eng.lastRequest.Messages) != 4 {
+		t.Fatalf("Run() request message count = %d, want 4", len(eng.lastRequest.Messages))
 	}
 	if len(eng.lastRequest.Messages[0].Content) != 1 {
 		t.Fatalf("Run() recovered content = %#v, want unresolved tool_use removed", eng.lastRequest.Messages[0].Content)
@@ -2418,8 +2484,14 @@ func TestRunnerRunContinueRecoversInterruptedTurn(t *testing.T) {
 	if eng.lastRequest.Messages[0].Content[0].Type != "text" || eng.lastRequest.Messages[0].Content[0].Text != "Running search" {
 		t.Fatalf("Run() recovered first message = %#v, want cleaned assistant text", eng.lastRequest.Messages[0])
 	}
-	if eng.lastRequest.Messages[1].Content[0].Text != "follow-up" {
-		t.Fatalf("Run() request last message = %#v, want follow-up", eng.lastRequest.Messages[1])
+	if eng.lastRequest.Messages[1].Role != message.RoleUser || eng.lastRequest.Messages[1].Content[0].Text != runtimesession.ContinuationPrompt {
+		t.Fatalf("Run() continuation message = %#v, want synthetic continuation prompt", eng.lastRequest.Messages[1])
+	}
+	if eng.lastRequest.Messages[2].Role != message.RoleAssistant || eng.lastRequest.Messages[2].Content[0].Text != runtimesession.NoResponseRequestedPrompt {
+		t.Fatalf("Run() assistant sentinel = %#v, want no-response sentinel", eng.lastRequest.Messages[2])
+	}
+	if eng.lastRequest.Messages[3].Content[0].Text != "follow-up" {
+		t.Fatalf("Run() request last message = %#v, want follow-up", eng.lastRequest.Messages[3])
 	}
 }
 

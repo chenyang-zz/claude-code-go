@@ -237,6 +237,53 @@ func TestRecoverMessagesDropsUnresolvedToolUse(t *testing.T) {
 	}
 }
 
+// TestRunnableRecoveredMessagesAppendsContinuationPair verifies interrupted turns gain the synthetic continuation prompt plus one assistant sentinel.
+func TestRunnableRecoveredMessagesAppendsContinuationPair(t *testing.T) {
+	prepared := RunnableRecoveredMessages([]message.Message{
+		{
+			Role: message.RoleAssistant,
+			Content: []message.ContentPart{
+				message.TextPart("Running search"),
+			},
+		},
+	}, RecoveryState{
+		Kind:              InterruptionTurn,
+		NeedsContinuation: true,
+	})
+
+	if len(prepared) != 3 {
+		t.Fatalf("RunnableRecoveredMessages() len = %d, want 3", len(prepared))
+	}
+	if prepared[1].Role != message.RoleUser || prepared[1].Content[0].Text != ContinuationPrompt {
+		t.Fatalf("RunnableRecoveredMessages() continuation = %#v, want synthetic continuation prompt", prepared[1])
+	}
+	if prepared[2].Role != message.RoleAssistant || prepared[2].Content[0].Text != NoResponseRequestedPrompt {
+		t.Fatalf("RunnableRecoveredMessages() sentinel = %#v, want assistant sentinel", prepared[2])
+	}
+}
+
+// TestRunnableRecoveredMessagesAppendsAssistantSentinel verifies interrupted prompts only append the assistant sentinel needed for one new user prompt.
+func TestRunnableRecoveredMessagesAppendsAssistantSentinel(t *testing.T) {
+	prepared := RunnableRecoveredMessages([]message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("continue deploy"),
+			},
+		},
+	}, RecoveryState{
+		Kind:              InterruptionPrompt,
+		NeedsContinuation: true,
+	})
+
+	if len(prepared) != 2 {
+		t.Fatalf("RunnableRecoveredMessages() len = %d, want 2", len(prepared))
+	}
+	if prepared[1].Role != message.RoleAssistant || prepared[1].Content[0].Text != NoResponseRequestedPrompt {
+		t.Fatalf("RunnableRecoveredMessages() sentinel = %#v, want assistant sentinel", prepared[1])
+	}
+}
+
 // TestRecoverMessagesKeepsResolvedToolUse verifies completed assistant tool_use histories stay untouched.
 func TestRecoverMessagesKeepsResolvedToolUse(t *testing.T) {
 	messages := []message.Message{

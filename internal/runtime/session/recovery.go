@@ -8,6 +8,8 @@ import (
 const (
 	// ContinuationPrompt stores the stable synthetic user message used when one interrupted session should continue automatically.
 	ContinuationPrompt = "Continue from where you left off."
+	// NoResponseRequestedPrompt stores the minimal assistant sentinel used to keep recovery histories API-valid when they end on a user message.
+	NoResponseRequestedPrompt = "No response requested."
 )
 
 const (
@@ -46,6 +48,37 @@ func RecoveryPromptMessage() message.Message {
 			message.TextPart(ContinuationPrompt),
 		},
 	}
+}
+
+// RecoveryAssistantSentinelMessage builds the minimal assistant sentinel used to keep one recovered history API-valid.
+func RecoveryAssistantSentinelMessage() message.Message {
+	return message.Message{
+		Role: message.RoleAssistant,
+		Content: []message.ContentPart{
+			message.TextPart(NoResponseRequestedPrompt),
+		},
+	}
+}
+
+// RunnableRecoveredMessages appends the minimum recovery-only messages required before one new prompt can be sent safely.
+func RunnableRecoveredMessages(messages []message.Message, state RecoveryState) []message.Message {
+	if len(messages) == 0 && !state.NeedsContinuation {
+		return nil
+	}
+
+	prepared := make([]message.Message, 0, len(messages)+2)
+	for _, msg := range messages {
+		prepared = append(prepared, cloneMessage(msg))
+	}
+
+	if state.Kind == InterruptionTurn {
+		prepared = append(prepared, RecoveryPromptMessage())
+	}
+	if len(prepared) > 0 && prepared[len(prepared)-1].Role == message.RoleUser {
+		prepared = append(prepared, RecoveryAssistantSentinelMessage())
+	}
+
+	return prepared
 }
 
 // RecoverMessages normalizes one persisted history into an API-safe message sequence and reports whether it was interrupted.

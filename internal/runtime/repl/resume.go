@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -47,20 +46,11 @@ func (r *Runner) resumeSessionWithPrompt(ctx context.Context, sessionID string, 
 			return err
 		}
 	}
-
-	r.SessionID = recovered.Snapshot.Session.ID
-	if recovered.Snapshot.Session.ProjectPath != "" {
-		r.ProjectPath = recovered.Snapshot.Session.ProjectPath
+	history, err := r.consumeRecoveredSnapshot("resume_command", recovered, forkSession)
+	if err != nil {
+		return err
 	}
-	logger.DebugCF("repl", "resumed session from slash command", map[string]any{
-		"session_id":         r.SessionID,
-		"fork_session":       forkSession,
-		"project_path":       r.ProjectPath,
-		"message_count":      len(recovered.Snapshot.Session.Messages),
-		"interruption_kind":  recovered.State.Kind,
-		"needs_continuation": recovered.State.NeedsContinuation,
-	})
-	return r.runPrompt(ctx, conversation.History{Messages: recovered.Snapshot.Session.Messages}, prompt)
+	return r.runPrompt(ctx, history, prompt)
 }
 
 func (r *Runner) searchAndResumeSession(ctx context.Context, body string) error {
