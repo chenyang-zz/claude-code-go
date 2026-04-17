@@ -192,6 +192,144 @@ func TestManagerResumeLatestLoadsExistingSession(t *testing.T) {
 	}
 }
 
+// TestRecoverMessagesDetectsInterruptedPrompt verifies histories ending on a user message request one continuation prompt.
+func TestRecoverMessagesDetectsInterruptedPrompt(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("continue deploy")}},
+	}
+
+	cleaned, state := RecoverMessages(messages)
+	if len(cleaned) != 1 {
+		t.Fatalf("RecoverMessages() len = %d, want 1", len(cleaned))
+	}
+	if state.Kind != InterruptionPrompt {
+		t.Fatalf("RecoverMessages() interruption kind = %q, want %q", state.Kind, InterruptionPrompt)
+	}
+	if !state.NeedsContinuation {
+		t.Fatal("RecoverMessages() needs continuation = false, want true")
+	}
+}
+
+// TestRecoverMessagesDropsUnresolvedToolUse verifies dangling assistant tool_use blocks are stripped and classified as interrupted turns.
+func TestRecoverMessagesDropsUnresolvedToolUse(t *testing.T) {
+	messages := []message.Message{
+		{
+			Role: message.RoleAssistant,
+			Content: []message.ContentPart{
+				message.TextPart("Running search"),
+				message.ToolUsePart("tool-1", "grep", map[string]any{"pattern": "TODO"}),
+			},
+		},
+	}
+
+	cleaned, state := RecoverMessages(messages)
+	if len(cleaned) != 1 {
+		t.Fatalf("RecoverMessages() len = %d, want 1", len(cleaned))
+	}
+	if len(cleaned[0].Content) != 1 || cleaned[0].Content[0].Type != "text" {
+		t.Fatalf("RecoverMessages() cleaned content = %#v, want unresolved tool_use removed", cleaned[0].Content)
+	}
+	if state.Kind != InterruptionTurn {
+		t.Fatalf("RecoverMessages() interruption kind = %q, want %q", state.Kind, InterruptionTurn)
+	}
+	if !state.NeedsContinuation {
+		t.Fatal("RecoverMessages() needs continuation = false, want true")
+	}
+}
+
+// TestRecoverMessagesKeepsResolvedToolUse verifies completed assistant tool_use histories stay untouched.
+func TestRecoverMessagesKeepsResolvedToolUse(t *testing.T) {
+	messages := []message.Message{
+		{
+			Role: message.RoleAssistant,
+			Content: []message.ContentPart{
+				message.ToolUsePart("tool-1", "grep", map[string]any{"pattern": "TODO"}),
+			},
+		},
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.ToolResultPart("tool-1", "found", false),
+			},
+		},
+		{
+			Role: message.RoleAssistant,
+			Content: []message.ContentPart{
+				message.TextPart("Done"),
+			},
+		},
+	}
+
+	cleaned, state := RecoverMessages(messages)
+	if len(cleaned) != 3 {
+		t.Fatalf("RecoverMessages() len = %d, want 3", len(cleaned))
+	}
+	if state.Kind != InterruptionNone {
+		t.Fatalf("RecoverMessages() interruption kind = %q, want %q", state.Kind, InterruptionNone)
+	}
+	if state.NeedsContinuation {
+		t.Fatal("RecoverMessages() needs continuation = true, want false")
+	}
+}
+
+// TestManagerRecoverClassifiesInterruptedPrompt verifies manager recovery exposes the normalized interruption state.
+func TestManagerRecoverClassifiesInterruptedPrompt(t *testing.T) {
+	repo := &stubRepository{
+		loadResult: coresession.Session{
+			ID: "session-interrupted",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("draft response")}},
+			},
+		},
+	}
+	manager := NewManager(repo)
+
+	recovered, err := manager.Recover(context.Background(), "session-interrupted")
+	if err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+	if recovered.State.Kind != InterruptionPrompt {
+		t.Fatalf("Recover() interruption kind = %q, want %q", recovered.State.Kind, InterruptionPrompt)
+	}
+	if !recovered.State.NeedsContinuation {
+		t.Fatal("Recover() needs continuation = false, want true")
+	}
+}
+
+// TestManagerRecoverLatestDropsUnresolvedToolUse verifies latest-session recovery strips dangling assistant tool_use blocks.
+func TestManagerRecoverLatestDropsUnresolvedToolUse(t *testing.T) {
+	repo := &stubRepository{
+		latestResult: coresession.Session{
+			ID:          "session-latest",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{
+					Role: message.RoleAssistant,
+					Content: []message.ContentPart{
+						message.TextPart("searching"),
+						message.ToolUsePart("tool-1", "grep", map[string]any{"pattern": "TODO"}),
+					},
+				},
+			},
+		},
+	}
+	manager := NewManager(repo)
+
+	recovered, err := manager.RecoverLatest(context.Background(), "/repo")
+	if err != nil {
+		t.Fatalf("RecoverLatest() error = %v", err)
+	}
+	if recovered.State.Kind != InterruptionTurn {
+		t.Fatalf("RecoverLatest() interruption kind = %q, want %q", recovered.State.Kind, InterruptionTurn)
+	}
+	if len(recovered.Snapshot.Session.Messages) != 1 {
+		t.Fatalf("RecoverLatest() message count = %d, want 1", len(recovered.Snapshot.Session.Messages))
+	}
+	if len(recovered.Snapshot.Session.Messages[0].Content) != 1 {
+		t.Fatalf("RecoverLatest() cleaned content = %#v, want unresolved tool_use removed", recovered.Snapshot.Session.Messages[0].Content)
+	}
+}
+
 // TestManagerListRecentReturnsSummaries verifies project-scoped recent-session summaries are bridged through the manager.
 func TestManagerListRecentReturnsSummaries(t *testing.T) {
 	repo := &stubRepository{

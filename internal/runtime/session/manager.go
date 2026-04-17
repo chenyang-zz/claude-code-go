@@ -89,6 +89,15 @@ func (m *Manager) Resume(ctx context.Context, id string) (coresession.Snapshot, 
 	}, nil
 }
 
+// Recover loads one existing session snapshot and applies minimum interruption recovery classification.
+func (m *Manager) Recover(ctx context.Context, id string) (RecoveredSnapshot, error) {
+	snapshot, err := m.Resume(ctx, id)
+	if err != nil {
+		return RecoveredSnapshot{}, err
+	}
+	return m.recoverSnapshot("recover", snapshot), nil
+}
+
 // ResumeLatest loads the most recently updated session for one project scope.
 func (m *Manager) ResumeLatest(ctx context.Context, projectPath string) (coresession.Snapshot, error) {
 	if projectPath == "" {
@@ -112,6 +121,15 @@ func (m *Manager) ResumeLatest(ctx context.Context, projectPath string) (coreses
 		Session: session.Clone(),
 		Resumed: true,
 	}, nil
+}
+
+// RecoverLatest loads the latest project-scoped session and applies minimum interruption recovery classification.
+func (m *Manager) RecoverLatest(ctx context.Context, projectPath string) (RecoveredSnapshot, error) {
+	snapshot, err := m.ResumeLatest(ctx, projectPath)
+	if err != nil {
+		return RecoveredSnapshot{}, err
+	}
+	return m.recoverSnapshot("recover_latest", snapshot), nil
 }
 
 // ListRecent returns recent session summaries for one project scope.
@@ -360,4 +378,24 @@ func (m *Manager) now() time.Time {
 		return m.Now()
 	}
 	return time.Now()
+}
+
+func (m *Manager) recoverSnapshot(action string, snapshot coresession.Snapshot) RecoveredSnapshot {
+	cleanedMessages, state := RecoverMessages(snapshot.Session.Messages)
+	recovered := snapshot.Clone()
+	recovered.Session.Messages = cleanedMessages
+
+	logger.DebugCF("session_manager", "classified recovered session history", map[string]any{
+		"action":             action,
+		"session_id":         recovered.Session.ID,
+		"message_count":      len(snapshot.Session.Messages),
+		"cleaned_count":      len(cleanedMessages),
+		"interruption_kind":  state.Kind,
+		"needs_continuation": state.NeedsContinuation,
+	})
+
+	return RecoveredSnapshot{
+		Snapshot: recovered,
+		State:    state,
+	}
 }
