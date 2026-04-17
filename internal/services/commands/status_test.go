@@ -78,12 +78,14 @@ func TestStatusCommandExecute(t *testing.T) {
 
 	result, err := StatusCommand{
 		Config: coreconfig.Config{
-			Provider:      "anthropic",
-			Model:         "claude-sonnet-4-5",
-			ProjectPath:   "/repo/project",
-			ApprovalMode:  "default",
-			SessionDBPath: "/tmp/sessions.db",
-			APIKey:        "test-key",
+			Provider:             "anthropic",
+			Model:                "claude-sonnet-4-5",
+			ProjectPath:          "/repo/project",
+			ApprovalMode:         "default",
+			SessionDBPath:        "/tmp/sessions.db",
+			LoadedSettingSources: []string{"userSettings", "projectSettings", "localSettings"},
+			APIKey:               "test-key",
+			APIKeySource:         "ANTHROPIC_API_KEY",
 		},
 		ToolRegistry: toolRegistry,
 		APIProbe: stubStatusProbe{
@@ -97,7 +99,7 @@ func TestStatusCommandExecute(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Account auth: API key configured; interactive account status is not available\n- API base URL: default\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -107,9 +109,10 @@ func TestStatusCommandExecute(t *testing.T) {
 func TestStatusCommandExecuteWithAuthToken(t *testing.T) {
 	result, err := StatusCommand{
 		Config: coreconfig.Config{
-			Provider:    "anthropic",
-			AuthToken:   "auth-token",
-			ProjectPath: "/repo/project",
+			Provider:        "anthropic",
+			AuthToken:       "auth-token",
+			AuthTokenSource: "ANTHROPIC_AUTH_TOKEN",
+			ProjectPath:     "/repo/project",
 		},
 		APIProbe: stubStatusProbe{
 			result: APIConnectivityProbeResult{
@@ -121,7 +124,7 @@ func TestStatusCommandExecuteWithAuthToken(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: Auth token configured; interactive account status is not available\n- API base URL: default\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: Auth token configured; interactive account status is not available\n- API key source: not configured\n- Auth token source: ANTHROPIC_AUTH_TOKEN\n- API base URL: default\n- API base URL source: default\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -134,7 +137,7 @@ func TestStatusCommandExecuteWithoutCredential(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing auth credential; interactive account status is not available\n- API base URL: default\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: (not set)\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: missing auth credential; interactive account status is not available\n- API key source: not configured\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

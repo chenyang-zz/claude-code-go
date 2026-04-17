@@ -34,6 +34,18 @@ func Merge(base, override Config) Config {
 	if override.APIBaseURL != "" {
 		base.APIBaseURL = override.APIBaseURL
 	}
+	if len(override.LoadedSettingSources) > 0 {
+		base.LoadedSettingSources = append([]string(nil), override.LoadedSettingSources...)
+	}
+	if override.APIKeySource != "" {
+		base.APIKeySource = override.APIKeySource
+	}
+	if override.AuthTokenSource != "" {
+		base.AuthTokenSource = override.AuthTokenSource
+	}
+	if override.APIBaseURLSource != "" {
+		base.APIBaseURLSource = override.APIBaseURLSource
+	}
 	if override.ApprovalMode != "" {
 		base.ApprovalMode = override.ApprovalMode
 	}

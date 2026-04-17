@@ -33,6 +33,14 @@ type Config struct {
 	AuthToken string
 	// APIBaseURL optionally overrides the provider API endpoint.
 	APIBaseURL string
+	// LoadedSettingSources lists the migrated settings layers that actually participated in config loading.
+	LoadedSettingSources []string
+	// APIKeySource stores the environment key that supplied the effective API key when one is configured.
+	APIKeySource string
+	// AuthTokenSource stores the environment key that supplied the effective auth token when one is configured.
+	AuthTokenSource string
+	// APIBaseURLSource stores the environment key that supplied the effective API base URL override.
+	APIBaseURLSource string
 	// ApprovalMode controls the runtime approval behavior.
 	ApprovalMode string
 	// SessionDBPath points at the session persistence database when enabled.

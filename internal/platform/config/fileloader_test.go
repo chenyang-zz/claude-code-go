@@ -252,8 +252,14 @@ func TestFileLoaderLoadGLMEnvFallback(t *testing.T) {
 	if cfg.APIKey != "glm-key" {
 		t.Fatalf("Load() api key = %q, want glm-key", cfg.APIKey)
 	}
+	if cfg.APIKeySource != "GLM_API_KEY" {
+		t.Fatalf("Load() api key source = %q, want GLM_API_KEY", cfg.APIKeySource)
+	}
 	if cfg.APIBaseURL != "https://glm.example.com" {
 		t.Fatalf("Load() api base url = %q, want https://glm.example.com", cfg.APIBaseURL)
+	}
+	if cfg.APIBaseURLSource != "ZHIPUAI_BASE_URL" {
+		t.Fatalf("Load() api base url source = %q, want ZHIPUAI_BASE_URL", cfg.APIBaseURLSource)
 	}
 }
 
@@ -528,6 +534,9 @@ func TestFileLoaderLoadAnthropicAuthToken(t *testing.T) {
 	if cfg.AuthToken != "test-auth-token" {
 		t.Fatalf("Load() auth token = %q, want test-auth-token", cfg.AuthToken)
 	}
+	if cfg.AuthTokenSource != "ANTHROPIC_AUTH_TOKEN" {
+		t.Fatalf("Load() auth token source = %q, want ANTHROPIC_AUTH_TOKEN", cfg.AuthTokenSource)
+	}
 }
 
 // TestFileLoaderLoadSettingSourcesFilter verifies the loader only reads the disk-backed settings sources enabled by `--setting-sources`.
@@ -563,6 +572,9 @@ func TestFileLoaderLoadSettingSourcesFilter(t *testing.T) {
 	if cfg.Model != "project-model" {
 		t.Fatalf("Load() model = %q, want project-model", cfg.Model)
 	}
+	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourceProjectSettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [projectSettings]", cfg.LoadedSettingSources)
+	}
 }
 
 // TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings verifies disabling disk-backed settings does not suppress `--settings` overrides.
@@ -595,5 +607,39 @@ func TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings(t *testing.T)
 
 	if cfg.Model != "flag-model" {
 		t.Fatalf("Load() model = %q, want flag-model", cfg.Model)
+	}
+	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourceFlagSettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [flagSettings]", cfg.LoadedSettingSources)
+	}
+}
+
+// TestFileLoaderLoadTracksSettingsEnvCredentialSource verifies trusted settings env values report their source labels.
+func TestFileLoaderLoadTracksSettingsEnvCredentialSource(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"provider":"anthropic","env":{"ANTHROPIC_API_KEY":"settings-key","ANTHROPIC_BASE_URL":"https://settings.example.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.APIKeySource != "ANTHROPIC_API_KEY (settings env)" {
+		t.Fatalf("Load() api key source = %q, want ANTHROPIC_API_KEY (settings env)", cfg.APIKeySource)
+	}
+	if cfg.APIBaseURLSource != "ANTHROPIC_BASE_URL (settings env)" {
+		t.Fatalf("Load() api base url source = %q, want ANTHROPIC_BASE_URL (settings env)", cfg.APIBaseURLSource)
+	}
+	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourceUserSettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [userSettings]", cfg.LoadedSettingSources)
 	}
 }

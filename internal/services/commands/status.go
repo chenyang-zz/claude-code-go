@@ -55,12 +55,17 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 	lines := []string{
 		"Status summary:",
 		fmt.Sprintf("- Provider: %s", displayValue(c.Config.Provider)),
+		fmt.Sprintf("- API provider type: %s", statusProviderType(c.Config.Provider)),
 		fmt.Sprintf("- Model: %s", displayValue(c.Config.Model)),
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
 		fmt.Sprintf("- Session storage: %s", c.sessionStorageStatus()),
+		fmt.Sprintf("- Settings sources: %s", statusSettingSources(c.Config.LoadedSettingSources)),
 		fmt.Sprintf("- Account auth: %s", statusAccountAuth(c.Config)),
+		fmt.Sprintf("- API key source: %s", statusCredentialSource(c.Config.APIKeySource)),
+		fmt.Sprintf("- Auth token source: %s", statusCredentialSource(c.Config.AuthTokenSource)),
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
+		fmt.Sprintf("- API base URL source: %s", statusBaseURLSource(c.Config)),
 		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),
 		"- Settings status UI: not available in Claude Code Go yet",
@@ -74,6 +79,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		"has_api_key":         c.Config.APIKey != "",
 		"has_auth_token":      c.Config.AuthToken != "",
 		"has_session_db_path": c.Config.SessionDBPath != "",
+		"settings_sources":    strings.Join(c.Config.LoadedSettingSources, ","),
 		"api_connectivity":    apiProbe.Summary,
 		"tool_count":          toolCount,
 	})
@@ -159,6 +165,63 @@ func statusAccountAuth(cfg coreconfig.Config) string {
 		return "Auth token configured; interactive account status is not available"
 	}
 	return "missing auth credential; interactive account status is not available"
+}
+
+// statusProviderType renders the stable provider-family label used by `/status`.
+func statusProviderType(provider string) string {
+	switch coreconfig.NormalizeProvider(provider) {
+	case coreconfig.ProviderAnthropic:
+		return "Anthropic first-party"
+	case coreconfig.ProviderOpenAICompatible:
+		return "OpenAI-compatible"
+	case coreconfig.ProviderGLM:
+		return "GLM-compatible"
+	default:
+		return displayValue(provider)
+	}
+}
+
+// statusSettingSources renders the loaded settings sources in a stable human-readable order.
+func statusSettingSources(sources []string) string {
+	if len(sources) == 0 {
+		return "none"
+	}
+
+	labels := make([]string, 0, len(sources))
+	for _, source := range sources {
+		switch strings.TrimSpace(source) {
+		case "userSettings":
+			labels = append(labels, "User settings")
+		case "projectSettings":
+			labels = append(labels, "Project settings")
+		case "localSettings":
+			labels = append(labels, "Local settings")
+		case "flagSettings":
+			labels = append(labels, "--settings")
+		default:
+			labels = append(labels, source)
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+// statusCredentialSource renders the tracked environment key that supplied one runtime credential.
+func statusCredentialSource(source string) string {
+	if strings.TrimSpace(source) == "" {
+		return "not configured"
+	}
+	return source
+}
+
+// statusBaseURLSource renders either the tracked base URL source or a stable default marker.
+func statusBaseURLSource(cfg coreconfig.Config) string {
+	if strings.TrimSpace(cfg.APIBaseURL) == "" {
+		return "default"
+	}
+	if strings.TrimSpace(cfg.APIBaseURLSource) == "" {
+		return "configured"
+	}
+	return cfg.APIBaseURLSource
 }
 
 // missingStatusCredential reports whether the current provider lacks the minimum credential needed for /status probing.

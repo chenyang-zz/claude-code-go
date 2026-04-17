@@ -83,10 +83,14 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	sourceEnvs := map[SettingSource]map[string]string{}
+	loadedSettingSources := make([]string, 0, 4)
 	for _, candidate := range l.settingsPathCandidates() {
-		fileCfg, err := l.loadSettingsFile(candidate.Path)
+		fileCfg, loaded, err := l.loadSettingsFile(candidate.Path)
 		if err != nil {
 			return coreconfig.Config{}, err
+		}
+		if loaded {
+			loadedSettingSources = append(loadedSettingSources, string(candidate.Source))
 		}
 		sourceEnvs[candidate.Source] = cloneStringMap(fileCfg.Env)
 		cfg = coreconfig.Merge(cfg, fileCfg)
@@ -96,24 +100,34 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		if err != nil {
 			return coreconfig.Config{}, err
 		}
+		loadedSettingSources = append(loadedSettingSources, string(SettingSourceFlagSettings))
 		sourceEnvs[SettingSourceFlagSettings] = cloneStringMap(flagCfg.Env)
 		cfg = coreconfig.Merge(cfg, flagCfg)
 	}
+	cfg.LoadedSettingSources = append([]string(nil), loadedSettingSources...)
 	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")))
 
 	envLookup := l.runtimeEnvLookup(cfg.Env)
-	envProvider := strings.TrimSpace(envLookup("CLAUDE_CODE_PROVIDER"))
+	envLookupWithSource := l.runtimeEnvLookupWithSource(cfg.Env)
+	envProvider, _ := envLookupWithSource("CLAUDE_CODE_PROVIDER")
+	envProvider = strings.TrimSpace(envProvider)
 	activeProvider := firstNonEmpty(envProvider, cfg.Provider)
+	apiKey, apiKeySource := l.lookupAPIKey(activeProvider, envLookupWithSource)
+	authToken, authTokenSource := l.lookupAuthToken(activeProvider, envLookupWithSource)
+	apiBaseURL, apiBaseURLSource := l.lookupAPIBaseURL(activeProvider, envLookupWithSource)
 	envCfg := coreconfig.Config{
-		Model:         envLookup("CLAUDE_CODE_MODEL"),
-		Theme:         envLookup("CLAUDE_CODE_THEME"),
-		EditorMode:    envLookup("CLAUDE_CODE_EDITOR_MODE"),
-		Provider:      envProvider,
-		APIKey:        l.lookupAPIKey(activeProvider, envLookup),
-		AuthToken:     l.lookupAuthToken(activeProvider, envLookup),
-		APIBaseURL:    l.lookupAPIBaseURL(activeProvider, envLookup),
-		ApprovalMode:  envLookup("CLAUDE_CODE_APPROVAL_MODE"),
-		SessionDBPath: envLookup("CLAUDE_CODE_SESSION_DB_PATH"),
+		Model:            envLookup("CLAUDE_CODE_MODEL"),
+		Theme:            envLookup("CLAUDE_CODE_THEME"),
+		EditorMode:       envLookup("CLAUDE_CODE_EDITOR_MODE"),
+		Provider:         envProvider,
+		APIKey:           apiKey,
+		AuthToken:        authToken,
+		APIBaseURL:       apiBaseURL,
+		APIKeySource:     apiKeySource,
+		AuthTokenSource:  authTokenSource,
+		APIBaseURLSource: apiBaseURLSource,
+		ApprovalMode:     envLookup("CLAUDE_CODE_APPROVAL_MODE"),
+		SessionDBPath:    envLookup("CLAUDE_CODE_SESSION_DB_PATH"),
 	}
 	cfg = coreconfig.Merge(cfg, envCfg)
 
@@ -144,6 +158,25 @@ func (l *FileLoader) runtimeEnvLookup(settingsEnv map[string]string) func(string
 			}
 		}
 		return l.LookupEnv(key)
+	}
+}
+
+// runtimeEnvLookupWithSource resolves environment variables together with a stable source label for `/status`.
+func (l *FileLoader) runtimeEnvLookupWithSource(settingsEnv map[string]string) func(string) (string, string) {
+	return func(key string) (string, string) {
+		if settingsEnv != nil {
+			if value, ok := settingsEnv[key]; ok {
+				if value == "" {
+					return "", ""
+				}
+				return value, fmt.Sprintf("%s (settings env)", key)
+			}
+		}
+		value := l.LookupEnv(key)
+		if value == "" {
+			return "", ""
+		}
+		return value, key
 	}
 }
 
@@ -198,16 +231,20 @@ func (l *FileLoader) allowedSettingSources() []SettingSource {
 }
 
 // loadSettingsFile extracts the minimal runtime fields currently consumed by the Go host.
-func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, error) {
+func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return coreconfig.Config{}, nil
+			return coreconfig.Config{}, false, nil
 		}
-		return coreconfig.Config{}, fmt.Errorf("read settings file %s: %w", path, err)
+		return coreconfig.Config{}, false, fmt.Errorf("read settings file %s: %w", path, err)
 	}
 
-	return parseSettingsConfig(data, path)
+	cfg, parseErr := parseSettingsConfig(data, path)
+	if parseErr != nil {
+		return coreconfig.Config{}, false, parseErr
+	}
+	return cfg, true, nil
 }
 
 // loadFlagSettings resolves one `--settings` value as either inline JSON or an additional settings file.
@@ -306,9 +343,9 @@ func (l *FileLoader) defaultSessionDBPath() string {
 }
 
 // lookupAPIKey resolves the provider-specific credential environment variable for the active runtime provider.
-func (l *FileLoader) lookupAPIKey(provider string, lookup func(string) string) string {
-	if value := lookup("CLAUDE_CODE_API_KEY"); value != "" {
-		return value
+func (l *FileLoader) lookupAPIKey(provider string, lookup func(string) (string, string)) (string, string) {
+	if value, source := lookup("CLAUDE_CODE_API_KEY"); value != "" {
+		return value, source
 	}
 
 	switch coreconfig.NormalizeProvider(provider) {
@@ -317,43 +354,50 @@ func (l *FileLoader) lookupAPIKey(provider string, lookup func(string) string) s
 	case coreconfig.ProviderOpenAICompatible:
 		return lookup("OPENAI_API_KEY")
 	case coreconfig.ProviderGLM:
-		return firstNonEmpty(
-			lookup("GLM_API_KEY"),
-			lookup("ZHIPUAI_API_KEY"),
-			lookup("OPENAI_API_KEY"),
-		)
+		for _, key := range []string{"GLM_API_KEY", "ZHIPUAI_API_KEY", "OPENAI_API_KEY"} {
+			if value, source := lookup(key); value != "" {
+				return value, source
+			}
+		}
+		return "", ""
 	default:
-		return ""
+		return "", ""
 	}
 }
 
 // lookupAuthToken resolves the Anthropic bearer token used by first-party account auth.
-func (l *FileLoader) lookupAuthToken(provider string, lookup func(string) string) string {
+func (l *FileLoader) lookupAuthToken(provider string, lookup func(string) (string, string)) (string, string) {
 	if coreconfig.NormalizeProvider(provider) != coreconfig.ProviderAnthropic {
-		return ""
+		return "", ""
 	}
 	return lookup("ANTHROPIC_AUTH_TOKEN")
 }
 
 // lookupAPIBaseURL resolves the provider-specific base URL override environment variable for the active runtime provider.
-func (l *FileLoader) lookupAPIBaseURL(provider string, lookup func(string) string) string {
-	if value := lookup("CLAUDE_CODE_API_BASE_URL"); value != "" {
-		return value
+func (l *FileLoader) lookupAPIBaseURL(provider string, lookup func(string) (string, string)) (string, string) {
+	if value, source := lookup("CLAUDE_CODE_API_BASE_URL"); value != "" {
+		return value, source
 	}
 
 	switch coreconfig.NormalizeProvider(provider) {
 	case coreconfig.ProviderAnthropic:
 		return lookup("ANTHROPIC_BASE_URL")
 	case coreconfig.ProviderOpenAICompatible:
-		return lookup("OPENAI_BASE_URL")
+		for _, key := range []string{"OPENAI_BASE_URL", "OPENAI_API_BASE"} {
+			if value, source := lookup(key); value != "" {
+				return value, source
+			}
+		}
+		return "", ""
 	case coreconfig.ProviderGLM:
-		return firstNonEmpty(
-			lookup("GLM_BASE_URL"),
-			lookup("ZHIPUAI_BASE_URL"),
-			lookup("OPENAI_BASE_URL"),
-		)
+		for _, key := range []string{"GLM_BASE_URL", "ZHIPUAI_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"} {
+			if value, source := lookup(key); value != "" {
+				return value, source
+			}
+		}
+		return "", ""
 	default:
-		return ""
+		return "", ""
 	}
 }
 
