@@ -18,6 +18,10 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			AccountUUID:      "base-account",
 			OrganizationName: "Base Org",
 		},
+		PolicySettings: PolicySettingsConfig{
+			Origin:      PolicySettingsOriginFile,
+			HasBaseFile: true,
+		},
 		Permissions: PermissionConfig{
 			DefaultMode: "default",
 			Allow:       []string{"Bash(ls)"},
@@ -41,6 +45,11 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 		OAuthAccount: OAuthAccountConfig{
 			EmailAddress:     "user@example.com",
 			OrganizationUUID: "org-123",
+		},
+		PolicySettings: PolicySettingsConfig{
+			Origin:      PolicySettingsOriginFile,
+			HasBaseFile: true,
+			HasDropIns:  true,
 		},
 		Permissions: PermissionConfig{
 			DefaultMode: "plan",
@@ -71,6 +80,11 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			EmailAddress:     "user@example.com",
 			OrganizationUUID: "org-123",
 			OrganizationName: "Base Org",
+		},
+		PolicySettings: PolicySettingsConfig{
+			Origin:      PolicySettingsOriginFile,
+			HasBaseFile: true,
+			HasDropIns:  true,
 		},
 		Permissions: PermissionConfig{
 			DefaultMode: "plan",

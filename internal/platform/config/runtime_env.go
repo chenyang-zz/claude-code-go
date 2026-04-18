@@ -139,15 +139,16 @@ func buildRuntimeSettingsEnv(sourceEnvs map[SettingSource]map[string]string, hos
 	merged := map[string]string{}
 	for _, source := range []SettingSource{
 		SettingSourceUserSettings,
-		SettingSourceFlagSettings,
-	} {
-		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, false)
-	}
-	for _, source := range []SettingSource{
 		SettingSourceProjectSettings,
 		SettingSourceLocalSettings,
 	} {
-		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, true)
+		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, source == SettingSourceProjectSettings || source == SettingSourceLocalSettings)
+	}
+	for _, source := range []SettingSource{
+		SettingSourcePolicySettings,
+		SettingSourceFlagSettings,
+	} {
+		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, false)
 	}
 	if len(merged) == 0 {
 		return nil

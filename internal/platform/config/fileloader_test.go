@@ -582,17 +582,70 @@ func TestFileLoaderLoadAnthropicAuthToken(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadManagedSettingsBaseAndDropIns verifies file-based managed settings merge base and alphabetical drop-ins into policySettings.
+func TestFileLoaderLoadManagedSettingsBaseAndDropIns(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
+
+	if err := os.MkdirAll(filepath.Join(managedDir, "managed-settings.d"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed drop-ins) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"model":"managed-base","permissions":{"additionalDirectories":["/managed/base"]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(managed base) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.d", "10-provider.json"), []byte(`{"provider":"openai-compatible"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(managed drop-in provider) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.d", "20-model.json"), []byte(`{"env":{"CLAUDE_CODE_MODEL":"managed-env-model"},"permissions":{"additionalDirectories":["/managed/dropin"]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(managed drop-in model) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "managed-env-model" {
+		t.Fatalf("Load() model = %q, want managed-env-model", cfg.Model)
+	}
+	if cfg.Provider != coreconfig.ProviderOpenAICompatible {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderOpenAICompatible)
+	}
+	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [policySettings]", cfg.LoadedSettingSources)
+	}
+	if cfg.PolicySettings.Origin != coreconfig.PolicySettingsOriginFile || !cfg.PolicySettings.HasBaseFile || !cfg.PolicySettings.HasDropIns {
+		t.Fatalf("Load() policy settings = %#v, want file origin with base+drop-ins", cfg.PolicySettings)
+	}
+	if len(cfg.Permissions.AdditionalDirectoryEntries) != 1 {
+		t.Fatalf("Load() permissions.additionalDirectoryEntries = %#v, want one managed entry", cfg.Permissions.AdditionalDirectoryEntries)
+	}
+	entry := cfg.Permissions.AdditionalDirectoryEntries[0]
+	if entry.Path != "/managed/dropin" || entry.Source != coreconfig.AdditionalDirectorySourcePolicySettings {
+		t.Fatalf("Load() permissions.additionalDirectoryEntries[0] = %#v, want managed drop-in path with policySettings source", entry)
+	}
+}
+
 // TestFileLoaderLoadSettingSourcesFilter verifies the loader only reads the disk-backed settings sources enabled by `--setting-sources`.
 func TestFileLoaderLoadSettingSourcesFilter(t *testing.T) {
 	tempDir := t.TempDir()
 	projectDir := filepath.Join(tempDir, "project")
 	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
 
 	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(project) error = %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
@@ -603,8 +656,12 @@ func TestFileLoaderLoadSettingSourcesFilter(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), []byte(`{"model":"local-model"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(local settings) error = %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"model":"managed-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(managed settings) error = %v", err)
+	}
 
 	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
 	loader.AllowedSettingSources = []SettingSource{SettingSourceProjectSettings}
 
 	cfg, err := loader.Load(context.Background())
@@ -612,19 +669,20 @@ func TestFileLoaderLoadSettingSourcesFilter(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.Model != "project-model" {
-		t.Fatalf("Load() model = %q, want project-model", cfg.Model)
+	if cfg.Model != "managed-model" {
+		t.Fatalf("Load() model = %q, want managed-model because policySettings still participates", cfg.Model)
 	}
-	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourceProjectSettings) {
-		t.Fatalf("Load() loaded setting sources = %#v, want [projectSettings]", cfg.LoadedSettingSources)
+	if len(cfg.LoadedSettingSources) != 2 || cfg.LoadedSettingSources[0] != string(SettingSourceProjectSettings) || cfg.LoadedSettingSources[1] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [projectSettings policySettings]", cfg.LoadedSettingSources)
 	}
 }
 
-// TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings verifies disabling disk-backed settings does not suppress `--settings` overrides.
-func TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings(t *testing.T) {
+// TestFileLoaderLoadSettingSourcesEmptyStillAppliesPolicyAndFlagSettings verifies disabling user/project/local sources does not suppress policySettings or `--settings`.
+func TestFileLoaderLoadSettingSourcesEmptyStillAppliesPolicyAndFlagSettings(t *testing.T) {
 	tempDir := t.TempDir()
 	projectDir := filepath.Join(tempDir, "project")
 	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
 
 	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(project) error = %v", err)
@@ -632,14 +690,21 @@ func TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(home) error = %v", err)
 	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(home settings) error = %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(project settings) error = %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"model":"managed-model"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(managed settings) error = %v", err)
+	}
 
 	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
 	loader.AllowedSettingSources = []SettingSource{}
 	loader.FlagSettingsValue = `{"model":"flag-model"}`
 
@@ -651,8 +716,8 @@ func TestFileLoaderLoadSettingSourcesEmptyStillAppliesFlagSettings(t *testing.T)
 	if cfg.Model != "flag-model" {
 		t.Fatalf("Load() model = %q, want flag-model", cfg.Model)
 	}
-	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourceFlagSettings) {
-		t.Fatalf("Load() loaded setting sources = %#v, want [flagSettings]", cfg.LoadedSettingSources)
+	if len(cfg.LoadedSettingSources) != 2 || cfg.LoadedSettingSources[0] != string(SettingSourcePolicySettings) || cfg.LoadedSettingSources[1] != string(SettingSourceFlagSettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [policySettings flagSettings]", cfg.LoadedSettingSources)
 	}
 }
 

@@ -112,6 +112,8 @@ func permissionsAdditionalDirectorySourceLabel(source coreconfig.AdditionalDirec
 		return "projectSettings"
 	case coreconfig.AdditionalDirectorySourceLocalSettings:
 		return "localSettings"
+	case coreconfig.AdditionalDirectorySourcePolicySettings:
+		return "policySettings"
 	case coreconfig.AdditionalDirectorySourceSession:
 		return "session"
 	default:

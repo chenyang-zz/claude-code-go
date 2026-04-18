@@ -19,11 +19,13 @@ type FileLoader struct {
 	CWD string
 	// HomeDir identifies the user home directory used for global settings lookup.
 	HomeDir string
+	// ManagedSettingsDir optionally overrides the managed settings root for tests and controlled runtime setups.
+	ManagedSettingsDir string
 	// LookupEnv resolves environment variables so tests can supply stable inputs.
 	LookupEnv func(string) string
 	// FlagSettingsValue carries one optional `--settings` CLI override that should merge after on-disk settings and before env.
 	FlagSettingsValue string
-	// AllowedSettingSources optionally restricts which disk-backed settings files participate in config loading.
+	// AllowedSettingSources optionally restricts which user/project/local disk-backed settings files participate in config loading.
 	AllowedSettingSources []SettingSource
 }
 
@@ -89,7 +91,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	sourceEnvs := map[SettingSource]map[string]string{}
-	loadedSettingSources := make([]string, 0, 4)
+	loadedSettingSources := make([]string, 0, 5)
 	for _, candidate := range l.settingsPathCandidates() {
 		fileCfg, loaded, err := l.loadSettingsFile(candidate)
 		if err != nil {
@@ -100,6 +102,15 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		}
 		sourceEnvs[candidate.Source] = cloneStringMap(fileCfg.Env)
 		cfg = coreconfig.Merge(cfg, fileCfg)
+	}
+	policyCfg, loadedPolicySettings, err := l.loadManagedSettings()
+	if err != nil {
+		return coreconfig.Config{}, err
+	}
+	if loadedPolicySettings {
+		loadedSettingSources = append(loadedSettingSources, string(SettingSourcePolicySettings))
+		sourceEnvs[SettingSourcePolicySettings] = cloneStringMap(policyCfg.Env)
+		cfg = coreconfig.Merge(cfg, policyCfg)
 	}
 	if strings.TrimSpace(l.FlagSettingsValue) != "" {
 		flagCfg, err := l.loadFlagSettings(l.FlagSettingsValue)
@@ -325,9 +336,9 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 		HasEffortLevelSetting: parsed.EffortLevel != nil,
 		FastMode:              readFastMode(parsed.FastMode),
 		HasFastModeSetting:    parsed.FastMode != nil,
-		Theme:                 coreconfig.NormalizeThemeSetting(parsed.Theme),
-		EditorMode:            coreconfig.NormalizeEditorMode(parsed.EditorMode),
-		Provider:              coreconfig.NormalizeProvider(parsed.Provider),
+		Theme:                 readThemeSetting(parsed.Theme),
+		EditorMode:            readEditorMode(parsed.EditorMode),
+		Provider:              readProvider(parsed.Provider),
 		ApprovalMode:          parsed.Permissions.DefaultMode,
 		SessionDBPath:         parsed.SessionDBPath,
 		OAuthAccount: coreconfig.OAuthAccountConfig{
@@ -357,6 +368,8 @@ func additionalDirectorySourceFromSettingSource(source SettingSource) coreconfig
 		return coreconfig.AdditionalDirectorySourceLocalSettings
 	case SettingSourceProjectSettings:
 		return coreconfig.AdditionalDirectorySourceProjectSettings
+	case SettingSourcePolicySettings:
+		return coreconfig.AdditionalDirectorySourcePolicySettings
 	default:
 		return ""
 	}
@@ -380,6 +393,30 @@ func readEffortLevel(value *string) string {
 		return ""
 	}
 	return coreconfig.NormalizeEffortLevel(*value)
+}
+
+// readThemeSetting normalizes one optional theme value while preserving the "unset" state.
+func readThemeSetting(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return coreconfig.NormalizeThemeSetting(value)
+}
+
+// readEditorMode normalizes one optional editor mode while preserving the "unset" state.
+func readEditorMode(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return coreconfig.NormalizeEditorMode(value)
+}
+
+// readProvider normalizes one optional provider value while preserving the "unset" state.
+func readProvider(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return coreconfig.NormalizeProvider(value)
 }
 
 // readFastMode dereferences one optional fast-mode pointer into the runtime representation.

@@ -323,3 +323,55 @@ func TestStatusCommandExecuteWithOAuthAccount(t *testing.T) {
 		t.Fatalf("Execute() output = %q, want email line", result.Output)
 	}
 }
+
+// TestStatusSettingSourcesRendersManagedVariants verifies `/status` renders file-based managed source detail variants.
+func TestStatusSettingSourcesRendersManagedVariants(t *testing.T) {
+	testCases := []struct {
+		name   string
+		cfg    coreconfig.Config
+		expect string
+	}{
+		{
+			name: "file only",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"policySettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin:      coreconfig.PolicySettingsOriginFile,
+					HasBaseFile: true,
+				},
+			},
+			expect: "Enterprise managed settings (file)",
+		},
+		{
+			name: "drop-ins only",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"policySettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin:     coreconfig.PolicySettingsOriginFile,
+					HasDropIns: true,
+				},
+			},
+			expect: "Enterprise managed settings (drop-ins)",
+		},
+		{
+			name: "file and drop-ins",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"userSettings", "policySettings", "flagSettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin:      coreconfig.PolicySettingsOriginFile,
+					HasBaseFile: true,
+					HasDropIns:  true,
+				},
+			},
+			expect: "User settings, Enterprise managed settings (file + drop-ins), --settings",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statusSettingSources(tc.cfg); got != tc.expect {
+				t.Fatalf("statusSettingSources() = %q, want %q", got, tc.expect)
+			}
+		})
+	}
+}

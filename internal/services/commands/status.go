@@ -66,7 +66,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Project path: %s", displayValue(c.Config.ProjectPath)),
 		fmt.Sprintf("- Approval mode: %s", displayValue(c.Config.ApprovalMode)),
 		fmt.Sprintf("- Session storage: %s", c.sessionStorageStatus()),
-		fmt.Sprintf("- Settings sources: %s", statusSettingSources(c.Config.LoadedSettingSources)),
+		fmt.Sprintf("- Settings sources: %s", statusSettingSources(c.Config)),
 		fmt.Sprintf("- Account auth: %s", statusAccountAuth(c.Config)),
 		fmt.Sprintf("- API key source: %s", statusCredentialSource(c.Config.APIKeySource)),
 		fmt.Sprintf("- Auth token source: %s", statusCredentialSource(c.Config.AuthTokenSource)),
@@ -238,13 +238,13 @@ func statusProviderType(provider string) string {
 }
 
 // statusSettingSources renders the loaded settings sources in a stable human-readable order.
-func statusSettingSources(sources []string) string {
-	if len(sources) == 0 {
+func statusSettingSources(cfg coreconfig.Config) string {
+	if len(cfg.LoadedSettingSources) == 0 {
 		return "none"
 	}
 
-	labels := make([]string, 0, len(sources))
-	for _, source := range sources {
+	labels := make([]string, 0, len(cfg.LoadedSettingSources))
+	for _, source := range cfg.LoadedSettingSources {
 		switch strings.TrimSpace(source) {
 		case "userSettings":
 			labels = append(labels, "User settings")
@@ -252,6 +252,8 @@ func statusSettingSources(sources []string) string {
 			labels = append(labels, "Project settings")
 		case "localSettings":
 			labels = append(labels, "Local settings")
+		case "policySettings":
+			labels = append(labels, statusPolicySettingSourceLabel(cfg.PolicySettings))
 		case "flagSettings":
 			labels = append(labels, "--settings")
 		default:
@@ -259,6 +261,20 @@ func statusSettingSources(sources []string) string {
 		}
 	}
 	return strings.Join(labels, ", ")
+}
+
+// statusPolicySettingSourceLabel renders the minimum managed settings source detail surfaced by `/status`.
+func statusPolicySettingSourceLabel(details coreconfig.PolicySettingsConfig) string {
+	if details.Origin != coreconfig.PolicySettingsOriginFile {
+		return "Enterprise managed settings"
+	}
+	if details.HasBaseFile && details.HasDropIns {
+		return "Enterprise managed settings (file + drop-ins)"
+	}
+	if details.HasDropIns {
+		return "Enterprise managed settings (drop-ins)"
+	}
+	return "Enterprise managed settings (file)"
 }
 
 // statusCredentialSource renders the tracked environment key that supplied one runtime credential.
