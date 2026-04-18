@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
@@ -35,6 +37,7 @@ type fakeToolExecutor struct {
 	errors  map[string]error
 	calls   []tool.Call
 	run     func(ctx context.Context, call tool.Call) (tool.Result, error)
+	safe    map[string]bool
 }
 
 func (e *fakeToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -49,6 +52,10 @@ func (e *fakeToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Re
 		return result, nil
 	}
 	return tool.Result{}, nil
+}
+
+func (e *fakeToolExecutor) IsConcurrencySafe(toolName string) bool {
+	return e.safe[toolName]
 }
 
 type fakeApprovalService struct {
@@ -229,6 +236,215 @@ func TestRuntimeRunToolLoop(t *testing.T) {
 	}
 	if toolResult.Content[0].ToolUseID != "toolu_1" || toolResult.Content[0].Text != "file contents" {
 		t.Fatalf("second request tool result content = %#v", toolResult.Content[0])
+	}
+}
+
+// TestRuntimeRunToolLoopExecutesConcurrencySafeBatchInParallel verifies consecutive concurrency-safe tools execute in parallel while preserving tool_result order.
+func TestRuntimeRunToolLoopExecutesConcurrencySafeBatchInParallel(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_read",
+						Name: "Read",
+					},
+				},
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_glob",
+						Name: "Glob",
+					},
+				},
+			),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "done",
+			}),
+		},
+	}
+
+	var mu sync.Mutex
+	current := 0
+	maxConcurrent := 0
+	started := make(chan struct{}, 2)
+	barrier := make(chan struct{})
+	go func() {
+		<-started
+		<-started
+		close(barrier)
+	}()
+
+	executor := &fakeToolExecutor{
+		safe: map[string]bool{
+			"Read": true,
+			"Glob": true,
+		},
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			mu.Lock()
+			current++
+			if current > maxConcurrent {
+				maxConcurrent = current
+			}
+			mu.Unlock()
+
+			started <- struct{}{}
+			select {
+			case <-barrier:
+			case <-time.After(150 * time.Millisecond):
+			}
+
+			if call.Name == "Read" {
+				time.Sleep(40 * time.Millisecond)
+			}
+			if call.Name == "Glob" {
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			mu.Lock()
+			current--
+			mu.Unlock()
+
+			return tool.Result{Output: call.Name + " ok"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "read and glob",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if maxConcurrent != 2 {
+		t.Fatalf("max concurrent tool executions = %d, want 2", maxConcurrent)
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("Stream() call count = %d, want 2", len(client.requests))
+	}
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages) != 3 {
+		t.Fatalf("second request message count = %d, want 3", len(secondRequest.Messages))
+	}
+
+	toolResults := secondRequest.Messages[2].Content
+	if len(toolResults) != 2 {
+		t.Fatalf("tool result content count = %d, want 2", len(toolResults))
+	}
+	if toolResults[0].ToolUseID != "toolu_read" || toolResults[0].Text != "Read ok" {
+		t.Fatalf("first tool result = %#v, want toolu_read / Read ok", toolResults[0])
+	}
+	if toolResults[1].ToolUseID != "toolu_glob" || toolResults[1].Text != "Glob ok" {
+		t.Fatalf("second tool result = %#v, want toolu_glob / Glob ok", toolResults[1])
+	}
+}
+
+// TestRuntimeRunToolLoopKeepsNonConcurrencySafeToolExclusive verifies non-safe tools do not overlap with a preceding parallel-safe batch.
+func TestRuntimeRunToolLoopKeepsNonConcurrencySafeToolExclusive(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_read",
+						Name: "Read",
+					},
+				},
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_glob",
+						Name: "Glob",
+					},
+				},
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_write",
+						Name: "Write",
+					},
+				},
+			),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "done",
+			}),
+		},
+	}
+
+	var mu sync.Mutex
+	current := 0
+	writeOverlapped := false
+	started := make(chan struct{}, 2)
+	barrier := make(chan struct{})
+	go func() {
+		<-started
+		<-started
+		close(barrier)
+	}()
+
+	executor := &fakeToolExecutor{
+		safe: map[string]bool{
+			"Read":  true,
+			"Glob":  true,
+			"Write": false,
+		},
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			mu.Lock()
+			current++
+			if call.Name == "Write" && current != 1 {
+				writeOverlapped = true
+			}
+			mu.Unlock()
+
+			if call.Name == "Read" || call.Name == "Glob" {
+				started <- struct{}{}
+				select {
+				case <-barrier:
+				case <-time.After(150 * time.Millisecond):
+				}
+			}
+
+			time.Sleep(15 * time.Millisecond)
+
+			mu.Lock()
+			current--
+			mu.Unlock()
+
+			return tool.Result{Output: call.Name + " ok"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "read, glob, then write",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if writeOverlapped {
+		t.Fatal("Write overlapped with another running tool, want exclusive execution")
+	}
+
+	secondRequest := client.requests[1]
+	toolResults := secondRequest.Messages[2].Content
+	if len(toolResults) != 3 {
+		t.Fatalf("tool result content count = %d, want 3", len(toolResults))
+	}
+	if toolResults[2].ToolUseID != "toolu_write" || toolResults[2].Text != "Write ok" {
+		t.Fatalf("third tool result = %#v, want toolu_write / Write ok", toolResults[2])
 	}
 }
 

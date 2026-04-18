@@ -24,6 +24,19 @@ func NewToolExecutor(registry tool.Registry) *ToolExecutor {
 	return &ToolExecutor{registry: registry}
 }
 
+// IsConcurrencySafe reports whether the named tool may be scheduled in a parallel-safe runtime batch.
+func (e *ToolExecutor) IsConcurrencySafe(toolName string) bool {
+	if e == nil || e.registry == nil || toolName == "" {
+		return false
+	}
+
+	target, ok := e.registry.Get(toolName)
+	if !ok || target == nil {
+		return false
+	}
+	return target.IsConcurrencySafe()
+}
+
 // Execute validates the call envelope, resolves the target tool, and delegates invocation.
 func (e *ToolExecutor) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if e == nil || e.registry == nil {

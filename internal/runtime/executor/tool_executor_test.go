@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -104,6 +106,43 @@ func (readTrackingTool) Invoke(_ context.Context, _ tool.Call) (tool.Result, err
 	}, nil
 }
 
+// multiReadTrackingTool is a concurrency-safe test double that emits one read-state delta derived from the call ID.
+type multiReadTrackingTool struct{}
+
+// Name returns the stable registration name used by the concurrent read-state test.
+func (multiReadTrackingTool) Name() string { return "read_multi" }
+
+// Description returns a short summary for the concurrent read-state test tool.
+func (multiReadTrackingTool) Description() string { return "test concurrent read tool" }
+
+// InputSchema returns the synthetic schema used by the concurrent read-state test.
+func (multiReadTrackingTool) InputSchema() tool.InputSchema { return tool.InputSchema{} }
+
+// IsReadOnly reports that the synthetic read never mutates external state.
+func (multiReadTrackingTool) IsReadOnly() bool { return true }
+
+// IsConcurrencySafe reports that the synthetic read tool is safe to invoke concurrently.
+func (multiReadTrackingTool) IsConcurrencySafe() bool { return true }
+
+// Invoke emits one read-state update keyed by the call ID so concurrent merges can be asserted.
+func (multiReadTrackingTool) Invoke(_ context.Context, call tool.Call) (tool.Result, error) {
+	filePath := fmt.Sprintf("/tmp/project/%s.go", call.ID)
+	return tool.Result{
+		Output: "read-multi-ok",
+		Meta: map[string]any{
+			"read_state": tool.ReadStateSnapshot{
+				Files: map[string]tool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(300, 0),
+						ObservedModTime: time.Unix(290, 0),
+						IsPartial:       false,
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 // writeTrackingTool is a test double that exposes the invocation read state for assertions.
 type writeTrackingTool struct{}
 
@@ -119,8 +158,8 @@ func (writeTrackingTool) InputSchema() tool.InputSchema { return tool.InputSchem
 // IsReadOnly reports that the test focuses on context propagation rather than mutation semantics.
 func (writeTrackingTool) IsReadOnly() bool { return false }
 
-// IsConcurrencySafe reports that the test write tool is safe to invoke concurrently.
-func (writeTrackingTool) IsConcurrencySafe() bool { return true }
+// IsConcurrencySafe reports that arbitrary writes should not be assumed safe to invoke concurrently.
+func (writeTrackingTool) IsConcurrencySafe() bool { return false }
 
 // Invoke returns the invocation read state so the executor test can inspect it.
 func (writeTrackingTool) Invoke(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -180,6 +219,97 @@ func TestToolExecutorMaintainsReadState(t *testing.T) {
 	}
 	if state.IsPartial {
 		t.Fatal("Execute(write) IsPartial = true, want false")
+	}
+}
+
+// TestToolExecutorIsConcurrencySafe verifies the executor surfaces tool concurrency metadata from the registry.
+func TestToolExecutorIsConcurrencySafe(t *testing.T) {
+	modules, err := wiring.NewModules(readTrackingTool{}, writeTrackingTool{})
+	if err != nil {
+		t.Fatalf("NewModules() error = %v", err)
+	}
+
+	executor := NewToolExecutor(modules.Tools)
+
+	if !executor.IsConcurrencySafe("read") {
+		t.Fatal("IsConcurrencySafe(read) = false, want true")
+	}
+	if executor.IsConcurrencySafe("write") {
+		t.Fatal("IsConcurrencySafe(write) = true, want false")
+	}
+	if executor.IsConcurrencySafe("missing") {
+		t.Fatal("IsConcurrencySafe(missing) = true, want false")
+	}
+}
+
+// TestToolExecutorMaintainsReadStateAcrossConcurrentReads verifies concurrent successful reads are merged before a later write.
+func TestToolExecutorMaintainsReadStateAcrossConcurrentReads(t *testing.T) {
+	modules, err := wiring.NewModules(multiReadTrackingTool{}, writeTrackingTool{})
+	if err != nil {
+		t.Fatalf("NewModules() error = %v", err)
+	}
+
+	executor := NewToolExecutor(modules.Tools)
+
+	calls := []tool.Call{
+		{
+			ID:   "read-a",
+			Name: "read_multi",
+			Context: tool.UseContext{
+				WorkingDir: "/tmp/project",
+			},
+		},
+		{
+			ID:   "read-b",
+			Name: "read_multi",
+			Context: tool.UseContext{
+				WorkingDir: "/tmp/project",
+			},
+		},
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(calls))
+	for _, call := range calls {
+		wg.Add(1)
+		go func(pending tool.Call) {
+			defer wg.Done()
+			_, err := executor.Execute(context.Background(), pending)
+			errs <- err
+		}(call)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Execute(concurrent read) error = %v", err)
+		}
+	}
+
+	result, err := executor.Execute(context.Background(), tool.Call{
+		ID:   "call-write",
+		Name: "write",
+		Context: tool.UseContext{
+			WorkingDir: "/tmp/project",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute(write) error = %v", err)
+	}
+
+	snapshot, ok := result.Meta["read_state"].(tool.ReadStateSnapshot)
+	if !ok {
+		t.Fatalf("Execute(write) read_state type = %T", result.Meta["read_state"])
+	}
+	if len(snapshot.Files) != 2 {
+		t.Fatalf("Execute(write) len(read_state.Files) = %d, want 2", len(snapshot.Files))
+	}
+	if _, ok := snapshot.Lookup("/tmp/project/read-a.go"); !ok {
+		t.Fatal("Execute(write) missing read state for /tmp/project/read-a.go")
+	}
+	if _, ok := snapshot.Lookup("/tmp/project/read-b.go"); !ok {
+		t.Fatal("Execute(write) missing read state for /tmp/project/read-b.go")
 	}
 }
 

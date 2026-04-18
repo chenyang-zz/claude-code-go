@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
@@ -25,6 +26,8 @@ type Engine interface {
 // ToolExecutor resolves one normalized tool call for the runtime loop.
 type ToolExecutor interface {
 	Execute(ctx context.Context, call coretool.Call) (coretool.Result, error)
+	// IsConcurrencySafe reports whether the named tool may run in parallel with other safe tools.
+	IsConcurrencySafe(toolName string) bool
 }
 
 // Runtime is the minimum single-turn text engine used by batch-07.
@@ -41,16 +44,19 @@ type Runtime struct {
 	ApprovalService approval.Service
 	// MaxToolIterations caps the number of tool-result feedback loops per runtime turn.
 	MaxToolIterations int
+	// MaxConcurrentToolCalls caps the number of concurrency-safe tool calls that may execute in parallel within one batch.
+	MaxConcurrentToolCalls int
 }
 
 // New builds the minimum single-turn engine.
 func New(client model.Client, defaultModel string, executor ToolExecutor, tools ...model.ToolDefinition) *Runtime {
 	return &Runtime{
-		Client:            client,
-		DefaultModel:      defaultModel,
-		ToolCatalog:       append([]model.ToolDefinition(nil), tools...),
-		Executor:          executor,
-		MaxToolIterations: 8,
+		Client:                 client,
+		DefaultModel:           defaultModel,
+		ToolCatalog:            append([]model.ToolDefinition(nil), tools...),
+		Executor:               executor,
+		MaxToolIterations:      8,
+		MaxConcurrentToolCalls: 10,
 	}
 }
 
@@ -200,34 +206,88 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, out chan<- event.
 	return assistant, toolUses, nil
 }
 
-// executeToolUses resolves one serial batch of tool calls and converts the results into a single tool_result message.
+// executeToolUses resolves one tool batch sequence and converts the results into one tool_result message.
 func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse, out chan<- event.Event) message.Message {
 	resultMessage := message.Message{Role: message.RoleUser}
 
-	for _, toolUse := range toolUses {
-		call := coretool.Call{
-			ID:     toolUse.ID,
-			Name:   toolUse.Name,
-			Input:  toolUse.Input,
-			Source: "model",
-		}
-		result, invokeErr := e.executeToolUse(ctx, call, out)
-
-		content, isError := renderToolResult(result, invokeErr)
-		resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(toolUse.ID, content, isError))
-		out <- event.Event{
-			Type:      event.TypeToolCallFinished,
-			Timestamp: time.Now(),
-			Payload: event.ToolResultPayload{
-				ID:      toolUse.ID,
-				Name:    toolUse.Name,
-				Output:  content,
-				IsError: isError,
-			},
+	batches := partitionToolUses(toolUses, e.Executor)
+	for _, batch := range batches {
+		outcomes := e.executeToolBatch(ctx, batch, out)
+		for _, outcome := range outcomes {
+			content, isError := renderToolResult(outcome.result, outcome.invokeErr)
+			resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(outcome.toolUse.ID, content, isError))
+			out <- event.Event{
+				Type:      event.TypeToolCallFinished,
+				Timestamp: time.Now(),
+				Payload: event.ToolResultPayload{
+					ID:      outcome.toolUse.ID,
+					Name:    outcome.toolUse.Name,
+					Output:  content,
+					IsError: isError,
+				},
+			}
 		}
 	}
 
 	return resultMessage
+}
+
+// executeToolBatch resolves one partitioned batch either serially or with bounded concurrency.
+func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch, out chan<- event.Event) []toolExecutionOutcome {
+	if len(batch.toolUses) == 0 {
+		return nil
+	}
+	if !batch.concurrencySafe || len(batch.toolUses) == 1 {
+		outcomes := make([]toolExecutionOutcome, 0, len(batch.toolUses))
+		for _, toolUse := range batch.toolUses {
+			call := coretool.Call{
+				ID:     toolUse.ID,
+				Name:   toolUse.Name,
+				Input:  toolUse.Input,
+				Source: "model",
+			}
+			result, invokeErr := e.executeToolUse(ctx, call, out)
+			outcomes = append(outcomes, toolExecutionOutcome{
+				toolUse:   toolUse,
+				result:    result,
+				invokeErr: invokeErr,
+			})
+		}
+		return outcomes
+	}
+
+	logger.DebugCF("engine", "executing concurrency-safe tool batch", map[string]any{
+		"tool_count":      len(batch.toolUses),
+		"max_concurrency": e.maxConcurrentToolCalls(),
+	})
+
+	outcomes := make([]toolExecutionOutcome, len(batch.toolUses))
+	sem := make(chan struct{}, e.maxConcurrentToolCalls())
+	var wg sync.WaitGroup
+	for idx, toolUse := range batch.toolUses {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(index int, pending model.ToolUse) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			call := coretool.Call{
+				ID:     pending.ID,
+				Name:   pending.Name,
+				Input:  pending.Input,
+				Source: "model",
+			}
+			result, invokeErr := e.executeToolUse(ctx, call, out)
+			outcomes[index] = toolExecutionOutcome{
+				toolUse:   pending,
+				result:    result,
+				invokeErr: invokeErr,
+			}
+		}(idx, toolUse)
+	}
+	wg.Wait()
+	return outcomes
 }
 
 // executeToolUse resolves one tool call and branches into the approval flow when the tool is blocked by a permission ask.
@@ -349,6 +409,14 @@ func (e *Runtime) maxToolIterations() int {
 		return 8
 	}
 	return e.MaxToolIterations
+}
+
+// maxConcurrentToolCalls returns the configured per-batch concurrency cap for safe tool calls.
+func (e *Runtime) maxConcurrentToolCalls() int {
+	if e == nil || e.MaxConcurrentToolCalls <= 0 {
+		return 10
+	}
+	return e.MaxConcurrentToolCalls
 }
 
 // DescribeTools converts a tool registry into provider-facing tool definitions.
