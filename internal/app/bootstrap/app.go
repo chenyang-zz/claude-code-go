@@ -162,7 +162,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
 		return nil, err
 	}
-	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy)...)
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions)...)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +323,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 		}
 		policy.AddReadRoot(expanded)
 	}
-	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy)
+	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions)
 	if err != nil {
 		return nil, nil, err
 	}

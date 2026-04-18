@@ -1,9 +1,12 @@
 package wiring
 
 import (
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/bash"
 	fileedit "github.com/sheepzhao/claude-code-go/internal/services/tools/file_edit"
 	fileread "github.com/sheepzhao/claude-code-go/internal/services/tools/file_read"
 	filewrite "github.com/sheepzhao/claude-code-go/internal/services/tools/file_write"
@@ -32,13 +35,14 @@ func NewModules(tools ...tool.Tool) (Modules, error) {
 }
 
 // NewBaseWorkspaceModules wires the base workspace exploration and editing tools into one registry.
-func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy) (Modules, error) {
-	return NewModules(BaseWorkspaceTools(fs, policy)...)
+func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig) (Modules, error) {
+	return NewModules(BaseWorkspaceTools(fs, policy, permissions)...)
 }
 
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
-func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy) []tool.Tool {
+func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig) []tool.Tool {
 	return []tool.Tool{
+		bash.NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(permissions)),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
 		fileread.NewTool(fs, policy),
