@@ -662,7 +662,7 @@ func TestRunnerRunPlanCommandReportsFallback(t *testing.T) {
 	}
 }
 
-// TestRunnerRunTasksCommandReportsFallback verifies /tasks is routed through the shared registry and emits the stable guidance fallback.
+// TestRunnerRunTasksCommandReportsFallback verifies /tasks is routed through the shared registry and emits the stable empty-state guidance.
 func TestRunnerRunTasksCommandReportsFallback(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
@@ -673,7 +673,7 @@ func TestRunnerRunTasksCommandReportsFallback(t *testing.T) {
 		t.Fatalf("Run(/tasks) error = %v", err)
 	}
 
-	want := "Background task management is not available in Claude Code Go yet. Background task listing, status inspection, cancellation, and interactive task controls remain unmigrated.\n"
+	want := "No background tasks are running.\nBackground task controls are not available in Claude Code Go yet.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/tasks) output = %q, want %q", got, want)
 	}
@@ -854,13 +854,17 @@ func TestRunnerRunStatusCommandReportsFallback(t *testing.T) {
 	var buf bytes.Buffer
 	eng := &recordingEngine{}
 	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
-	registerSlashCommands(t, runner, servicecommands.StatusCommand{})
+	registerSlashCommands(t, runner, servicecommands.StatusCommand{
+		LookPath: func(string) (string, error) {
+			return "", os.ErrNotExist
+		},
+	})
 
 	if err := runner.Run(context.Background(), []string{"/status"}); err != nil {
 		t.Fatalf("Run(/status) error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: (not set)\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Account auth: missing auth credential; interactive account status is not available\n- API base URL: default\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet\n"
+	want := "Status summary:\n- Provider: (not set)\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: missing auth credential; interactive account status is not available\n- API key source: not configured\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: project path not configured\n- Installation health: ripgrep missing from PATH\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/status) output = %q, want %q", got, want)
 	}

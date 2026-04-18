@@ -31,10 +31,14 @@ func TestPermissionsCommandExecuteRendersSummary(t *testing.T) {
 		Config: coreconfig.Config{
 			ApprovalMode: "default",
 			Permissions: coreconfig.PermissionConfig{
-				DefaultMode:                  "plan",
-				Allow:                        []string{"Bash(ls)", "Read(src/**)"},
-				Deny:                         []string{"Bash(rm -rf)"},
-				Ask:                          []string{"Edit(*)"},
+				DefaultMode: "plan",
+				Allow:       []string{"Bash(ls)", "Read(src/**)"},
+				Deny:        []string{"Bash(rm -rf)"},
+				Ask:         []string{"Edit(*)"},
+				AdditionalDirectoryEntries: []coreconfig.AdditionalDirectoryConfig{
+					{Path: "packages/app", Source: coreconfig.AdditionalDirectorySourceProjectSettings},
+					{Path: "docs", Source: coreconfig.AdditionalDirectorySourceSession},
+				},
 				AdditionalDirectories:        []string{"packages/app", "docs"},
 				DisableBypassPermissionsMode: "disable",
 			},
@@ -44,7 +48,7 @@ func TestPermissionsCommandExecuteRendersSummary(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Permission settings:\n- Default mode: plan\n- Disable bypass-permissions mode: enabled\n- Allow rules: Bash(ls), Read(src/**)\n- Deny rules: Bash(rm -rf)\n- Ask rules: Edit(*)\n- Additional directories: packages/app, docs\nRun /add-dir <path> to persist one extra working directory. Interactive permission rule editing is not available in the Go host yet."
+	want := "Permission settings:\n- Default mode: plan\n- Disable bypass-permissions mode: enabled\n- Allow rules: Bash(ls), Read(src/**)\n- Deny rules: Bash(rm -rf)\n- Ask rules: Edit(*)\n- Additional directories: packages/app (projectSettings), docs (session)\nRun /add-dir <path> to persist one extra working directory. Interactive permission rule editing is not available in the Go host yet."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

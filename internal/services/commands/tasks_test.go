@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 )
 
 // TestTasksCommandMetadata verifies /tasks is exposed with the expected canonical descriptor.
@@ -24,13 +26,44 @@ func TestTasksCommandMetadata(t *testing.T) {
 	}
 }
 
-// TestTasksCommandExecute verifies /tasks returns the stable fallback guidance.
+// TestTasksCommandExecute verifies /tasks reports the stable empty-state guidance when no task snapshots exist.
 func TestTasksCommandExecute(t *testing.T) {
-	result, err := TasksCommand{}.Execute(context.Background(), command.Args{})
+	result, err := TasksCommand{TaskStore: runtimesession.NewBackgroundTaskStore()}.Execute(context.Background(), command.Args{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if result.Output != tasksCommandFallback {
-		t.Fatalf("Execute() output = %q, want %q", result.Output, tasksCommandFallback)
+	if result.Output != tasksCommandEmptyState {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, tasksCommandEmptyState)
+	}
+}
+
+// TestTasksCommandExecuteWithTasks verifies /tasks renders the minimum task list summary from the shared runtime store.
+func TestTasksCommandExecuteWithTasks(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	store.Replace([]coresession.BackgroundTaskSnapshot{
+		{
+			ID:                "task-1",
+			Type:              "shell",
+			Status:            coresession.BackgroundTaskStatusRunning,
+			Summary:           "build watcher",
+			ControlsAvailable: false,
+		},
+		{
+			ID:                "task-2",
+			Type:              "agent",
+			Status:            coresession.BackgroundTaskStatusPending,
+			Summary:           "code review draft",
+			ControlsAvailable: false,
+		},
+	})
+
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Background tasks: 2\n- shell: running - build watcher\n- agent: pending - code review draft\nTask listing is available, but stop/resume controls are not migrated yet."
+	if result.Output != want {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
 }

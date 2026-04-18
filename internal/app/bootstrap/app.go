@@ -83,7 +83,6 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		runner.SessionManager = manager
 		runner.AutoSave = runtimesession.NewAutoSave(manager)
 	}
-
 	var globalSettingsStore *platformconfig.GlobalSettingsStore
 	var projectSettingsStore *platformconfig.ProjectSettingsStore
 	var localSettingsStore *platformconfig.LocalSettingsStore
@@ -115,6 +114,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
 func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
+	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
 		sessionRepository = runner.SessionManager.Repository
@@ -217,7 +217,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.PlanCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.TasksCommand{}); err != nil {
+	if err := registry.Register(servicecommands.TasksCommand{TaskStore: backgroundTaskStore}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.DiffCommand{}); err != nil {

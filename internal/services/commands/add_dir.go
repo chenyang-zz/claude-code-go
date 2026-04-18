@@ -101,6 +101,7 @@ func (c AddDirCommand) ResolveDirectory(requested string) (string, error) {
 // ApplyDirectory expands the active permission scope and optionally persists the directory based on the chosen destination.
 func (c AddDirCommand) ApplyDirectory(ctx context.Context, absolutePath string, destination AddDirDestination) (command.Result, error) {
 	projectPath := ""
+	directorySource := coreconfig.AdditionalDirectorySourceSession
 	if c.Config != nil {
 		projectPath = c.Config.ProjectPath
 	}
@@ -109,6 +110,7 @@ func (c AddDirCommand) ApplyDirectory(ctx context.Context, absolutePath string, 
 	case AddDirDestinationSession:
 		// Session-only directories intentionally stay in-memory.
 	case AddDirDestinationLocalSettings:
+		directorySource = coreconfig.AdditionalDirectorySourceLocalSettings
 		if c.LocalStore == nil {
 			return command.Result{}, fmt.Errorf("local settings storage is not configured")
 		}
@@ -119,8 +121,8 @@ func (c AddDirCommand) ApplyDirectory(ctx context.Context, absolutePath string, 
 		return command.Result{}, fmt.Errorf("unsupported add-dir destination %q", destination)
 	}
 
-	if c.Config != nil && !addDirContainsString(c.Config.Permissions.AdditionalDirectories, absolutePath) {
-		c.Config.Permissions.AdditionalDirectories = append(c.Config.Permissions.AdditionalDirectories, absolutePath)
+	if c.Config != nil {
+		addDirUpsertAdditionalDirectory(&c.Config.Permissions, absolutePath, directorySource)
 	}
 	if c.Policy != nil {
 		c.Policy.AddReadRoot(absolutePath)
@@ -159,7 +161,11 @@ func addDirWorkingRoots(projectPath string, cfg *coreconfig.Config) ([]string, e
 		return roots, nil
 	}
 
-	for _, configured := range cfg.Permissions.AdditionalDirectories {
+	configuredDirectories := cfg.Permissions.AdditionalDirectories
+	if len(cfg.Permissions.AdditionalDirectoryEntries) > 0 {
+		configuredDirectories = coreconfig.AdditionalDirectoryPaths(cfg.Permissions.AdditionalDirectoryEntries)
+	}
+	for _, configured := range configuredDirectories {
 		expanded, err := platformfs.ExpandPath(configured, projectPath)
 		if err != nil {
 			return nil, fmt.Errorf("expand configured additional directory %q: %w", configured, err)
@@ -188,4 +194,17 @@ func addDirPathWithinRoot(root string, target string) bool {
 
 func addDirContainsString(values []string, target string) bool {
 	return slices.Contains(values, target)
+}
+
+// addDirUpsertAdditionalDirectory keeps the legacy path list and the sourced directory list in sync.
+func addDirUpsertAdditionalDirectory(cfg *coreconfig.PermissionConfig, path string, source coreconfig.AdditionalDirectorySource) {
+	if cfg == nil || addDirContainsString(cfg.AdditionalDirectories, path) {
+		return
+	}
+
+	cfg.AdditionalDirectories = append(cfg.AdditionalDirectories, path)
+	cfg.AdditionalDirectoryEntries = append(cfg.AdditionalDirectoryEntries, coreconfig.AdditionalDirectoryConfig{
+		Path:   path,
+		Source: source,
+	})
 }

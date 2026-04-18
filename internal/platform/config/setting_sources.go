@@ -17,6 +17,8 @@ const (
 	SettingSourceLocalSettings SettingSource = "localSettings"
 	// SettingSourceFlagSettings identifies the explicit `--settings` CLI override source.
 	SettingSourceFlagSettings SettingSource = "flagSettings"
+	// SettingSourcePolicySettings identifies enterprise-managed settings loaded from the managed settings layer.
+	SettingSourcePolicySettings SettingSource = "policySettings"
 )
 
 // DefaultSettingSources returns the default on-disk settings source order used when no CLI filter is provided.

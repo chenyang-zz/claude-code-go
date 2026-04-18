@@ -37,6 +37,7 @@ func Merge(base, override Config) Config {
 	if len(override.LoadedSettingSources) > 0 {
 		base.LoadedSettingSources = append([]string(nil), override.LoadedSettingSources...)
 	}
+	base.PolicySettings = mergePolicySettingsConfig(base.PolicySettings, override.PolicySettings)
 	if override.APIKeySource != "" {
 		base.APIKeySource = override.APIKeySource
 	}
@@ -111,11 +112,34 @@ func mergePermissionConfig(base, override PermissionConfig) PermissionConfig {
 	if len(override.Ask) > 0 {
 		base.Ask = append([]string(nil), override.Ask...)
 	}
-	if len(override.AdditionalDirectories) > 0 {
+	if len(override.AdditionalDirectoryEntries) > 0 {
+		base.AdditionalDirectoryEntries = cloneAdditionalDirectoryEntries(override.AdditionalDirectoryEntries)
+		base.AdditionalDirectories = AdditionalDirectoryPaths(base.AdditionalDirectoryEntries)
+	} else if len(override.AdditionalDirectories) > 0 {
 		base.AdditionalDirectories = append([]string(nil), override.AdditionalDirectories...)
 	}
 	if override.DisableBypassPermissionsMode != "" {
 		base.DisableBypassPermissionsMode = override.DisableBypassPermissionsMode
+	}
+	return base
+}
+
+// cloneAdditionalDirectoryEntries copies sourced directory entries so later merges cannot mutate prior snapshots.
+func cloneAdditionalDirectoryEntries(entries []AdditionalDirectoryConfig) []AdditionalDirectoryConfig {
+	if len(entries) == 0 {
+		return nil
+	}
+	cloned := make([]AdditionalDirectoryConfig, len(entries))
+	copy(cloned, entries)
+	return cloned
+}
+
+// mergePolicySettingsConfig overlays managed-settings source metadata when a higher-priority layer provides it.
+func mergePolicySettingsConfig(base, override PolicySettingsConfig) PolicySettingsConfig {
+	if override.Origin != "" {
+		base.Origin = override.Origin
+		base.HasBaseFile = override.HasBaseFile
+		base.HasDropIns = override.HasDropIns
 	}
 	return base
 }

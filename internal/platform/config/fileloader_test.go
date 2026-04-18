@@ -215,6 +215,12 @@ func TestFileLoaderLoadLocalSettingsOverrideProject(t *testing.T) {
 	if len(cfg.Permissions.AdditionalDirectories) != 1 || cfg.Permissions.AdditionalDirectories[0] != "packages/local" {
 		t.Fatalf("Load() permissions.additionalDirectories = %#v, want packages/local", cfg.Permissions.AdditionalDirectories)
 	}
+	if len(cfg.Permissions.AdditionalDirectoryEntries) != 1 {
+		t.Fatalf("Load() permissions.additionalDirectoryEntries = %#v, want one entry", cfg.Permissions.AdditionalDirectoryEntries)
+	}
+	if cfg.Permissions.AdditionalDirectoryEntries[0].Path != "packages/local" || cfg.Permissions.AdditionalDirectoryEntries[0].Source != coreconfig.AdditionalDirectorySourceLocalSettings {
+		t.Fatalf("Load() permissions.additionalDirectoryEntries[0] = %#v, want localSettings packages/local", cfg.Permissions.AdditionalDirectoryEntries[0])
+	}
 }
 
 // TestFileLoaderLoadDefaultsSessionDBPath verifies the loader derives a stable default session DB path from the home directory.

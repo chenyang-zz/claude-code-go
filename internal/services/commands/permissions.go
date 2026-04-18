@@ -43,7 +43,7 @@ func (c PermissionsCommand) Execute(ctx context.Context, args command.Args) (com
 		fmt.Sprintf("- Allow rules: %s", permissionsListSummary(c.Config.Permissions.Allow)),
 		fmt.Sprintf("- Deny rules: %s", permissionsListSummary(c.Config.Permissions.Deny)),
 		fmt.Sprintf("- Ask rules: %s", permissionsListSummary(c.Config.Permissions.Ask)),
-		fmt.Sprintf("- Additional directories: %s", permissionsListSummary(c.Config.Permissions.AdditionalDirectories)),
+		fmt.Sprintf("- Additional directories: %s", permissionsAdditionalDirectoriesSummary(c.Config.Permissions)),
 		"Run /add-dir <path> to persist one extra working directory. Interactive permission rule editing is not available in the Go host yet.",
 	}
 
@@ -76,4 +76,45 @@ func permissionsListSummary(values []string) string {
 		return "(none)"
 	}
 	return strings.Join(values, ", ")
+}
+
+// permissionsAdditionalDirectoriesSummary renders extra working directories together with their effective source when available.
+func permissionsAdditionalDirectoriesSummary(cfg coreconfig.PermissionConfig) string {
+	if len(cfg.AdditionalDirectoryEntries) == 0 {
+		return permissionsListSummary(cfg.AdditionalDirectories)
+	}
+
+	items := make([]string, 0, len(cfg.AdditionalDirectoryEntries))
+	for _, entry := range cfg.AdditionalDirectoryEntries {
+		path := strings.TrimSpace(entry.Path)
+		if path == "" {
+			continue
+		}
+		source := permissionsAdditionalDirectorySourceLabel(entry.Source)
+		if source == "" {
+			items = append(items, path)
+			continue
+		}
+		items = append(items, fmt.Sprintf("%s (%s)", path, source))
+	}
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
+}
+
+// permissionsAdditionalDirectorySourceLabel normalizes directory source labels for stable text output.
+func permissionsAdditionalDirectorySourceLabel(source coreconfig.AdditionalDirectorySource) string {
+	switch source {
+	case coreconfig.AdditionalDirectorySourceUserSettings:
+		return "userSettings"
+	case coreconfig.AdditionalDirectorySourceProjectSettings:
+		return "projectSettings"
+	case coreconfig.AdditionalDirectorySourceLocalSettings:
+		return "localSettings"
+	case coreconfig.AdditionalDirectorySourceSession:
+		return "session"
+	default:
+		return ""
+	}
 }

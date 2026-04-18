@@ -35,6 +35,8 @@ type Config struct {
 	APIBaseURL string
 	// LoadedSettingSources lists the migrated settings layers that actually participated in config loading.
 	LoadedSettingSources []string
+	// PolicySettings stores the minimum managed-settings source metadata surfaced by `/status`.
+	PolicySettings PolicySettingsConfig
 	// APIKeySource stores the environment key that supplied the effective API key when one is configured.
 	APIKeySource string
 	// AuthTokenSource stores the environment key that supplied the effective auth token when one is configured.
@@ -69,6 +71,24 @@ type Config struct {
 	Permissions PermissionConfig
 }
 
+// PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.
+type PolicySettingsOrigin string
+
+const (
+	// PolicySettingsOriginFile identifies file-based managed settings loaded from managed-settings.json and drop-ins.
+	PolicySettingsOriginFile PolicySettingsOrigin = "file"
+)
+
+// PolicySettingsConfig stores the minimum managed settings metadata needed by `/status`.
+type PolicySettingsConfig struct {
+	// Origin identifies which managed settings channel produced the effective policy layer.
+	Origin PolicySettingsOrigin
+	// HasBaseFile reports whether managed-settings.json contributed non-empty settings.
+	HasBaseFile bool
+	// HasDropIns reports whether managed-settings.d/*.json files were discovered.
+	HasDropIns bool
+}
+
 // RemoteSessionConfig stores the minimum runtime context needed by the Go host's remote-mode surfaces.
 type RemoteSessionConfig struct {
 	// Enabled reports whether bootstrap accepted `--remote` for this process.
@@ -93,6 +113,8 @@ type PermissionConfig struct {
 	Ask []string
 	// AdditionalDirectories lists extra directories included in permission scope.
 	AdditionalDirectories []string
+	// AdditionalDirectoryEntries tracks extra working directories together with their effective source.
+	AdditionalDirectoryEntries []AdditionalDirectoryConfig
 	// DisableBypassPermissionsMode preserves the literal disable marker when bypass mode is turned off.
 	DisableBypassPermissionsMode string
 }
@@ -124,6 +146,73 @@ type OAuthAccountConfig struct {
 	OrganizationUUID string
 	// OrganizationName stores the cached Claude organization display name.
 	OrganizationName string
+}
+
+// AdditionalDirectorySource identifies where one effective extra working directory came from.
+type AdditionalDirectorySource string
+
+const (
+	// AdditionalDirectorySourceUserSettings marks directories loaded from user settings.
+	AdditionalDirectorySourceUserSettings AdditionalDirectorySource = "userSettings"
+	// AdditionalDirectorySourceProjectSettings marks directories loaded from project settings.
+	AdditionalDirectorySourceProjectSettings AdditionalDirectorySource = "projectSettings"
+	// AdditionalDirectorySourceLocalSettings marks directories loaded from local settings.
+	AdditionalDirectorySourceLocalSettings AdditionalDirectorySource = "localSettings"
+	// AdditionalDirectorySourcePolicySettings marks directories loaded from managed policy settings.
+	AdditionalDirectorySourcePolicySettings AdditionalDirectorySource = "policySettings"
+	// AdditionalDirectorySourceSession marks directories added only for the current process session.
+	AdditionalDirectorySourceSession AdditionalDirectorySource = "session"
+)
+
+// AdditionalDirectoryConfig stores one effective extra working directory together with its source label.
+type AdditionalDirectoryConfig struct {
+	// Path stores the stable directory path used by the current runtime snapshot.
+	Path string
+	// Source records which settings layer or runtime path contributed the directory.
+	Source AdditionalDirectorySource
+}
+
+// NewAdditionalDirectoryConfigs tags one string directory list with a stable source label.
+func NewAdditionalDirectoryConfigs(paths []string, source AdditionalDirectorySource) []AdditionalDirectoryConfig {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	entries := make([]AdditionalDirectoryConfig, 0, len(paths))
+	for _, path := range paths {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			continue
+		}
+		entries = append(entries, AdditionalDirectoryConfig{
+			Path:   trimmed,
+			Source: source,
+		})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return entries
+}
+
+// AdditionalDirectoryPaths extracts the path list from one sourced directory slice.
+func AdditionalDirectoryPaths(entries []AdditionalDirectoryConfig) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		trimmed := strings.TrimSpace(entry.Path)
+		if trimmed == "" {
+			continue
+		}
+		paths = append(paths, trimmed)
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	return paths
 }
 
 const remoteSessionBaseURL = "https://claude.ai"

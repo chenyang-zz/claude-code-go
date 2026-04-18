@@ -19,8 +19,14 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			OrganizationName: "Base Org",
 		},
 		Permissions: PermissionConfig{
-			DefaultMode:           "default",
-			Allow:                 []string{"Bash(ls)"},
+			DefaultMode: "default",
+			Allow:       []string{"Bash(ls)"},
+			AdditionalDirectoryEntries: []AdditionalDirectoryConfig{
+				{
+					Path:   "packages/base",
+					Source: AdditionalDirectorySourceProjectSettings,
+				},
+			},
 			AdditionalDirectories: []string{"packages/base"},
 		},
 	}
@@ -37,9 +43,15 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			OrganizationUUID: "org-123",
 		},
 		Permissions: PermissionConfig{
-			DefaultMode:                  "plan",
-			Deny:                         []string{"Bash(rm -rf)"},
-			Ask:                          []string{"Edit(*)"},
+			DefaultMode: "plan",
+			Deny:        []string{"Bash(rm -rf)"},
+			Ask:         []string{"Edit(*)"},
+			AdditionalDirectoryEntries: []AdditionalDirectoryConfig{
+				{
+					Path:   "packages/feature",
+					Source: AdditionalDirectorySourceLocalSettings,
+				},
+			},
 			AdditionalDirectories:        []string{"packages/feature"},
 			DisableBypassPermissionsMode: "disable",
 		},
@@ -61,10 +73,16 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			OrganizationName: "Base Org",
 		},
 		Permissions: PermissionConfig{
-			DefaultMode:                  "plan",
-			Allow:                        []string{"Bash(ls)"},
-			Deny:                         []string{"Bash(rm -rf)"},
-			Ask:                          []string{"Edit(*)"},
+			DefaultMode: "plan",
+			Allow:       []string{"Bash(ls)"},
+			Deny:        []string{"Bash(rm -rf)"},
+			Ask:         []string{"Edit(*)"},
+			AdditionalDirectoryEntries: []AdditionalDirectoryConfig{
+				{
+					Path:   "packages/feature",
+					Source: AdditionalDirectorySourceLocalSettings,
+				},
+			},
 			AdditionalDirectories:        []string{"packages/feature"},
 			DisableBypassPermissionsMode: "disable",
 		},

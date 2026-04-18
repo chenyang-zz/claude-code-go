@@ -76,6 +76,13 @@ func TestAddDirCommandExecutePersistsDirectory(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Permissions.AdditionalDirectories, []string{wantPath}) {
 		t.Fatalf("config additional directories = %#v, want %#v", cfg.Permissions.AdditionalDirectories, []string{wantPath})
 	}
+	wantEntries := []coreconfig.AdditionalDirectoryConfig{{
+		Path:   wantPath,
+		Source: coreconfig.AdditionalDirectorySourceLocalSettings,
+	}}
+	if !reflect.DeepEqual(cfg.Permissions.AdditionalDirectoryEntries, wantEntries) {
+		t.Fatalf("config additional directory entries = %#v, want %#v", cfg.Permissions.AdditionalDirectoryEntries, wantEntries)
+	}
 	evaluation := policy.CheckReadPermissionForTool(context.Background(), "file_read", filepath.Join(wantPath, "README.md"), projectDir)
 	if evaluation.Decision != corepermission.DecisionAllow {
 		t.Fatalf("policy decision = %q, want allow", evaluation.Decision)
@@ -169,6 +176,13 @@ func TestAddDirCommandApplyDirectorySessionOnly(t *testing.T) {
 	}
 	if len(store.saved) != 0 {
 		t.Fatalf("saved directories = %#v, want none for session-only", store.saved)
+	}
+	wantEntries := []coreconfig.AdditionalDirectoryConfig{{
+		Path:   extraDir,
+		Source: coreconfig.AdditionalDirectorySourceSession,
+	}}
+	if !reflect.DeepEqual(cfg.Permissions.AdditionalDirectoryEntries, wantEntries) {
+		t.Fatalf("config additional directory entries = %#v, want %#v", cfg.Permissions.AdditionalDirectoryEntries, wantEntries)
 	}
 	if got := policy.CheckReadPermissionForTool(context.Background(), "file_read", filepath.Join(extraDir, "README.md"), projectDir).Decision; got != corepermission.DecisionAllow {
 		t.Fatalf("policy decision = %q, want allow", got)

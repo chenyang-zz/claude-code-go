@@ -91,7 +91,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	sourceEnvs := map[SettingSource]map[string]string{}
 	loadedSettingSources := make([]string, 0, 4)
 	for _, candidate := range l.settingsPathCandidates() {
-		fileCfg, loaded, err := l.loadSettingsFile(candidate.Path)
+		fileCfg, loaded, err := l.loadSettingsFile(candidate)
 		if err != nil {
 			return coreconfig.Config{}, err
 		}
@@ -261,16 +261,16 @@ func (l *FileLoader) allowedSettingSources() []SettingSource {
 }
 
 // loadSettingsFile extracts the minimal runtime fields currently consumed by the Go host.
-func (l *FileLoader) loadSettingsFile(path string) (coreconfig.Config, bool, error) {
-	data, err := os.ReadFile(path)
+func (l *FileLoader) loadSettingsFile(candidate settingsPathCandidate) (coreconfig.Config, bool, error) {
+	data, err := os.ReadFile(candidate.Path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return coreconfig.Config{}, false, nil
 		}
-		return coreconfig.Config{}, false, fmt.Errorf("read settings file %s: %w", path, err)
+		return coreconfig.Config{}, false, fmt.Errorf("read settings file %s: %w", candidate.Path, err)
 	}
 
-	cfg, parseErr := parseSettingsConfig(data, path)
+	cfg, parseErr := parseSettingsConfig(data, candidate.Path, candidate.Source)
 	if parseErr != nil {
 		return coreconfig.Config{}, false, parseErr
 	}
@@ -287,7 +287,7 @@ func (l *FileLoader) loadFlagSettings(value string) (coreconfig.Config, error) {
 		logger.DebugCF("runtime_config", "loading flag settings from inline json", map[string]any{
 			"source": "flag_json",
 		})
-		return parseSettingsConfig([]byte(trimmed), "--settings inline JSON")
+		return parseSettingsConfig([]byte(trimmed), "--settings inline JSON", SettingSourceFlagSettings)
 	}
 
 	path := trimmed
@@ -303,15 +303,20 @@ func (l *FileLoader) loadFlagSettings(value string) (coreconfig.Config, error) {
 	if err != nil {
 		return coreconfig.Config{}, fmt.Errorf("read settings file %s: %w", path, err)
 	}
-	return parseSettingsConfig(data, path)
+	return parseSettingsConfig(data, path, SettingSourceFlagSettings)
 }
 
 // parseSettingsConfig unmarshals the migrated settings subset and normalizes it into the runtime config model.
-func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) {
+func parseSettingsConfig(data []byte, source string, settingSource SettingSource) (coreconfig.Config, error) {
 	var parsed settingsFile
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return coreconfig.Config{}, fmt.Errorf("parse settings file %s: %w", source, err)
 	}
+
+	directoryEntries := coreconfig.NewAdditionalDirectoryConfigs(
+		parsed.Permissions.AdditionalDirectories,
+		additionalDirectorySourceFromSettingSource(settingSource),
+	)
 
 	return coreconfig.Config{
 		Env:                   cloneStringMap(parsed.Env),
@@ -337,9 +342,24 @@ func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) 
 			Deny:                         append([]string(nil), parsed.Permissions.Deny...),
 			Ask:                          append([]string(nil), parsed.Permissions.Ask...),
 			AdditionalDirectories:        append([]string(nil), parsed.Permissions.AdditionalDirectories...),
+			AdditionalDirectoryEntries:   directoryEntries,
 			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
 		},
 	}, nil
+}
+
+// additionalDirectorySourceFromSettingSource maps one settings layer into the matching directory source label.
+func additionalDirectorySourceFromSettingSource(source SettingSource) coreconfig.AdditionalDirectorySource {
+	switch source {
+	case SettingSourceUserSettings:
+		return coreconfig.AdditionalDirectorySourceUserSettings
+	case SettingSourceLocalSettings:
+		return coreconfig.AdditionalDirectorySourceLocalSettings
+	case SettingSourceProjectSettings:
+		return coreconfig.AdditionalDirectorySourceProjectSettings
+	default:
+		return ""
+	}
 }
 
 // cloneStringMap copies one string map so later merges cannot mutate decoded settings data.
