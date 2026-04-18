@@ -9,6 +9,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -16,8 +17,14 @@ import (
 type DoctorCommand struct {
 	// Config carries the already-resolved runtime configuration snapshot.
 	Config coreconfig.Config
+	// ToolRegistry exposes the currently wired tool set for shared local host diagnostics.
+	ToolRegistry coretool.Registry
 	// Stat inspects local filesystem paths so tests can supply stable results.
 	Stat func(string) (os.FileInfo, error)
+	// ReadFile inspects memory files for shared local diagnostics.
+	ReadFile func(string) ([]byte, error)
+	// LookPath inspects host binaries for shared installation-health diagnostics.
+	LookPath func(string) (string, error)
 }
 
 // Metadata returns the canonical slash descriptor for /doctor.
@@ -45,6 +52,13 @@ func (c DoctorCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Session DB: %s", c.sessionDBDiagnosis()),
 	}
 	lines = append(lines, transportDiagnosticLines(c.Config)...)
+	lines = append(lines, localDiagnosticLines(LocalDiagnosticsOptions{
+		Config:       c.Config,
+		ToolRegistry: c.ToolRegistry,
+		Stat:         c.Stat,
+		ReadFile:     c.ReadFile,
+		LookPath:     c.LookPath,
+	})...)
 
 	logger.DebugCF("commands", "rendered doctor command output", map[string]any{
 		"provider":            c.Config.Provider,

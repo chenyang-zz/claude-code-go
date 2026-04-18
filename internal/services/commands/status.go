@@ -35,6 +35,10 @@ type StatusCommand struct {
 	APIProbe APIConnectivityProber
 	// Stat inspects local filesystem paths so tests can provide stable storage diagnostics.
 	Stat func(string) (os.FileInfo, error)
+	// ReadFile inspects memory files for shared local diagnostics.
+	ReadFile func(string) ([]byte, error)
+	// LookPath inspects host binaries for shared installation-health diagnostics.
+	LookPath func(string) (string, error)
 }
 
 // Metadata returns the canonical slash descriptor for /status.
@@ -68,6 +72,13 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- API base URL source: %s", statusBaseURLSource(c.Config)),
 	}
 	lines = append(lines, transportDiagnosticLines(c.Config)...)
+	lines = append(lines, localDiagnosticLines(LocalDiagnosticsOptions{
+		Config:       c.Config,
+		ToolRegistry: c.ToolRegistry,
+		Stat:         c.Stat,
+		ReadFile:     c.ReadFile,
+		LookPath:     c.LookPath,
+	})...)
 	lines = append(lines,
 		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),

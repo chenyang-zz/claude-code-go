@@ -162,7 +162,14 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.DoctorCommand{Config: dereferenceConfig(cfg)}); err != nil {
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy)...)
+	if err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.DoctorCommand{
+		Config:       dereferenceConfig(cfg),
+		ToolRegistry: statusToolRegistry.Tools,
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.PermissionsCommand{Config: dereferenceConfig(cfg)}); err != nil {
@@ -183,10 +190,6 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
-		return nil, err
-	}
-	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy)...)
-	if err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.StatusCommand{
