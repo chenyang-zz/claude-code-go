@@ -43,6 +43,7 @@ func Merge(base, override Config) Config {
 	if override.AuthTokenSource != "" {
 		base.AuthTokenSource = override.AuthTokenSource
 	}
+	base.OAuthAccount = mergeOAuthAccountConfig(base.OAuthAccount, override.OAuthAccount)
 	if override.APIBaseURLSource != "" {
 		base.APIBaseURLSource = override.APIBaseURLSource
 	}
@@ -115,6 +116,23 @@ func mergePermissionConfig(base, override PermissionConfig) PermissionConfig {
 	}
 	if override.DisableBypassPermissionsMode != "" {
 		base.DisableBypassPermissionsMode = override.DisableBypassPermissionsMode
+	}
+	return base
+}
+
+// mergeOAuthAccountConfig overlays the non-empty cached account metadata fields.
+func mergeOAuthAccountConfig(base, override OAuthAccountConfig) OAuthAccountConfig {
+	if override.AccountUUID != "" {
+		base.AccountUUID = override.AccountUUID
+	}
+	if override.EmailAddress != "" {
+		base.EmailAddress = override.EmailAddress
+	}
+	if override.OrganizationUUID != "" {
+		base.OrganizationUUID = override.OrganizationUUID
+	}
+	if override.OrganizationName != "" {
+		base.OrganizationName = override.OrganizationName
 	}
 	return base
 }

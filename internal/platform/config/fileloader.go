@@ -36,7 +36,13 @@ type settingsFile struct {
 	Provider      string            `json:"provider"`
 	SessionDBPath string            `json:"sessionDbPath"`
 	Env           map[string]string `json:"env"`
-	Permissions   struct {
+	OAuthAccount  struct {
+		AccountUUID      string `json:"accountUuid"`
+		EmailAddress     string `json:"emailAddress"`
+		OrganizationUUID string `json:"organizationUuid"`
+		OrganizationName string `json:"organizationName"`
+	} `json:"oauthAccount"`
+	Permissions struct {
 		DefaultMode                  string   `json:"defaultMode"`
 		Allow                        []string `json:"allow"`
 		Deny                         []string `json:"deny"`
@@ -319,6 +325,12 @@ func parseSettingsConfig(data []byte, source string) (coreconfig.Config, error) 
 		Provider:              coreconfig.NormalizeProvider(parsed.Provider),
 		ApprovalMode:          parsed.Permissions.DefaultMode,
 		SessionDBPath:         parsed.SessionDBPath,
+		OAuthAccount: coreconfig.OAuthAccountConfig{
+			AccountUUID:      strings.TrimSpace(parsed.OAuthAccount.AccountUUID),
+			EmailAddress:     strings.TrimSpace(parsed.OAuthAccount.EmailAddress),
+			OrganizationUUID: strings.TrimSpace(parsed.OAuthAccount.OrganizationUUID),
+			OrganizationName: strings.TrimSpace(parsed.OAuthAccount.OrganizationName),
+		},
 		Permissions: coreconfig.PermissionConfig{
 			DefaultMode:                  parsed.Permissions.DefaultMode,
 			Allow:                        append([]string(nil), parsed.Permissions.Allow...),

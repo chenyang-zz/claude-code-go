@@ -134,7 +134,7 @@ func TestStatusCommandExecute(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Login method: API key account\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -162,7 +162,7 @@ func TestStatusCommandExecuteWithAuthToken(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: Auth token configured; interactive account status is not available\n- API key source: not configured\n- Auth token source: ANTHROPIC_AUTH_TOKEN\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: Auth token configured; interactive account status is not available\n- API key source: not configured\n- Auth token source: ANTHROPIC_AUTH_TOKEN\n- API base URL: default\n- API base URL source: default\n- Login method: Auth token account\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -289,5 +289,37 @@ func TestStatusCommandExecuteWithTerminalIDE(t *testing.T) {
 
 	if !strings.Contains(result.Output, "- IDE: terminal session appears to be running inside Cursor") {
 		t.Fatalf("Execute() output = %q, want terminal IDE diagnostic", result.Output)
+	}
+}
+
+// TestStatusCommandExecuteWithOAuthAccount verifies /status renders cached account metadata when available.
+func TestStatusCommandExecuteWithOAuthAccount(t *testing.T) {
+	result, err := StatusCommand{
+		Config: coreconfig.Config{
+			Provider:        "anthropic",
+			ProjectPath:     "/repo/project",
+			AuthToken:       "auth-token",
+			AuthTokenSource: "ANTHROPIC_AUTH_TOKEN",
+			OAuthAccount: coreconfig.OAuthAccountConfig{
+				OrganizationName: "Example Org",
+				EmailAddress:     "user@example.com",
+			},
+		},
+		LookPath: func(string) (string, error) {
+			return "", errors.New("missing")
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "- Login method: Auth token account") {
+		t.Fatalf("Execute() output = %q, want login method line", result.Output)
+	}
+	if !strings.Contains(result.Output, "- Organization: Example Org") {
+		t.Fatalf("Execute() output = %q, want organization line", result.Output)
+	}
+	if !strings.Contains(result.Output, "- Email: user@example.com") {
+		t.Fatalf("Execute() output = %q, want email line", result.Output)
 	}
 }

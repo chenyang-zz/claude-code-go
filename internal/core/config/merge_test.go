@@ -14,6 +14,10 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			"SHARED":    "base",
 		},
 		AuthToken: "base-token",
+		OAuthAccount: OAuthAccountConfig{
+			AccountUUID:      "base-account",
+			OrganizationName: "Base Org",
+		},
 		Permissions: PermissionConfig{
 			DefaultMode:           "default",
 			Allow:                 []string{"Bash(ls)"},
@@ -28,6 +32,10 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			"LOCAL":  "1",
 		},
 		AuthToken: "override-token",
+		OAuthAccount: OAuthAccountConfig{
+			EmailAddress:     "user@example.com",
+			OrganizationUUID: "org-123",
+		},
 		Permissions: PermissionConfig{
 			DefaultMode:                  "plan",
 			Deny:                         []string{"Bash(rm -rf)"},
@@ -46,6 +54,12 @@ func TestMergeOverlaysPermissionConfig(t *testing.T) {
 			"LOCAL":     "1",
 		},
 		AuthToken: "override-token",
+		OAuthAccount: OAuthAccountConfig{
+			AccountUUID:      "base-account",
+			EmailAddress:     "user@example.com",
+			OrganizationUUID: "org-123",
+			OrganizationName: "Base Org",
+		},
 		Permissions: PermissionConfig{
 			DefaultMode:                  "plan",
 			Allow:                        []string{"Bash(ls)"},

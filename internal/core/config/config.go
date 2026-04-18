@@ -39,6 +39,8 @@ type Config struct {
 	APIKeySource string
 	// AuthTokenSource stores the environment key that supplied the effective auth token when one is configured.
 	AuthTokenSource string
+	// OAuthAccount stores the minimum cached Claude account metadata surfaced to `/status`.
+	OAuthAccount OAuthAccountConfig
 	// APIBaseURLSource stores the environment key that supplied the effective API base URL override.
 	APIBaseURLSource string
 	// ProxyURL stores the effective outbound proxy URL resolved from runtime environment variables.
@@ -110,6 +112,18 @@ func DefaultConfig() Config {
 			DefaultMode: "default",
 		},
 	}
+}
+
+// OAuthAccountConfig stores the minimum cached account metadata needed by `/status`.
+type OAuthAccountConfig struct {
+	// AccountUUID identifies the cached Claude account when available.
+	AccountUUID string
+	// EmailAddress stores the cached Claude account email address.
+	EmailAddress string
+	// OrganizationUUID identifies the cached Claude organization when available.
+	OrganizationUUID string
+	// OrganizationName stores the cached Claude organization display name.
+	OrganizationName string
 }
 
 const remoteSessionBaseURL = "https://claude.ai"

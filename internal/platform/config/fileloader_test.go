@@ -87,6 +87,43 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadOAuthAccount verifies the loader preserves the minimum cached oauthAccount metadata from settings.
+func TestFileLoaderLoadOAuthAccount(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(homeDir, ".claude", "settings.json"),
+		[]byte(`{"oauthAccount":{"accountUuid":"acct-123","emailAddress":"user@example.com","organizationUuid":"org-456","organizationName":"Example Org"}}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.OAuthAccount.AccountUUID != "acct-123" {
+		t.Fatalf("Load() oauthAccount.accountUuid = %q, want acct-123", cfg.OAuthAccount.AccountUUID)
+	}
+	if cfg.OAuthAccount.EmailAddress != "user@example.com" {
+		t.Fatalf("Load() oauthAccount.emailAddress = %q, want user@example.com", cfg.OAuthAccount.EmailAddress)
+	}
+	if cfg.OAuthAccount.OrganizationUUID != "org-456" {
+		t.Fatalf("Load() oauthAccount.organizationUuid = %q, want org-456", cfg.OAuthAccount.OrganizationUUID)
+	}
+	if cfg.OAuthAccount.OrganizationName != "Example Org" {
+		t.Fatalf("Load() oauthAccount.organizationName = %q, want Example Org", cfg.OAuthAccount.OrganizationName)
+	}
+}
+
 // TestFileLoaderLoadProjectThemeOverridesHome verifies project settings can override the home theme setting.
 func TestFileLoaderLoadProjectThemeOverridesHome(t *testing.T) {
 	tempDir := t.TempDir()

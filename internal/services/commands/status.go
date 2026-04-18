@@ -73,6 +73,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
 		fmt.Sprintf("- API base URL source: %s", statusBaseURLSource(c.Config)),
 	}
+	lines = append(lines, statusAccountMetadataLines(c.Config)...)
 	lines = append(lines, transportDiagnosticLines(c.Config)...)
 	lines = append(lines, localDiagnosticLines(LocalDiagnosticsOptions{
 		Config:       c.Config,
@@ -186,6 +187,40 @@ func statusAccountAuth(cfg coreconfig.Config) string {
 		return "Auth token configured; interactive account status is not available"
 	}
 	return "missing auth credential; interactive account status is not available"
+}
+
+// statusAccountMetadataLines renders the minimum cached account metadata surfaced by `/status`.
+func statusAccountMetadataLines(cfg coreconfig.Config) []string {
+	if coreconfig.NormalizeProvider(cfg.Provider) != coreconfig.ProviderAnthropic {
+		return nil
+	}
+
+	lines := []string{}
+	loginMethod := statusLoginMethod(cfg)
+	if loginMethod != "" {
+		lines = append(lines, fmt.Sprintf("- Login method: %s", loginMethod))
+	}
+	if organization := strings.TrimSpace(cfg.OAuthAccount.OrganizationName); organization != "" {
+		lines = append(lines, fmt.Sprintf("- Organization: %s", organization))
+	}
+	if email := strings.TrimSpace(cfg.OAuthAccount.EmailAddress); email != "" {
+		lines = append(lines, fmt.Sprintf("- Email: %s", email))
+	}
+	return lines
+}
+
+// statusLoginMethod renders the stable first-party account summary used by `/status`.
+func statusLoginMethod(cfg coreconfig.Config) string {
+	if coreconfig.NormalizeProvider(cfg.Provider) != coreconfig.ProviderAnthropic {
+		return ""
+	}
+	if strings.TrimSpace(cfg.AuthToken) != "" {
+		return "Auth token account"
+	}
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		return "API key account"
+	}
+	return ""
 }
 
 // statusProviderType renders the stable provider-family label used by `/status`.
