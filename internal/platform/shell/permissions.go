@@ -16,6 +16,8 @@ var bashRulePattern = regexp.MustCompile(`^\s*Bash\((.*)\)\s*$`)
 type PermissionEvaluation struct {
 	// Decision reports whether the command is allowed, denied, or still needs approval.
 	Decision corepermission.Decision
+	// NormalizedCommand stores the command string after the current minimal wrapper/env cleanup.
+	NormalizedCommand string
 	// Rule stores the matched Bash(...) rule string when one participated in the decision.
 	Rule string
 	// Message stores the stable caller-facing explanation for deny or ask outcomes.
@@ -46,8 +48,9 @@ func (c *PermissionChecker) Check(command string) PermissionEvaluation {
 	normalized := normalizeCommandForPermission(command)
 	if normalized == "" {
 		return PermissionEvaluation{
-			Decision: corepermission.DecisionAsk,
-			Message:  "Claude requested permissions to execute an empty command, but you haven't granted it yet.",
+			Decision:          corepermission.DecisionAsk,
+			NormalizedCommand: normalized,
+			Message:           "Claude requested permissions to execute an empty command, but you haven't granted it yet.",
 		}
 	}
 
@@ -57,9 +60,10 @@ func (c *PermissionChecker) Check(command string) PermissionEvaluation {
 			"rule":    rule.raw,
 		})
 		return PermissionEvaluation{
-			Decision: corepermission.DecisionDeny,
-			Rule:     rule.raw,
-			Message:  fmt.Sprintf("Permission to execute %q has been denied.", normalized),
+			Decision:          corepermission.DecisionDeny,
+			NormalizedCommand: normalized,
+			Rule:              rule.raw,
+			Message:           fmt.Sprintf("Permission to execute %q has been denied.", normalized),
 		}
 	}
 	if rule, ok := matchPermissionRule(c.ask, normalized); ok {
@@ -68,9 +72,10 @@ func (c *PermissionChecker) Check(command string) PermissionEvaluation {
 			"rule":    rule.raw,
 		})
 		return PermissionEvaluation{
-			Decision: corepermission.DecisionAsk,
-			Rule:     rule.raw,
-			Message:  fmt.Sprintf("Claude requested permissions to execute %q, but you haven't granted it yet.", normalized),
+			Decision:          corepermission.DecisionAsk,
+			NormalizedCommand: normalized,
+			Rule:              rule.raw,
+			Message:           fmt.Sprintf("Claude requested permissions to execute %q, but you haven't granted it yet.", normalized),
 		}
 	}
 	if rule, ok := matchPermissionRule(c.allow, normalized); ok {
@@ -79,8 +84,9 @@ func (c *PermissionChecker) Check(command string) PermissionEvaluation {
 			"rule":    rule.raw,
 		})
 		return PermissionEvaluation{
-			Decision: corepermission.DecisionAllow,
-			Rule:     rule.raw,
+			Decision:          corepermission.DecisionAllow,
+			NormalizedCommand: normalized,
+			Rule:              rule.raw,
 		}
 	}
 
@@ -88,8 +94,9 @@ func (c *PermissionChecker) Check(command string) PermissionEvaluation {
 		"command": normalized,
 	})
 	return PermissionEvaluation{
-		Decision: corepermission.DecisionAsk,
-		Message:  fmt.Sprintf("Claude requested permissions to execute %q, but you haven't granted it yet.", normalized),
+		Decision:          corepermission.DecisionAsk,
+		NormalizedCommand: normalized,
+		Message:           fmt.Sprintf("Claude requested permissions to execute %q, but you haven't granted it yet.", normalized),
 	}
 }
 

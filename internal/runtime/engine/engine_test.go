@@ -536,3 +536,140 @@ func TestRuntimeRunApprovalDenial(t *testing.T) {
 		t.Fatalf("tool result text = %q, want approval denial", toolResult.Text)
 	}
 }
+
+// TestRuntimeRunBashApprovalRetry verifies Bash ask errors enter the runtime approval flow and retry after approval.
+func TestRuntimeRunBashApprovalRetry(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Bash",
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "approved",
+			}),
+		},
+	}
+	attempts := 0
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			attempts++
+			if attempts == 1 {
+				return tool.Result{}, &corepermission.BashPermissionError{
+					ToolName:   call.Name,
+					Command:    "git status",
+					WorkingDir: call.Context.WorkingDir,
+					Decision:   corepermission.DecisionAsk,
+					Message:    `Claude requested permissions to execute "git status", but you haven't granted it yet.`,
+				}
+			}
+			if !corepermission.HasBashGrant(ctx, corepermission.BashRequest{
+				ToolName:   call.Name,
+				Command:    "git status",
+				WorkingDir: call.Context.WorkingDir,
+			}) {
+				t.Fatal("retry context missing Bash grant")
+			}
+			return tool.Result{Output: "bash output"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.ApprovalService = &fakeApprovalService{
+		response: approval.Response{Approved: true},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "run bash",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var events []event.Event
+	for evt := range out {
+		events = append(events, evt)
+	}
+	if len(events) != 5 {
+		t.Fatalf("Run() event count = %d, want 5", len(events))
+	}
+	if events[1].Type != event.TypeApprovalRequired {
+		t.Fatalf("Run() second event type = %q, want approval.required", events[1].Type)
+	}
+	payload, ok := events[1].Payload.(event.ApprovalPayload)
+	if !ok {
+		t.Fatalf("Run() approval payload type = %T, want event.ApprovalPayload", events[1].Payload)
+	}
+	if payload.Action != "execute" || payload.Path != "git status" {
+		t.Fatalf("Run() approval payload = %#v, want execute git status", payload)
+	}
+	if attempts != 2 {
+		t.Fatalf("Execute() attempts = %d, want 2", attempts)
+	}
+
+	secondRequest := client.requests[1]
+	toolResult := secondRequest.Messages[2].Content[0]
+	if toolResult.Text != "bash output" || toolResult.IsError {
+		t.Fatalf("tool result content = %#v, want approved Bash output", toolResult)
+	}
+}
+
+// TestRuntimeRunBashApprovalDenial verifies denied Bash approval decisions become error tool_result blocks without retry success.
+func TestRuntimeRunBashApprovalDenial(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:   "toolu_1",
+					Name: "Bash",
+				},
+			}),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "denied",
+			}),
+		},
+	}
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{}, &corepermission.BashPermissionError{
+				ToolName:   call.Name,
+				Command:    "git status",
+				WorkingDir: call.Context.WorkingDir,
+				Decision:   corepermission.DecisionAsk,
+				Message:    `Claude requested permissions to execute "git status", but you haven't granted it yet.`,
+			}
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.ApprovalService = &fakeApprovalService{
+		response: approval.Response{
+			Approved: false,
+			Reason:   `Permission to execute "git status" was not granted.`,
+		},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "run bash",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	toolResult := secondRequest.Messages[2].Content[0]
+	if !toolResult.IsError {
+		t.Fatalf("tool result is_error = false, want true")
+	}
+	if toolResult.Text != `Permission to execute "git status" was not granted.` {
+		t.Fatalf("tool result text = %q, want Bash approval denial", toolResult.Text)
+	}
+}

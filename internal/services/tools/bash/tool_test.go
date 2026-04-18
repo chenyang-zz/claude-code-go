@@ -2,11 +2,15 @@ package bash
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
 )
@@ -69,6 +73,95 @@ func TestToolInvokeRejectsPermissionDenied(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, `Permission to execute "pwd" has been denied.`) {
 		t.Fatalf("Invoke() error = %q, want deny message", result.Error)
+	}
+}
+
+// TestToolInvokeRequestsApproval verifies ask-style Bash permission outcomes return a retryable Bash permission error.
+func TestToolInvokeRequestsApproval(t *testing.T) {
+	tool := NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{}))
+
+	_, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: "Bash",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err == nil {
+		t.Fatal("Invoke() error = nil, want Bash permission error")
+	}
+
+	var permissionErr *corepermission.BashPermissionError
+	if !errors.As(err, &permissionErr) {
+		t.Fatalf("Invoke() error = %T, want *BashPermissionError", err)
+	}
+	if permissionErr.Decision != corepermission.DecisionAsk {
+		t.Fatalf("Invoke() decision = %q, want %q", permissionErr.Decision, corepermission.DecisionAsk)
+	}
+	if permissionErr.Command != "pwd" {
+		t.Fatalf("Invoke() command = %q, want pwd", permissionErr.Command)
+	}
+}
+
+// TestToolInvokeAcceptEditsAutoAllowsFilesystemCommands verifies acceptEdits auto-allows the migrated filesystem-style Bash subset.
+func TestToolInvokeAcceptEditsAutoAllowsFilesystemCommands(t *testing.T) {
+	projectDir := t.TempDir()
+	tool := NewToolWithMode(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{}), "acceptEdits")
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: "Bash",
+		Input: map[string]any{
+			"command": "mkdir accept-edits-dir",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q, want empty", result.Error)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "accept-edits-dir")); err != nil {
+		t.Fatalf("Stat() error = %v, want created directory", err)
+	}
+}
+
+// TestToolInvokeAcceptEditsStillAsksForNonFilesystemCommands verifies acceptEdits does not auto-approve arbitrary Bash commands.
+func TestToolInvokeAcceptEditsStillAsksForNonFilesystemCommands(t *testing.T) {
+	tool := NewToolWithMode(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{}), "acceptEdits")
+
+	_, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: "Bash",
+		Input: map[string]any{
+			"command": successCommandForToolTest(),
+		},
+	})
+	if err == nil {
+		t.Fatal("Invoke() error = nil, want Bash permission error")
+	}
+
+	var permissionErr *corepermission.BashPermissionError
+	if !errors.As(err, &permissionErr) {
+		t.Fatalf("Invoke() error = %T, want *BashPermissionError", err)
+	}
+}
+
+// TestToolInvokeDontAskConvertsAskIntoStableDenial verifies dontAsk short-circuits ask-style Bash requests without entering approval flow.
+func TestToolInvokeDontAskConvertsAskIntoStableDenial(t *testing.T) {
+	tool := NewToolWithMode(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{}), "dontAsk")
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: "Bash",
+		Input: map[string]any{
+			"command": "pwd",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if result.Error != `Permission to execute "pwd" was not granted.` {
+		t.Fatalf("Invoke() result.Error = %q, want stable dontAsk denial", result.Error)
 	}
 }
 

@@ -41,6 +41,8 @@ type Tool struct {
 	executor ShellExecutor
 	// permissions checks Bash(...) allow/deny/ask rules before execution starts.
 	permissions CommandPermissionChecker
+	// approvalMode stores the current default approval mode used to interpret ask-style Bash outcomes.
+	approvalMode string
 }
 
 // Input stores the typed request payload accepted by the migrated Bash tool.
@@ -73,9 +75,18 @@ type Output struct {
 
 // NewTool constructs a Bash tool with explicit host shell and permission dependencies.
 func NewTool(executor ShellExecutor, permissions CommandPermissionChecker) *Tool {
+	return NewToolWithMode(executor, permissions, "default")
+}
+
+// NewToolWithMode constructs a Bash tool with explicit host shell, permission, and approval-mode dependencies.
+func NewToolWithMode(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string) *Tool {
+	if strings.TrimSpace(approvalMode) == "" {
+		approvalMode = "default"
+	}
 	return &Tool{
-		executor:    executor,
-		permissions: permissions,
+		executor:     executor,
+		permissions:  permissions,
+		approvalMode: approvalMode,
 	}
 }
 
@@ -137,9 +148,30 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: err.Error()}, nil
 	}
 
+	if t.approvalMode == "bypassPermissions" {
+		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+	}
+
 	evaluation := t.permissions.Check(command)
+	normalizedCommand := strings.TrimSpace(evaluation.NormalizedCommand)
+	if normalizedCommand == "" {
+		normalizedCommand = command
+	}
+
+	if corepermission.HasBashGrant(ctx, corepermission.BashRequest{
+		ToolName:   call.Name,
+		Command:    normalizedCommand,
+		WorkingDir: call.Context.WorkingDir,
+	}) {
+		logger.DebugCF("bash_tool", "bash command allowed by runtime grant", map[string]any{
+			"working_dir": call.Context.WorkingDir,
+			"command":     normalizedCommand,
+		})
+		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+	}
+
 	switch evaluation.Decision {
-	case corepermission.DecisionDeny, corepermission.DecisionAsk:
+	case corepermission.DecisionDeny:
 		return coretool.Result{
 			Error: evaluation.Message,
 			Meta: map[string]any{
@@ -147,6 +179,39 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 				"permission_rule":     evaluation.Rule,
 			},
 		}, nil
+	case corepermission.DecisionAsk:
+		if t.approvalMode == "acceptEdits" && isAcceptEditsAutoAllowedCommand(normalizedCommand) {
+			return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+		}
+		if t.approvalMode == "dontAsk" {
+			return coretool.Result{
+				Error: fmt.Sprintf("Permission to execute %q was not granted.", normalizedCommand),
+				Meta: map[string]any{
+					"permission_decision": string(corepermission.DecisionDeny),
+					"permission_rule":     evaluation.Rule,
+				},
+			}, nil
+		}
+		return coretool.Result{}, &corepermission.BashPermissionError{
+			ToolName:   call.Name,
+			Command:    normalizedCommand,
+			WorkingDir: call.Context.WorkingDir,
+			Decision:   corepermission.DecisionAsk,
+			Rule:       evaluation.Rule,
+			Message:    evaluation.Message,
+		}
+	default:
+		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+	}
+}
+
+// executeForegroundCommand runs one normalized foreground Bash request and maps the process result into the stable tool result shape.
+func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call, command string, timeoutMilliseconds int) (coretool.Result, error) {
+	if t == nil {
+		return coretool.Result{}, fmt.Errorf("bash tool: nil receiver")
+	}
+	if t.executor == nil {
+		return coretool.Result{}, fmt.Errorf("bash tool: executor is not configured")
 	}
 
 	logger.DebugCF("bash_tool", "starting foreground bash tool invocation", map[string]any{
@@ -161,7 +226,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
 	})
 	if err != nil {
-		return coretool.Result{Error: fmt.Sprintf("bash tool: %v", err)}, nil
+		return coretool.Result{
+			Error: fmt.Sprintf("bash tool: %v", err),
+		}, nil
 	}
 
 	output := Output{
@@ -202,6 +269,29 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"data": output,
 		},
 	}, nil
+}
+
+// isAcceptEditsAutoAllowedCommand reports whether the normalized Bash command falls inside the minimal acceptEdits auto-allow subset.
+func isAcceptEditsAutoAllowedCommand(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return false
+	}
+	if strings.Contains(trimmed, "&&") || strings.Contains(trimmed, "||") || strings.Contains(trimmed, ";") || strings.Contains(trimmed, "|") {
+		return false
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+
+	switch fields[0] {
+	case "mkdir", "touch", "rm", "rmdir", "mv", "cp", "sed":
+		return true
+	default:
+		return false
+	}
 }
 
 // inputSchema declares the minimum Bash tool input fields carried forward in the current batch.

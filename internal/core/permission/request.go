@@ -47,3 +47,24 @@ func (r FilesystemRequest) Validate() error {
 	}
 	return nil
 }
+
+// BashRequest is the normalized permission input used by the migrated Bash tool approval flow.
+type BashRequest struct {
+	// ToolName identifies the tool issuing the command request.
+	ToolName string
+	// Command stores the normalized Bash command string that needs approval.
+	Command string
+	// WorkingDir stores the tool invocation working directory for grant scoping.
+	WorkingDir string
+}
+
+// Validate checks whether the Bash approval request contains the minimum information needed by the permission layer.
+func (r BashRequest) Validate() error {
+	if r.ToolName == "" {
+		return fmt.Errorf("permission: tool name is required")
+	}
+	if r.Command == "" {
+		return fmt.Errorf("permission: command is required")
+	}
+	return nil
+}

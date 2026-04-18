@@ -238,10 +238,20 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 	}
 
 	var permissionErr *corepermission.PermissionError
-	if !errors.As(invokeErr, &permissionErr) || permissionErr.Decision != corepermission.DecisionAsk || e.ApprovalService == nil {
-		return result, invokeErr
+	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
+		return e.executeFilesystemApproval(ctx, call, permissionErr, out)
 	}
 
+	var bashPermissionErr *corepermission.BashPermissionError
+	if errors.As(invokeErr, &bashPermissionErr) && bashPermissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
+		return e.executeBashApproval(ctx, call, bashPermissionErr, out)
+	}
+
+	return result, invokeErr
+}
+
+// executeFilesystemApproval resolves one filesystem approval request through the runtime prompt and one-shot retry flow.
+func (e *Runtime) executeFilesystemApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.PermissionError, out chan<- event.Event) (coretool.Result, error) {
 	out <- event.Event{
 		Type:      event.TypeApprovalRequired,
 		Timestamp: time.Now(),
@@ -276,6 +286,45 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		Path:       permissionErr.Path,
 		WorkingDir: call.Context.WorkingDir,
 		Access:     permissionErr.Access,
+	})
+	return e.Executor.Execute(retryCtx, call)
+}
+
+// executeBashApproval resolves one Bash approval request through the runtime prompt and one-shot retry flow.
+func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.BashPermissionError, out chan<- event.Event) (coretool.Result, error) {
+	out <- event.Event{
+		Type:      event.TypeApprovalRequired,
+		Timestamp: time.Now(),
+		Payload: event.ApprovalPayload{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Path:     permissionErr.Command,
+			Action:   "execute",
+			Message:  permissionErr.Message,
+		},
+	}
+
+	decision, err := e.ApprovalService.Decide(ctx, approval.Request{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Path:     permissionErr.Command,
+		Action:   "execute",
+		Message:  permissionErr.Message,
+	})
+	if err != nil {
+		return coretool.Result{}, err
+	}
+	if !decision.Approved {
+		if strings.TrimSpace(decision.Reason) == "" {
+			decision.Reason = fmt.Sprintf("Permission to execute %q was not granted.", permissionErr.Command)
+		}
+		return coretool.Result{Error: decision.Reason}, nil
+	}
+
+	retryCtx := corepermission.WithBashGrant(ctx, corepermission.BashRequest{
+		ToolName:   call.Name,
+		Command:    permissionErr.Command,
+		WorkingDir: call.Context.WorkingDir,
 	})
 	return e.Executor.Execute(retryCtx, call)
 }

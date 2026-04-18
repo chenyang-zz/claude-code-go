@@ -42,7 +42,7 @@ func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.Fi
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
 func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig) []tool.Tool {
 	return []tool.Tool{
-		bash.NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(permissions)),
+		bash.NewToolWithMode(platformshell.NewExecutor(), platformshell.NewPermissionChecker(permissions), permissions.DefaultMode),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
 		fileread.NewTool(fs, policy),
