@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,8 +53,36 @@ func TestDoctorCommandExecuteRendersLocalDiagnostics(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Doctor summary:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- API key: missing\n- API base URL: default\n- Project path: /repo\n- Approval mode: default\n- Session DB: /tmp/claude.db (not created yet; parent directory exists)\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH"
+	want := "Doctor summary:\n- Provider: anthropic\n- Model: claude-sonnet-4-5\n- API key: missing\n- API base URL: default\n- Project path: /repo\n- Approval mode: default\n- Session DB: /tmp/claude.db (not created yet; parent directory exists)\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+}
+
+// TestDoctorCommandExecuteWithTerminalIDE verifies /doctor shares the terminal IDE fallback.
+func TestDoctorCommandExecuteWithTerminalIDE(t *testing.T) {
+	result, err := DoctorCommand{
+		Config: coreconfig.Config{
+			Provider:    "anthropic",
+			ProjectPath: "/repo",
+		},
+		LookupEnv: func(key string) (string, bool) {
+			switch key {
+			case "JETBRAINS_IDE":
+				return "GoLand", true
+			default:
+				return "", false
+			}
+		},
+		LookPath: func(string) (string, error) {
+			return "", errors.New("missing")
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "- IDE: terminal session appears to be running inside GoLand") {
+		t.Fatalf("Execute() output = %q, want terminal IDE diagnostic", result.Output)
 	}
 }

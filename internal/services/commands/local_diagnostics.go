@@ -19,6 +19,8 @@ type LocalDiagnosticsOptions struct {
 	Config coreconfig.Config
 	// ToolRegistry exposes the currently wired tool set so MCP-style tool presence can be summarized.
 	ToolRegistry coretool.Registry
+	// LookupEnv allows tests to provide stable IDE-related terminal environment signals.
+	LookupEnv func(string) (string, bool)
 	// Stat allows tests to control filesystem existence checks for memory diagnostics.
 	Stat func(string) (os.FileInfo, error)
 	// ReadFile allows tests to control memory file contents without touching the host filesystem.
@@ -31,6 +33,7 @@ type LocalDiagnosticsOptions struct {
 func localDiagnosticLines(opts LocalDiagnosticsOptions) []string {
 	return []string{
 		fmt.Sprintf("- Bash sandbox: %s", sandboxDiagnosticSummary()),
+		fmt.Sprintf("- IDE: %s", ideDiagnosticSummary(opts.ToolRegistry, opts.LookupEnv)),
 		fmt.Sprintf("- MCP servers: %s", mcpDiagnosticSummary(opts.ToolRegistry)),
 		fmt.Sprintf("- Memory files: %s", memoryDiagnosticSummary(opts)),
 		fmt.Sprintf("- Installation health: %s", installationDiagnosticSummary(opts.LookPath)),
@@ -40,6 +43,36 @@ func localDiagnosticLines(opts LocalDiagnosticsOptions) []string {
 // sandboxDiagnosticSummary reports the current stable fallback until Bash sandbox wiring exists in the Go host.
 func sandboxDiagnosticSummary() string {
 	return "not available in Claude Code Go yet"
+}
+
+// ideDiagnosticSummary reports whether the current host can see IDE MCP wiring or a likely terminal IDE.
+func ideDiagnosticSummary(registry coretool.Registry, lookupEnvFn func(string) (string, bool)) string {
+	ideToolCount := 0
+	if registry != nil {
+		for _, item := range registry.List() {
+			if item == nil {
+				continue
+			}
+			name := strings.ToLower(strings.TrimSpace(item.Name()))
+			if strings.HasPrefix(name, "mcp__ide__") {
+				ideToolCount++
+			}
+		}
+	}
+	if ideToolCount > 0 {
+		return fmt.Sprintf("connected via IDE MCP (%d tool(s) registered)", ideToolCount)
+	}
+
+	lookupEnv := lookupEnvFn
+	if lookupEnv == nil {
+		lookupEnv = os.LookupEnv
+	}
+
+	if ideName := terminalIDEName(lookupEnv); ideName != "" {
+		return fmt.Sprintf("terminal session appears to be running inside %s", ideName)
+	}
+
+	return "not detected"
 }
 
 // mcpDiagnosticSummary reports how many registered tools currently look like MCP proxies.
@@ -61,6 +94,46 @@ func mcpDiagnosticSummary(registry coretool.Registry) string {
 		return "no MCP tools registered"
 	}
 	return fmt.Sprintf("%d MCP tool(s) registered", count)
+}
+
+// terminalIDEName infers the likely IDE host from stable terminal environment variables.
+func terminalIDEName(lookupEnv func(string) (string, bool)) string {
+	if lookupEnv == nil {
+		return ""
+	}
+
+	jetBrainsName, ok := lookupEnv("JETBRAINS_IDE")
+	if ok && strings.TrimSpace(jetBrainsName) != "" {
+		return strings.TrimSpace(jetBrainsName)
+	}
+
+	terminalEmulator, ok := lookupEnv("TERMINAL_EMULATOR")
+	if ok && strings.EqualFold(strings.TrimSpace(terminalEmulator), "JetBrains-JediTerm") {
+		return "JetBrains IDE"
+	}
+
+	termProgram, ok := lookupEnv("TERM_PROGRAM")
+	if ok {
+		switch strings.ToLower(strings.TrimSpace(termProgram)) {
+		case "vscode":
+			if _, hasCursor := lookupEnv("CURSOR_TRACE_ID"); hasCursor {
+				return "Cursor"
+			}
+			return "VS Code"
+		case "cursor":
+			return "Cursor"
+		case "windsurf":
+			return "Windsurf"
+		case "jetbrains-jediterm":
+			return "JetBrains IDE"
+		}
+	}
+
+	if _, ok := lookupEnv("VSCODE_CWD"); ok {
+		return "VS Code"
+	}
+
+	return ""
 }
 
 // memoryDiagnosticSummary reports whether the current workspace has oversized CLAUDE.md files in the upward search path.

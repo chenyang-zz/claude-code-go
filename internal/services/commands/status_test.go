@@ -59,6 +59,24 @@ func (statusStubRegularFileInfo) ModTime() time.Time { return time.Time{} }
 func (statusStubRegularFileInfo) IsDir() bool        { return false }
 func (statusStubRegularFileInfo) Sys() any           { return nil }
 
+type statusStubTool struct {
+	name string
+}
+
+func (t statusStubTool) Name() string { return t.name }
+
+func (statusStubTool) Description() string { return "stub tool" }
+
+func (statusStubTool) InputSchema() coretool.InputSchema { return coretool.InputSchema{} }
+
+func (statusStubTool) IsReadOnly() bool { return true }
+
+func (statusStubTool) IsConcurrencySafe() bool { return true }
+
+func (statusStubTool) Invoke(context.Context, coretool.Call) (coretool.Result, error) {
+	return coretool.Result{}, nil
+}
+
 // TestStatusCommandExecute verifies /status reports the current Go host summary and stable fallback boundaries.
 func TestStatusCommandExecute(t *testing.T) {
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
@@ -116,7 +134,7 @@ func TestStatusCommandExecute(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: claude-sonnet-4-5\n- Project path: /repo/project\n- Approval mode: default\n- Session storage: /tmp/sessions.db (not created yet; parent directory exists)\n- Settings sources: User settings, Project settings, Local settings\n- Account auth: API key configured; interactive account status is not available\n- API key source: ANTHROPIC_API_KEY\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Proxy: http://proxy.internal:8080\n- Additional CA cert(s): /etc/ssl/custom.pem\n- mTLS client cert: /etc/ssl/client.pem\n- mTLS client key: /etc/ssl/client-key.pem\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 204 from /v1/messages)\n- Tool status checks: 4 registered (Glob, Grep, Read, Edit)\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -144,7 +162,7 @@ func TestStatusCommandExecuteWithAuthToken(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: Auth token configured; interactive account status is not available\n- API key source: not configured\n- Auth token source: ANTHROPIC_AUTH_TOKEN\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: anthropic\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: /repo/project\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: Auth token configured; interactive account status is not available\n- API key source: not configured\n- Auth token source: ANTHROPIC_AUTH_TOKEN\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: no CLAUDE.md files detected\n- Installation health: ripgrep missing from PATH\n- API connectivity check: reachable (HTTP 401 from /v1/messages)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -161,7 +179,7 @@ func TestStatusCommandExecuteWithoutCredential(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Status summary:\n- Provider: (not set)\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: missing auth credential; interactive account status is not available\n- API key source: not configured\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- MCP servers: no MCP tools registered\n- Memory files: project path not configured\n- Installation health: ripgrep missing from PATH\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
+	want := "Status summary:\n- Provider: (not set)\n- API provider type: Anthropic first-party\n- Model: (not set)\n- Project path: (not set)\n- Approval mode: (not set)\n- Session storage: not configured\n- Settings sources: none\n- Account auth: missing auth credential; interactive account status is not available\n- API key source: not configured\n- Auth token source: not configured\n- API base URL: default\n- API base URL source: default\n- Bash sandbox: not available in Claude Code Go yet\n- IDE: not detected\n- MCP servers: no MCP tools registered\n- Memory files: project path not configured\n- Installation health: ripgrep missing from PATH\n- API connectivity check: skipped (missing auth credential)\n- Tool status checks: no tools registered\n- Settings status UI: not available in Claude Code Go yet"
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -204,5 +222,72 @@ func TestStatusCommandExecuteWithLargeMemoryFile(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "- Installation health: ripgrep available at /opt/homebrew/bin/rg") {
 		t.Fatalf("Execute() output = %q, want ripgrep availability diagnostic", result.Output)
+	}
+}
+
+// TestStatusCommandExecuteWithIDEMCP verifies /status prioritizes IDE MCP diagnostics when available.
+func TestStatusCommandExecuteWithIDEMCP(t *testing.T) {
+	toolRegistry := coretool.NewMemoryRegistry()
+	for _, tool := range []coretool.Tool{
+		statusStubTool{name: "mcp__ide__open_file"},
+		statusStubTool{name: "mcp__ide__get_diagnostics"},
+		statusStubTool{name: "Glob"},
+	} {
+		if err := toolRegistry.Register(tool); err != nil {
+			t.Fatalf("Register(tool=%s) error = %v", tool.Name(), err)
+		}
+	}
+
+	result, err := StatusCommand{
+		Config: coreconfig.Config{
+			Provider:    "anthropic",
+			ProjectPath: "/repo/project",
+			APIKey:      "test-key",
+		},
+		ToolRegistry: toolRegistry,
+		LookPath: func(string) (string, error) {
+			return "", errors.New("missing")
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "- IDE: connected via IDE MCP (2 tool(s) registered)") {
+		t.Fatalf("Execute() output = %q, want IDE MCP diagnostic", result.Output)
+	}
+	if !strings.Contains(result.Output, "- MCP servers: 2 MCP tool(s) registered") {
+		t.Fatalf("Execute() output = %q, want MCP summary including IDE tools", result.Output)
+	}
+}
+
+// TestStatusCommandExecuteWithTerminalIDE verifies /status falls back to terminal IDE inference.
+func TestStatusCommandExecuteWithTerminalIDE(t *testing.T) {
+	result, err := StatusCommand{
+		Config: coreconfig.Config{
+			Provider:    "anthropic",
+			ProjectPath: "/repo/project",
+			APIKey:      "test-key",
+		},
+		LookupEnv: func(key string) (string, bool) {
+			switch key {
+			case "TERM_PROGRAM":
+				return "vscode", true
+			case "CURSOR_TRACE_ID":
+				return "trace-id", true
+			default:
+				return "", false
+			}
+		},
+		LookPath: func(string) (string, error) {
+			return "", errors.New("missing")
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "- IDE: terminal session appears to be running inside Cursor") {
+		t.Fatalf("Execute() output = %q, want terminal IDE diagnostic", result.Output)
 	}
 }

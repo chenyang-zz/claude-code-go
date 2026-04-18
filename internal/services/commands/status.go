@@ -39,6 +39,8 @@ type StatusCommand struct {
 	ReadFile func(string) ([]byte, error)
 	// LookPath inspects host binaries for shared installation-health diagnostics.
 	LookPath func(string) (string, error)
+	// LookupEnv inspects terminal environment signals for shared IDE diagnostics.
+	LookupEnv func(string) (string, bool)
 }
 
 // Metadata returns the canonical slash descriptor for /status.
@@ -75,6 +77,7 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 	lines = append(lines, localDiagnosticLines(LocalDiagnosticsOptions{
 		Config:       c.Config,
 		ToolRegistry: c.ToolRegistry,
+		LookupEnv:    c.LookupEnv,
 		Stat:         c.Stat,
 		ReadFile:     c.ReadFile,
 		LookPath:     c.LookPath,
