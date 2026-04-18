@@ -11,6 +11,9 @@ const (
 	TypeApprovalRequired Type = "approval.required"
 	TypeConversationDone Type = "conversation.done"
 	TypeError            Type = "error"
+	TypeUsage            Type = "usage"
+	TypeRetryAttempted   Type = "retry.attempted"
+	TypeModelFallback    Type = "model.fallback"
 )
 
 type Event struct {

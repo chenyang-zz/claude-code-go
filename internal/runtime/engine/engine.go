@@ -36,6 +36,10 @@ type Runtime struct {
 	Client model.Client
 	// DefaultModel is used when the caller does not override the model.
 	DefaultModel string
+	// FallbackModel is an optional secondary model used when the primary model fails after exhausting retries.
+	FallbackModel string
+	// RetryPolicy controls exponential backoff retry for transient provider errors.
+	RetryPolicy RetryPolicy
 	// ToolCatalog stores the provider-facing tool declarations attached to each request by default.
 	ToolCatalog []model.ToolDefinition
 	// Executor runs normalized tool invocations when the model emits tool_use blocks.
@@ -55,6 +59,7 @@ func New(client model.Client, defaultModel string, executor ToolExecutor, tools 
 		DefaultModel:           defaultModel,
 		ToolCatalog:            append([]model.ToolDefinition(nil), tools...),
 		Executor:               executor,
+		RetryPolicy:            DefaultRetryPolicy(),
 		MaxToolIterations:      8,
 		MaxConcurrentToolCalls: 10,
 	}
@@ -122,29 +127,50 @@ func buildInitialHistory(req conversation.RunRequest) (conversation.History, err
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
 func (e *Runtime) runLoop(ctx context.Context, sessionID string, history conversation.History, out chan<- event.Event) error {
 	toolLoops := 0
+	var cumulativeUsage model.Usage
+	activeModel := e.activeModel()
+
 	for {
-		modelStream, err := e.Client.Stream(ctx, model.Request{
-			Model:    e.DefaultModel,
+		streamReq := model.Request{
+			Model:    activeModel,
 			Messages: history.Messages,
 			Tools:    e.ToolCatalog,
-		})
-		if err != nil {
-			return err
 		}
 
-		assistantMessage, pendingToolUses, err := e.consumeModelStream(modelStream, out)
+		result, err := e.streamAndConsume(ctx, streamReq, out)
 		if err != nil {
 			return err
 		}
-		if len(assistantMessage.Content) > 0 {
-			history.Append(assistantMessage)
+		if result.activeModel != "" {
+			activeModel = result.activeModel
 		}
-		if len(pendingToolUses) == 0 {
+
+		// Accumulate usage from this model call.
+		cumulativeUsage = cumulativeUsage.Add(result.usage)
+
+		// Emit per-call usage event.
+		if !result.usage.IsZero() {
+			out <- event.Event{
+				Type:      event.TypeUsage,
+				Timestamp: time.Now(),
+				Payload: event.UsagePayload{
+					TurnUsage:       result.usage,
+					CumulativeUsage: cumulativeUsage,
+					StopReason:      string(result.stopReason),
+				},
+			}
+		}
+
+		if len(result.assistant.Content) > 0 {
+			history.Append(result.assistant)
+		}
+		if len(result.toolUses) == 0 {
 			out <- event.Event{
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),
 				Payload: event.ConversationDonePayload{
 					History: history.Clone(),
+					Usage:   cumulativeUsage,
 				},
 			}
 			return nil
@@ -159,39 +185,165 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 		toolLoops++
 		logger.DebugCF("engine", "executing tool loop iteration", map[string]any{
 			"session_id": sessionID,
-			"tool_count": len(pendingToolUses),
+			"tool_count": len(result.toolUses),
 			"iteration":  toolLoops,
 		})
 
-		history.Append(e.executeToolUses(ctx, pendingToolUses, out))
+		history.Append(e.executeToolUses(ctx, result.toolUses, out))
 	}
 }
 
+// activeModel returns the configured model, falling back to DefaultModel.
+func (e *Runtime) activeModel() string {
+	if e != nil && e.DefaultModel != "" {
+		return e.DefaultModel
+	}
+	return "claude-sonnet-4-20250514"
+}
+
+// streamResult holds the aggregated output from one model stream consumption.
+type streamResult struct {
+	assistant   message.Message
+	toolUses    []model.ToolUse
+	stopReason  model.StopReason
+	usage       model.Usage
+	activeModel string        // non-empty if fallback was triggered
+	events      []event.Event // collected events, forwarded only on success
+}
+
+// streamAndConsume opens a model stream, consumes it, and handles both connection errors
+// and mid-stream errors through the retry and fallback paths.
+// MaxAttempts is the number of extra retries beyond the initial attempt (0 = single attempt, no retry).
+// Partial events from failed attempts are discarded — only successful attempt events are forwarded.
+func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out chan<- event.Event) (streamResult, error) {
+	policy := e.RetryPolicy
+	retries := policy.MaxAttempts
+	if retries < 0 {
+		retries = 0
+	}
+
+	lastErr := error(nil)
+	for attempt := 0; attempt <= retries; attempt++ {
+		modelStream, connErr := e.Client.Stream(ctx, req)
+		if connErr != nil {
+			lastErr = connErr
+			if !isRetriableError(connErr) {
+				break
+			}
+			if attempt < retries {
+				backoff := policy.backoffDuration(attempt + 1)
+				out <- event.Event{
+					Type:      event.TypeRetryAttempted,
+					Timestamp: time.Now(),
+					Payload: event.RetryAttemptedPayload{
+						Attempt:     attempt + 1,
+						MaxAttempts: retries,
+						BackoffMs:   backoff.Milliseconds(),
+						Error:       connErr.Error(),
+					},
+				}
+				select {
+				case <-time.After(backoff):
+				case <-ctx.Done():
+					return streamResult{}, ctx.Err()
+				}
+			}
+			continue
+		}
+
+		result, streamErr := e.consumeModelStream(modelStream)
+		if streamErr == nil {
+			// Success — forward collected events to caller.
+			for _, evt := range result.events {
+				out <- evt
+			}
+			return result, nil
+		}
+		// Stream error — discard partial events, retry if retriable.
+		if !isRetriableError(streamErr) {
+			return streamResult{}, streamErr
+		}
+		lastErr = streamErr
+
+		if attempt < retries {
+			backoff := policy.backoffDuration(attempt + 1)
+			out <- event.Event{
+				Type:      event.TypeRetryAttempted,
+				Timestamp: time.Now(),
+				Payload: event.RetryAttemptedPayload{
+					Attempt:     attempt + 1,
+					MaxAttempts: retries,
+					BackoffMs:   backoff.Milliseconds(),
+					Error:       streamErr.Error(),
+				},
+			}
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return streamResult{}, ctx.Err()
+			}
+		}
+	}
+
+	// All retries exhausted — try fallback.
+	if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
+		fbResult, fbErr := e.consumeModelStream(fb.stream)
+		if fbErr != nil {
+			return streamResult{}, fbErr
+		}
+		out <- event.Event{
+			Type:      event.TypeModelFallback,
+			Timestamp: time.Now(),
+			Payload: event.ModelFallbackPayload{
+				OriginalModel: req.Model,
+				FallbackModel: fb.model,
+			},
+		}
+		for _, evt := range fbResult.events {
+			out <- evt
+		}
+		fbResult.activeModel = fb.model
+		return fbResult, nil
+	}
+	return streamResult{}, fmt.Errorf("stream failed after %d retries: %w", retries, lastErr)
+}
+
 // consumeModelStream aggregates one provider response into an assistant message plus any completed tool_use blocks.
-func (e *Runtime) consumeModelStream(modelStream model.Stream, out chan<- event.Event) (message.Message, []model.ToolUse, error) {
+// Events are collected into the result and NOT forwarded to any channel — the caller decides whether to emit them.
+func (e *Runtime) consumeModelStream(modelStream model.Stream) (streamResult, error) {
 	assistant := message.Message{Role: message.RoleAssistant}
 	var toolUses []model.ToolUse
+	var stopReason model.StopReason
+	var usage model.Usage
+	var events []event.Event
 
 	for item := range modelStream {
 		switch item.Type {
 		case model.EventTypeTextDelta:
 			assistant.Content = append(assistant.Content, message.TextPart(item.Text))
-			out <- event.Event{
+			events = append(events, event.Event{
 				Type:      event.TypeMessageDelta,
 				Timestamp: time.Now(),
 				Payload: event.MessageDeltaPayload{
 					Text: item.Text,
 				},
-			}
+			})
 		case model.EventTypeError:
-			return message.Message{}, nil, errors.New(item.Error)
+			errMsg := item.Error
+			// Drain remaining events asynchronously so retries are not blocked on the provider closing the stream.
+			go func() {
+				for range modelStream {
+				}
+			}()
+			// Discard collected events — this attempt failed.
+			return streamResult{}, errors.New(errMsg)
 		case model.EventTypeToolUse:
 			if item.ToolUse == nil {
-				return message.Message{}, nil, fmt.Errorf("tool use event missing payload")
+				return streamResult{}, fmt.Errorf("tool use event missing payload")
 			}
 			toolUses = append(toolUses, *item.ToolUse)
 			assistant.Content = append(assistant.Content, message.ToolUsePart(item.ToolUse.ID, item.ToolUse.Name, item.ToolUse.Input))
-			out <- event.Event{
+			events = append(events, event.Event{
 				Type:      event.TypeToolCallStarted,
 				Timestamp: time.Now(),
 				Payload: event.ToolCallPayload{
@@ -199,11 +351,22 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, out chan<- event.
 					Name:  item.ToolUse.Name,
 					Input: item.ToolUse.Input,
 				},
+			})
+		case model.EventTypeDone:
+			stopReason = item.StopReason
+			if item.Usage != nil {
+				usage = *item.Usage
 			}
 		}
 	}
 
-	return assistant, toolUses, nil
+	return streamResult{
+		assistant:  assistant,
+		toolUses:   toolUses,
+		stopReason: stopReason,
+		usage:      usage,
+		events:     events,
+	}, nil
 }
 
 // executeToolUses resolves one tool batch sequence and converts the results into one tool_result message.

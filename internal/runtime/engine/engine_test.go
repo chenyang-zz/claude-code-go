@@ -19,10 +19,14 @@ import (
 type fakeModelClient struct {
 	requests []model.Request
 	streams  []model.Stream
+	streamFn func(ctx context.Context, req model.Request) (model.Stream, error)
 }
 
 func (c *fakeModelClient) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
 	c.requests = append(c.requests, req)
+	if c.streamFn != nil {
+		return c.streamFn(ctx, req)
+	}
 	if len(c.streams) == 0 {
 		return nil, errors.New("unexpected Stream call")
 	}
@@ -887,5 +891,105 @@ func TestRuntimeRunBashApprovalDenial(t *testing.T) {
 	}
 	if toolResult.Text != `Permission to execute "git status" was not granted.` {
 		t.Fatalf("tool result text = %q, want Bash approval denial", toolResult.Text)
+	}
+}
+
+// TestRuntimeRunConcurrentBatchPreservesEventOrder verifies that started/finished events
+// preserve original tool_use ordering even when tools complete out of order in a concurrent batch.
+func TestRuntimeRunConcurrentBatchPreservesEventOrder(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_read",
+						Name: "Read",
+					},
+				},
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:   "toolu_glob",
+						Name: "Glob",
+					},
+				},
+			),
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "done",
+			}),
+		},
+	}
+
+	readDone := make(chan struct{})
+	executor := &fakeToolExecutor{
+		safe: map[string]bool{
+			"Read": true,
+			"Glob": true,
+		},
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			if call.Name == "Glob" {
+				// Glob finishes fast
+				time.Sleep(5 * time.Millisecond)
+				return tool.Result{Output: "Glob ok"}, nil
+			}
+			// Read finishes slower than Glob
+			time.Sleep(50 * time.Millisecond)
+			close(readDone)
+			return tool.Result{Output: "Read ok"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "read and glob",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var events []event.Event
+	for evt := range out {
+		events = append(events, evt)
+	}
+
+	// tool.call.started events should appear in original order (Read, Glob)
+	var startedEvents []event.Event
+	for _, evt := range events {
+		if evt.Type == event.TypeToolCallStarted {
+			startedEvents = append(startedEvents, evt)
+		}
+	}
+	if len(startedEvents) != 2 {
+		t.Fatalf("started event count = %d, want 2", len(startedEvents))
+	}
+	readStarted, _ := startedEvents[0].Payload.(event.ToolCallPayload)
+	globStarted, _ := startedEvents[1].Payload.(event.ToolCallPayload)
+	if readStarted.ID != "toolu_read" {
+		t.Fatalf("first started = %s, want toolu_read", readStarted.ID)
+	}
+	if globStarted.ID != "toolu_glob" {
+		t.Fatalf("second started = %s, want toolu_glob", globStarted.ID)
+	}
+
+	// tool.call.finished events should also preserve original order (Read, Glob)
+	var finishedEvents []event.Event
+	for _, evt := range events {
+		if evt.Type == event.TypeToolCallFinished {
+			finishedEvents = append(finishedEvents, evt)
+		}
+	}
+	if len(finishedEvents) != 2 {
+		t.Fatalf("finished event count = %d, want 2", len(finishedEvents))
+	}
+	readFinished, _ := finishedEvents[0].Payload.(event.ToolResultPayload)
+	globFinished, _ := finishedEvents[1].Payload.(event.ToolResultPayload)
+	if readFinished.ID != "toolu_read" {
+		t.Fatalf("first finished = %s, want toolu_read", readFinished.ID)
+	}
+	if globFinished.ID != "toolu_glob" {
+		t.Fatalf("second finished = %s, want toolu_glob", globFinished.ID)
 	}
 }

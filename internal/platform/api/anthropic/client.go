@@ -106,6 +106,37 @@ type errorEnvelope struct {
 	} `json:"error"`
 }
 
+// messageStartEnvelope captures usage from the Anthropic message_start event.
+type messageStartEnvelope struct {
+	Message struct {
+		Usage struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+}
+
+// messageDeltaEnvelope captures output usage and stop_reason from the Anthropic message_delta event.
+type messageDeltaEnvelope struct {
+	Delta struct {
+		StopReason string `json:"stop_reason"`
+	} `json:"delta"`
+	Usage struct {
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+}
+
+// streamState accumulates metadata parsed from Anthropic SSE events across the stream lifetime.
+type streamState struct {
+	inputTokens       int
+	cacheCreateTokens int
+	cacheReadTokens   int
+	outputTokens      int
+	stopReason        string
+}
+
 // NewClient builds a minimal Anthropic streaming client.
 func NewClient(cfg Config) *Client {
 	baseURL := cfg.BaseURL
@@ -186,6 +217,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		var eventName string
 		var dataLines []string
 		contentBlocks := make(map[int]*streamContentBlock)
+		var state streamState
 
 		flush := func() {
 			if len(dataLines) == 0 {
@@ -193,7 +225,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 				return
 			}
 
-			c.handleSSEEvent(eventName, strings.Join(dataLines, "\n"), contentBlocks, out)
+			c.handleSSEEvent(eventName, strings.Join(dataLines, "\n"), contentBlocks, &state, out)
 			eventName = ""
 			dataLines = dataLines[:0]
 		}
@@ -222,19 +254,56 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			return
 		}
 
-		out <- model.Event{Type: model.EventTypeDone}
+		doneEvent := model.Event{Type: model.EventTypeDone}
+		if state.stopReason != "" {
+			doneEvent.StopReason = model.StopReason(state.stopReason)
+		}
+		if state.inputTokens > 0 || state.outputTokens > 0 || state.cacheCreateTokens > 0 || state.cacheReadTokens > 0 {
+			doneEvent.Usage = &model.Usage{
+				InputTokens:              state.inputTokens,
+				OutputTokens:             state.outputTokens,
+				CacheCreationInputTokens: state.cacheCreateTokens,
+				CacheReadInputTokens:     state.cacheReadTokens,
+			}
+		}
+		out <- doneEvent
 	}()
 
 	return out, nil
 }
 
 // handleSSEEvent maps one Anthropic SSE event into the shared model stream format.
-func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*streamContentBlock, out chan<- model.Event) {
+func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*streamContentBlock, state *streamState, out chan<- model.Event) {
 	if data == "" || data == "[DONE]" {
 		return
 	}
 
 	switch eventName {
+	case "message_start":
+		var payload messageStartEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic message_start: %v", err),
+			}
+			return
+		}
+		state.inputTokens = payload.Message.Usage.InputTokens
+		state.cacheCreateTokens = payload.Message.Usage.CacheCreationInputTokens
+		state.cacheReadTokens = payload.Message.Usage.CacheReadInputTokens
+	case "message_delta":
+		var payload messageDeltaEnvelope
+		if err := json.Unmarshal([]byte(data), &payload); err != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("parse anthropic message_delta: %v", err),
+			}
+			return
+		}
+		state.outputTokens = payload.Usage.OutputTokens
+		if payload.Delta.StopReason != "" {
+			state.stopReason = payload.Delta.StopReason
+		}
 	case "content_block_start":
 		var payload contentBlockStartEnvelope
 		if err := json.Unmarshal([]byte(data), &payload); err != nil {

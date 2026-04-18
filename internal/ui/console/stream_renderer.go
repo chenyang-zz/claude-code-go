@@ -50,6 +50,38 @@ func (r *StreamRenderer) RenderEvent(evt event.Event) error {
 		if err := r.Printer.PrintLine(payload.Message); err != nil {
 			return err
 		}
+	case event.TypeToolCallStarted:
+		payload, ok := evt.Payload.(event.ToolCallPayload)
+		if !ok {
+			return fmt.Errorf("tool call started payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf("  Tool started: %s", payload.Name)); err != nil {
+			return err
+		}
+	case event.TypeToolCallFinished:
+		payload, ok := evt.Payload.(event.ToolResultPayload)
+		if !ok {
+			return fmt.Errorf("tool call finished payload type mismatch")
+		}
+		suffix := ""
+		if payload.IsError {
+			suffix = " (error)"
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf("  Tool finished: %s%s", payload.Name, suffix)); err != nil {
+			return err
+		}
+	case event.TypeApprovalRequired:
+		payload, ok := evt.Payload.(event.ApprovalPayload)
+		if !ok {
+			return fmt.Errorf("approval required payload type mismatch")
+		}
+		label := payload.ToolName
+		if payload.Action != "" && payload.Path != "" {
+			label = fmt.Sprintf("%s wants to %s %s", payload.ToolName, payload.Action, payload.Path)
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf("  Approval required: %s", label)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

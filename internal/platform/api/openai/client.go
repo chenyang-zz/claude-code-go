@@ -56,11 +56,16 @@ type Client struct {
 
 // chatCompletionsRequest stores the minimal OpenAI-compatible request payload used by the runtime.
 type chatCompletionsRequest struct {
-	Model      string         `json:"model"`
-	Messages   []chatMessage  `json:"messages"`
-	Stream     bool           `json:"stream"`
-	Tools      []toolEnvelope `json:"tools,omitempty"`
-	ToolChoice string         `json:"tool_choice,omitempty"`
+	Model         string             `json:"model"`
+	Messages      []chatMessage      `json:"messages"`
+	Stream        bool               `json:"stream"`
+	StreamOptions *streamOptionsBody `json:"stream_options,omitempty"`
+	Tools         []toolEnvelope     `json:"tools,omitempty"`
+	ToolChoice    string             `json:"tool_choice,omitempty"`
+}
+
+type streamOptionsBody struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 // chatMessage stores one OpenAI-compatible conversation message payload.
@@ -109,6 +114,25 @@ type streamEnvelope struct {
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+// openAIStopReasonMap maps OpenAI finish_reason values to model stop reasons.
+var openAIStopReasonMap = map[string]model.StopReason{
+	"stop":           model.StopReasonEndTurn,
+	"length":         model.StopReasonMaxTokens,
+	"tool_calls":     model.StopReasonToolUse,
+	"content_filter": model.StopReasonEndTurn,
+}
+
+// openaiStreamState accumulates metadata across one OpenAI-compatible stream.
+type openaiStreamState struct {
+	finishReason     string
+	promptTokens     int
+	completionTokens int
 }
 
 // streamToolCallDelta stores one partial tool-call delta inside an OpenAI-compatible SSE chunk.
@@ -156,11 +180,12 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	}
 
 	body, err := json.Marshal(chatCompletionsRequest{
-		Model:      req.Model,
-		Messages:   mapMessages(req.System, req.Messages),
-		Stream:     true,
-		Tools:      mapTools(req.Tools),
-		ToolChoice: renderToolChoice(req.Tools),
+		Model:         req.Model,
+		Messages:      mapMessages(req.System, req.Messages),
+		Stream:        true,
+		StreamOptions: c.streamUsageOption(),
+		Tools:         mapTools(req.Tools),
+		ToolChoice:    renderToolChoice(req.Tools),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-compatible request: %w", err)
@@ -203,12 +228,13 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		var dataLines []string
 		toolCalls := make(map[int]*streamToolCall)
 		toolOrder := make([]int, 0)
+		var state openaiStreamState
 
 		flush := func() {
 			if len(dataLines) == 0 {
 				return
 			}
-			if c.handleChunk(strings.Join(dataLines, "\n"), toolCalls, &toolOrder, out) {
+			if c.handleChunk(strings.Join(dataLines, "\n"), toolCalls, &toolOrder, &state, out) {
 				dataLines = dataLines[:0]
 				return
 			}
@@ -236,14 +262,25 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		}
 
 		c.emitToolUses(toolCalls, toolOrder, out)
-		out <- model.Event{Type: model.EventTypeDone}
+
+		doneEvent := model.Event{Type: model.EventTypeDone}
+		if sr, ok := openAIStopReasonMap[state.finishReason]; ok {
+			doneEvent.StopReason = sr
+		}
+		if state.promptTokens > 0 || state.completionTokens > 0 {
+			doneEvent.Usage = &model.Usage{
+				InputTokens:  state.promptTokens,
+				OutputTokens: state.completionTokens,
+			}
+		}
+		out <- doneEvent
 	}()
 
 	return out, nil
 }
 
 // handleChunk maps one OpenAI-compatible SSE chunk into shared model events and returns whether the chunk ended the stream.
-func (c *Client) handleChunk(data string, toolCalls map[int]*streamToolCall, toolOrder *[]int, out chan<- model.Event) bool {
+func (c *Client) handleChunk(data string, toolCalls map[int]*streamToolCall, toolOrder *[]int, state *openaiStreamState, out chan<- model.Event) bool {
 	if data == "" {
 		return false
 	}
@@ -266,6 +303,12 @@ func (c *Client) handleChunk(data string, toolCalls map[int]*streamToolCall, too
 			Error: payload.Error.Message,
 		}
 		return false
+	}
+
+	// Capture usage when the provider includes it (typically the last chunk).
+	if payload.Usage != nil {
+		state.promptTokens = payload.Usage.PromptTokens
+		state.completionTokens = payload.Usage.CompletionTokens
 	}
 
 	for _, choice := range payload.Choices {
@@ -291,6 +334,9 @@ func (c *Client) handleChunk(data string, toolCalls map[int]*streamToolCall, too
 			if delta.Function.Arguments != "" {
 				call.Arguments.WriteString(delta.Function.Arguments)
 			}
+		}
+		if choice.FinishReason != "" {
+			state.finishReason = choice.FinishReason
 		}
 		if choice.FinishReason == "tool_calls" {
 			c.emitToolUses(toolCalls, *toolOrder, out)
@@ -453,4 +499,13 @@ func resolveChatCompletionsPath(provider string) string {
 		return glmChatCompletionsPath
 	}
 	return defaultChatCompletionsPath
+}
+
+// streamUsageOption returns stream_options with include_usage only when targeting the standard OpenAI API.
+// Other OpenAI-compatible providers may not support this parameter.
+func (c *Client) streamUsageOption() *streamOptionsBody {
+	if c.baseURL == defaultBaseURL {
+		return &streamOptionsBody{IncludeUsage: true}
+	}
+	return nil
 }

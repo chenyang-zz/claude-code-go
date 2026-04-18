@@ -14,12 +14,28 @@ const (
 	EventTypeDone EventType = "done"
 )
 
+// StopReason describes why the model stopped generating tokens.
+type StopReason string
+
+const (
+	// StopReasonEndTurn indicates the model finished its response naturally.
+	StopReasonEndTurn StopReason = "end_turn"
+	// StopReasonMaxTokens indicates the model hit the maximum output token limit.
+	StopReasonMaxTokens StopReason = "max_tokens"
+	// StopReasonToolUse indicates the model stopped to request tool execution.
+	StopReasonToolUse StopReason = "tool_use"
+	// StopReasonStopSequence indicates the model hit a configured stop sequence.
+	StopReasonStopSequence StopReason = "stop_sequence"
+)
+
 // Event carries one provider stream item in a provider-agnostic form.
 type Event struct {
-	Type    EventType
-	Text    string
-	Error   string
-	ToolUse *ToolUse
+	Type       EventType
+	Text       string
+	Error      string
+	ToolUse    *ToolUse
+	StopReason StopReason
+	Usage      *Usage
 }
 
 // Stream is the asynchronous event channel returned by a model client.

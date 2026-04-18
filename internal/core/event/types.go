@@ -1,6 +1,9 @@
 package event
 
-import "github.com/sheepzhao/claude-code-go/internal/core/conversation"
+import (
+	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
+)
 
 // MessageDeltaPayload carries one assistant text chunk rendered to the caller.
 type MessageDeltaPayload struct {
@@ -39,4 +42,26 @@ type ErrorPayload struct {
 // ConversationDonePayload carries the final normalized history produced by one runtime turn.
 type ConversationDonePayload struct {
 	History conversation.History
+	Usage   model.Usage
+}
+
+// UsagePayload carries per-turn and cumulative token usage metrics.
+type UsagePayload struct {
+	TurnUsage       model.Usage
+	CumulativeUsage model.Usage
+	StopReason      string
+}
+
+// RetryAttemptedPayload carries information about one retry attempt.
+type RetryAttemptedPayload struct {
+	Attempt     int
+	MaxAttempts int
+	BackoffMs   int64
+	Error       string
+}
+
+// ModelFallbackPayload carries information about a model fallback switch.
+type ModelFallbackPayload struct {
+	OriginalModel string
+	FallbackModel string
 }
