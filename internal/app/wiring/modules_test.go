@@ -17,7 +17,7 @@ func TestBaseWorkspaceToolsIncludesBash(t *testing.T) {
 
 	modules, err := NewBaseWorkspaceModules(platformfs.NewLocalFS(), policy, coreconfig.PermissionConfig{
 		Allow: []string{"Bash(*)"},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewBaseWorkspaceModules() error = %v", err)
 	}

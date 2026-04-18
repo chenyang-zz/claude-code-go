@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
@@ -27,7 +29,7 @@ import (
 )
 
 // EngineFactory constructs the engine selected by the resolved runtime config together with the shared filesystem policy.
-type EngineFactory func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error)
+type EngineFactory func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error)
 
 // App wires together the minimum batch-07 runtime needed by cmd/cc.
 type App struct {
@@ -62,7 +64,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	applyRuntimeEnvironment(cfg.Env)
 
 	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
-	eng, policy, err := engineFactory(cfg, backgroundTaskStore)
+	taskStore := resolveTaskStore(loader, cfg.HomeDir)
+	eng, policy, err := engineFactory(cfg, backgroundTaskStore, taskStore)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +96,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		localSettingsStore = platformconfig.NewLocalSettingsStore(fileLoader.CWD)
 	}
 
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +116,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -162,7 +165,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
 		return nil, err
 	}
-	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions, backgroundTaskStore)...)
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions, backgroundTaskStore, taskStore)...)
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +312,24 @@ func dereferenceConfig(cfg *coreconfig.Config) coreconfig.Config {
 	return *cfg
 }
 
+// resolveTaskStore builds a task store rooted under the effective home directory.
+func resolveTaskStore(loader coreconfig.Loader, homeDir string) coretask.Store {
+	if homeDir == "" {
+		if fl, ok := loader.(*platformconfig.FileLoader); ok {
+			homeDir = fl.HomeDir
+		}
+	}
+	if homeDir == "" {
+		homeDir, _ = os.UserHomeDir()
+	}
+	if homeDir == "" {
+		return nil
+	}
+	return coretask.NewFileStore(filepath.Join(homeDir, ".claude", "tasks", "default"))
+}
+
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
-func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 	filesystem := platformfs.NewLocalFS()
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 	if err != nil {
@@ -323,7 +342,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		}
 		policy.AddReadRoot(expanded)
 	}
-	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions, backgroundTaskStore)
+	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore)
 	if err != nil {
 		return nil, nil, err
 	}

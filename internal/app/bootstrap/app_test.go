@@ -12,6 +12,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -32,9 +33,10 @@ func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testi
 		},
 	}
 
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		_ = cfg
 		_ = backgroundTaskStore
+		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -92,11 +94,12 @@ func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
 		},
 	}
 
-	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		if got := os.Getenv(envKey); got != "settings" {
 			t.Fatalf("engineFactory observed %s = %q, want settings", envKey, got)
 		}
 		_ = backgroundTaskStore
+		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -122,12 +125,13 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	}
 
 	called := false
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		called = true
 		if cfg.APIKey != "test-key" {
 			t.Fatalf("engine factory cfg = %#v, want api key", cfg)
 		}
 		_ = backgroundTaskStore
+		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -308,7 +312,7 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4-5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	}, runtimesession.NewBackgroundTaskStore())
+	}, runtimesession.NewBackgroundTaskStore(), nil)
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -328,7 +332,7 @@ func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
 		Provider:     coreconfig.ProviderOpenAICompatible,
 		Model:        "gpt-5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	}, runtimesession.NewBackgroundTaskStore())
+	}, runtimesession.NewBackgroundTaskStore(), nil)
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -348,7 +352,7 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 		Provider:     coreconfig.ProviderGLM,
 		Model:        "glm-4.5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	}, runtimesession.NewBackgroundTaskStore())
+	}, runtimesession.NewBackgroundTaskStore(), nil)
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -364,7 +368,7 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil, runtimesession.NewBackgroundTaskStore())
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil, runtimesession.NewBackgroundTaskStore(), nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}

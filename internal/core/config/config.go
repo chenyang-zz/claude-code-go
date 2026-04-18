@@ -9,6 +9,8 @@ import (
 type Config struct {
 	// ProjectPath identifies the current workspace path used for project-scoped runtime behavior.
 	ProjectPath string
+	// HomeDir stores the resolved user home directory used for config and data file paths.
+	HomeDir string
 	// Env stores the filtered settings-sourced environment variables that remain eligible for runtime config resolution and bootstrap application.
 	Env map[string]string
 	// Model overrides the default model selection when provided.

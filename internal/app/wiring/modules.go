@@ -3,6 +3,7 @@ package wiring
 import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
@@ -13,7 +14,11 @@ import (
 	filewrite "github.com/sheepzhao/claude-code-go/internal/services/tools/file_write"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/glob"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/grep"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_create"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_get"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_list"
 	taskstop "github.com/sheepzhao/claude-code-go/internal/services/tools/task_stop"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_update"
 )
 
 // Modules aggregates host-level runtime dependencies assembled during startup.
@@ -37,12 +42,12 @@ func NewModules(tools ...tool.Tool) (Modules, error) {
 }
 
 // NewBaseWorkspaceModules wires the base workspace exploration and editing tools into one registry.
-func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore) (Modules, error) {
-	return NewModules(BaseWorkspaceTools(fs, policy, permissions, backgroundTaskStore)...)
+func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (Modules, error) {
+	return NewModules(BaseWorkspaceTools(fs, policy, permissions, backgroundTaskStore, taskStore)...)
 }
 
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
-func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore) []tool.Tool {
+func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) []tool.Tool {
 	executor := platformshell.NewExecutor()
 	return []tool.Tool{
 		bash.NewToolWithRuntime(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
@@ -52,5 +57,9 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		fileread.NewTool(fs, policy),
 		filewrite.NewTool(fs, policy),
 		fileedit.NewTool(fs, policy),
+		task_create.NewTool(taskStore),
+		task_get.NewTool(taskStore),
+		task_list.NewTool(taskStore),
+		task_update.NewTool(taskStore),
 	}
 }

@@ -88,6 +88,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 
 	cfg := coreconfig.DefaultConfig()
 	cfg.ProjectPath = l.CWD
+	cfg.HomeDir = l.HomeDir
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	sourceEnvs := map[SettingSource]map[string]string{}
