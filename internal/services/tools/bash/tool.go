@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -29,20 +31,40 @@ type ShellExecutor interface {
 	Execute(ctx context.Context, req platformshell.Request) (platformshell.Result, error)
 }
 
+// BackgroundShellExecutor describes the background shell execution dependency used by the Bash tool.
+type BackgroundShellExecutor interface {
+	// Start launches one normalized background shell request and returns a stoppable process handle.
+	Start(req platformshell.Request) (platformshell.BackgroundProcess, error)
+}
+
 // CommandPermissionChecker describes the minimal Bash permission dependency used by the Bash tool.
 type CommandPermissionChecker interface {
 	// Check evaluates whether the provided Bash command is currently allowed to run.
 	Check(command string) platformshell.PermissionEvaluation
 }
 
+// BackgroundTaskStore describes the shared lifecycle store used by background Bash tasks and task-control tools.
+type BackgroundTaskStore interface {
+	// Register inserts one new live background task snapshot into the shared store.
+	Register(task coresession.BackgroundTaskSnapshot, stopper interface{ Stop() error })
+	// Update replaces the stored snapshot for one existing task.
+	Update(task coresession.BackgroundTaskSnapshot) bool
+	// Remove deletes one task from the shared task list.
+	Remove(id string)
+}
+
 // Tool implements the minimum migrated foreground Bash tool path.
 type Tool struct {
 	// executor runs the normalized shell request in the host environment.
 	executor ShellExecutor
+	// backgroundExecutor launches background shell commands when run_in_background is requested.
+	backgroundExecutor BackgroundShellExecutor
 	// permissions checks Bash(...) allow/deny/ask rules before execution starts.
 	permissions CommandPermissionChecker
 	// approvalMode stores the current default approval mode used to interpret ask-style Bash outcomes.
 	approvalMode string
+	// taskStore exposes the shared runtime task lifecycle store used by background Bash tasks.
+	taskStore BackgroundTaskStore
 }
 
 // Input stores the typed request payload accepted by the migrated Bash tool.
@@ -73,20 +95,38 @@ type Output struct {
 	TimedOut bool `json:"timedOut"`
 }
 
+// BackgroundOutput stores the structured result metadata returned when one Bash command starts in the background.
+type BackgroundOutput struct {
+	// TaskID stores the stable runtime task identifier created for the background command.
+	TaskID string `json:"taskId"`
+	// Command echoes the started command string.
+	Command string `json:"command"`
+	// Summary stores the minimum user-visible label registered with the shared task store.
+	Summary string `json:"summary"`
+}
+
 // NewTool constructs a Bash tool with explicit host shell and permission dependencies.
 func NewTool(executor ShellExecutor, permissions CommandPermissionChecker) *Tool {
-	return NewToolWithMode(executor, permissions, "default")
+	return NewToolWithRuntime(executor, permissions, "default", nil)
 }
 
 // NewToolWithMode constructs a Bash tool with explicit host shell, permission, and approval-mode dependencies.
 func NewToolWithMode(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string) *Tool {
+	return NewToolWithRuntime(executor, permissions, approvalMode, nil)
+}
+
+// NewToolWithRuntime constructs a Bash tool with explicit host shell, permission, approval-mode, and background-task dependencies.
+func NewToolWithRuntime(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string, taskStore BackgroundTaskStore) *Tool {
 	if strings.TrimSpace(approvalMode) == "" {
 		approvalMode = "default"
 	}
+	backgroundExecutor, _ := executor.(BackgroundShellExecutor)
 	return &Tool{
-		executor:     executor,
-		permissions:  permissions,
-		approvalMode: approvalMode,
+		executor:           executor,
+		backgroundExecutor: backgroundExecutor,
+		permissions:        permissions,
+		approvalMode:       approvalMode,
+		taskStore:          taskStore,
 	}
 }
 
@@ -136,9 +176,6 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if command == "" {
 		return coretool.Result{Error: "command is required"}, nil
 	}
-	if input.RunInBackground {
-		return coretool.Result{Error: "Background Bash tasks are not available in Claude Code Go yet."}, nil
-	}
 	if input.DangerouslyDisableSandbox {
 		return coretool.Result{Error: "Sandbox override is not available in Claude Code Go yet."}, nil
 	}
@@ -149,7 +186,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	}
 
 	if t.approvalMode == "bypassPermissions" {
-		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+		return t.executeAllowedCommand(ctx, call, input, command, timeoutMilliseconds)
 	}
 
 	evaluation := t.permissions.Check(command)
@@ -167,7 +204,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"working_dir": call.Context.WorkingDir,
 			"command":     normalizedCommand,
 		})
-		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+		return t.executeAllowedCommand(ctx, call, input, command, timeoutMilliseconds)
 	}
 
 	switch evaluation.Decision {
@@ -181,7 +218,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		}, nil
 	case corepermission.DecisionAsk:
 		if t.approvalMode == "acceptEdits" && isAcceptEditsAutoAllowedCommand(normalizedCommand) {
-			return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+			return t.executeAllowedCommand(ctx, call, input, command, timeoutMilliseconds)
 		}
 		if t.approvalMode == "dontAsk" {
 			return coretool.Result{
@@ -201,8 +238,16 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			Message:    evaluation.Message,
 		}
 	default:
-		return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+		return t.executeAllowedCommand(ctx, call, input, command, timeoutMilliseconds)
 	}
+}
+
+// executeAllowedCommand dispatches one already-authorized Bash invocation to the foreground or background execution path.
+func (t *Tool) executeAllowedCommand(ctx context.Context, call coretool.Call, input Input, command string, timeoutMilliseconds int) (coretool.Result, error) {
+	if input.RunInBackground {
+		return t.startBackgroundCommand(call, input, command, timeoutMilliseconds)
+	}
+	return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
 }
 
 // executeForegroundCommand runs one normalized foreground Bash request and maps the process result into the stable tool result shape.
@@ -271,6 +316,97 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 	}, nil
 }
 
+// startBackgroundCommand launches one authorized Bash command in the background and registers it in the shared runtime task store.
+func (t *Tool) startBackgroundCommand(call coretool.Call, input Input, command string, timeoutMilliseconds int) (coretool.Result, error) {
+	if t == nil {
+		return coretool.Result{}, fmt.Errorf("bash tool: nil receiver")
+	}
+	if t.backgroundExecutor == nil {
+		return coretool.Result{Error: "Background Bash tasks are not available in Claude Code Go yet."}, nil
+	}
+	if t.taskStore == nil {
+		return coretool.Result{Error: "Background Bash tasks are not available in Claude Code Go yet."}, nil
+	}
+
+	process, err := t.backgroundExecutor.Start(platformshell.Request{
+		Command:    command,
+		WorkingDir: call.Context.WorkingDir,
+		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
+	})
+	if err != nil {
+		return coretool.Result{
+			Error: fmt.Sprintf("bash tool: %v", err),
+		}, nil
+	}
+
+	output := BackgroundOutput{
+		TaskID:  newBackgroundTaskID(),
+		Command: command,
+		Summary: summarizeBackgroundCommand(input.Description, command),
+	}
+	snapshot := coresession.BackgroundTaskSnapshot{
+		ID:                output.TaskID,
+		Type:              "bash",
+		Status:            coresession.BackgroundTaskStatusRunning,
+		Summary:           output.Summary,
+		ControlsAvailable: true,
+	}
+	t.taskStore.Register(snapshot, process)
+
+	logger.DebugCF("bash_tool", "started background bash task", map[string]any{
+		"task_id":     output.TaskID,
+		"working_dir": call.Context.WorkingDir,
+		"timeout_ms":  timeoutMilliseconds,
+	})
+
+	go t.consumeBackgroundResult(output.TaskID, snapshot, process)
+
+	return coretool.Result{
+		Output: renderBackgroundStart(output),
+		Meta: map[string]any{
+			"data": output,
+		},
+	}, nil
+}
+
+// consumeBackgroundResult observes the background process completion and removes the task from the shared active-task store.
+func (t *Tool) consumeBackgroundResult(taskID string, snapshot coresession.BackgroundTaskSnapshot, process platformshell.BackgroundProcess) {
+	if t == nil || t.taskStore == nil || process == nil {
+		return
+	}
+
+	resultCh := process.Result()
+	if resultCh == nil {
+		return
+	}
+
+	result, ok := <-resultCh
+	if !ok {
+		return
+	}
+
+	switch {
+	case result.TimedOut:
+		snapshot.Status = coresession.BackgroundTaskStatusFailed
+	case result.ExitCode == 0:
+		snapshot.Status = coresession.BackgroundTaskStatusCompleted
+	case result.Canceled:
+		snapshot.Status = coresession.BackgroundTaskStatusStopped
+	default:
+		snapshot.Status = coresession.BackgroundTaskStatusFailed
+	}
+
+	t.taskStore.Update(snapshot)
+	t.taskStore.Remove(taskID)
+
+	logger.DebugCF("bash_tool", "background bash task finished", map[string]any{
+		"task_id":     taskID,
+		"exit_code":   result.ExitCode,
+		"timed_out":   result.TimedOut,
+		"final_state": snapshot.Status,
+	})
+}
+
 // isAcceptEditsAutoAllowedCommand reports whether the normalized Bash command falls inside the minimal acceptEdits auto-allow subset.
 func isAcceptEditsAutoAllowedCommand(command string) bool {
 	trimmed := strings.TrimSpace(command)
@@ -313,7 +449,7 @@ func inputSchema() coretool.InputSchema {
 			},
 			"run_in_background": {
 				Type:        coretool.ValueKindBoolean,
-				Description: "Set to true to run the command in the background. Not yet supported in Claude Code Go.",
+				Description: "Set to true to run the command in the background and return a task identifier.",
 			},
 			"dangerouslyDisableSandbox": {
 				Type:        coretool.ValueKindBoolean,
@@ -321,6 +457,19 @@ func inputSchema() coretool.InputSchema {
 			},
 		},
 	}
+}
+
+// newBackgroundTaskID returns one stable task identifier for a newly started background Bash task.
+func newBackgroundTaskID() string {
+	return fmt.Sprintf("task_%s", strings.ReplaceAll(uuid.NewString(), "-", ""))
+}
+
+// summarizeBackgroundCommand returns the minimum user-visible label used for one background Bash task.
+func summarizeBackgroundCommand(description string, command string) string {
+	if trimmed := strings.TrimSpace(description); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(command)
 }
 
 // resolveTimeoutMilliseconds normalizes the optional caller-supplied timeout against the current defaults and cap.
@@ -381,6 +530,11 @@ func renderSuccess(output Output) string {
 	default:
 		return fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", stdout, stderr)
 	}
+}
+
+// renderBackgroundStart converts one background Bash task creation into a stable caller-facing text payload.
+func renderBackgroundStart(output BackgroundOutput) string {
+	return fmt.Sprintf("Started background task: %s\nCommand: %s", output.TaskID, output.Command)
 }
 
 // renderFailure converts one non-zero exit result into a stable caller-facing error payload.

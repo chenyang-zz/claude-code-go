@@ -6,12 +6,14 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
+	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/bash"
 	fileedit "github.com/sheepzhao/claude-code-go/internal/services/tools/file_edit"
 	fileread "github.com/sheepzhao/claude-code-go/internal/services/tools/file_read"
 	filewrite "github.com/sheepzhao/claude-code-go/internal/services/tools/file_write"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/glob"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/grep"
+	taskstop "github.com/sheepzhao/claude-code-go/internal/services/tools/task_stop"
 )
 
 // Modules aggregates host-level runtime dependencies assembled during startup.
@@ -35,14 +37,16 @@ func NewModules(tools ...tool.Tool) (Modules, error) {
 }
 
 // NewBaseWorkspaceModules wires the base workspace exploration and editing tools into one registry.
-func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig) (Modules, error) {
-	return NewModules(BaseWorkspaceTools(fs, policy, permissions)...)
+func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore) (Modules, error) {
+	return NewModules(BaseWorkspaceTools(fs, policy, permissions, backgroundTaskStore)...)
 }
 
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
-func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig) []tool.Tool {
+func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore) []tool.Tool {
+	executor := platformshell.NewExecutor()
 	return []tool.Tool{
-		bash.NewToolWithMode(platformshell.NewExecutor(), platformshell.NewPermissionChecker(permissions), permissions.DefaultMode),
+		bash.NewToolWithRuntime(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
+		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
 		fileread.NewTool(fs, policy),

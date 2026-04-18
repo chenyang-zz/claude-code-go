@@ -13,6 +13,7 @@ import (
 const (
 	tasksCommandEmptyState = "No background tasks are running.\nBackground task controls are not available in Claude Code Go yet."
 	tasksCommandNoControl  = "Task listing is available, but stop/resume controls are not migrated yet."
+	tasksCommandStopReady  = "Controls: stop available for local bash tasks."
 )
 
 // BackgroundTaskSnapshotLister exposes the minimum runtime task snapshot source consumed by `/tasks`.
@@ -76,7 +77,9 @@ func renderTasksOutput(tasks []coresession.BackgroundTaskSnapshot) string {
 	for _, task := range tasks {
 		lines = append(lines, renderTaskLine(task))
 	}
-	if !tasksControlsAvailable(tasks) {
+	if tasksControlsAvailable(tasks) {
+		lines = append(lines, tasksCommandStopReady)
+	} else {
 		lines = append(lines, tasksCommandNoControl)
 	}
 	return strings.Join(lines, "\n")
@@ -84,7 +87,7 @@ func renderTasksOutput(tasks []coresession.BackgroundTaskSnapshot) string {
 
 // renderTaskLine formats one read-only background task summary line.
 func renderTaskLine(task coresession.BackgroundTaskSnapshot) string {
-	line := fmt.Sprintf("- %s: %s", displayValue(task.Type), displayValue(string(task.Status)))
+	line := fmt.Sprintf("- %s: %s - %s", displayValue(task.ID), displayValue(task.Type), displayValue(string(task.Status)))
 	if summary := strings.TrimSpace(task.Summary); summary != "" {
 		line += fmt.Sprintf(" - %s", summary)
 	}

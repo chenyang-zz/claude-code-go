@@ -15,6 +15,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
+	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 )
 
 type stubLoader struct {
@@ -31,8 +32,9 @@ func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testi
 		},
 	}
 
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		_ = cfg
+		_ = backgroundTaskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -90,10 +92,11 @@ func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
 		},
 	}
 
-	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		if got := os.Getenv(envKey); got != "settings" {
 			t.Fatalf("engineFactory observed %s = %q, want settings", envKey, got)
 		}
+		_ = backgroundTaskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -119,11 +122,12 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	}
 
 	called := false
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 		called = true
 		if cfg.APIKey != "test-key" {
 			t.Fatalf("engine factory cfg = %#v, want api key", cfg)
 		}
+		_ = backgroundTaskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
 			return nil, nil, err
@@ -304,7 +308,7 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4-5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	})
+	}, runtimesession.NewBackgroundTaskStore())
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -324,7 +328,7 @@ func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
 		Provider:     coreconfig.ProviderOpenAICompatible,
 		Model:        "gpt-5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	})
+	}, runtimesession.NewBackgroundTaskStore())
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -344,7 +348,7 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 		Provider:     coreconfig.ProviderGLM,
 		Model:        "glm-4.5",
 		ApprovalMode: approval.ModeBypassPermissions,
-	})
+	}, runtimesession.NewBackgroundTaskStore())
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
@@ -360,7 +364,7 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil)
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil, runtimesession.NewBackgroundTaskStore())
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}

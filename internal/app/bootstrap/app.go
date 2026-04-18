@@ -27,7 +27,7 @@ import (
 )
 
 // EngineFactory constructs the engine selected by the resolved runtime config together with the shared filesystem policy.
-type EngineFactory func(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error)
+type EngineFactory func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error)
 
 // App wires together the minimum batch-07 runtime needed by cmd/cc.
 type App struct {
@@ -61,7 +61,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	}
 	applyRuntimeEnvironment(cfg.Env)
 
-	eng, policy, err := engineFactory(cfg)
+	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
+	eng, policy, err := engineFactory(cfg, backgroundTaskStore)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +93,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		localSettingsStore = platformconfig.NewLocalSettingsStore(fileLoader.CWD)
 	}
 
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore)
 	if err != nil {
 		return nil, err
 	}
@@ -112,9 +113,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
-	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
 		sessionRepository = runner.SessionManager.Repository
@@ -162,7 +162,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
 		return nil, err
 	}
-	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions)...)
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions, backgroundTaskStore)...)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func dereferenceConfig(cfg *coreconfig.Config) coreconfig.Config {
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
-func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore) (engine.Engine, *corepermission.FilesystemPolicy, error) {
 	filesystem := platformfs.NewLocalFS()
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 	if err != nil {
@@ -323,7 +323,7 @@ func DefaultEngineFactory(cfg coreconfig.Config) (engine.Engine, *corepermission
 		}
 		policy.AddReadRoot(expanded)
 	}
-	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions)
+	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions, backgroundTaskStore)
 	if err != nil {
 		return nil, nil, err
 	}

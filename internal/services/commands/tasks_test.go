@@ -62,7 +62,31 @@ func TestTasksCommandExecuteWithTasks(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Background tasks: 2\n- shell: running - build watcher\n- agent: pending - code review draft\nTask listing is available, but stop/resume controls are not migrated yet."
+	want := "Background tasks: 2\n- task-1: shell - running - build watcher\n- task-2: agent - pending - code review draft\nTask listing is available, but stop/resume controls are not migrated yet."
+	if result.Output != want {
+		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+}
+
+// TestTasksCommandExecuteWithControllableTasks verifies /tasks reports stop availability for controllable local bash tasks.
+func TestTasksCommandExecuteWithControllableTasks(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	store.Replace([]coresession.BackgroundTaskSnapshot{
+		{
+			ID:                "task-1",
+			Type:              "bash",
+			Status:            coresession.BackgroundTaskStatusRunning,
+			Summary:           "npm run dev",
+			ControlsAvailable: true,
+		},
+	})
+
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	want := "Background tasks: 1\n- task-1: bash - running - npm run dev\nControls: stop available for local bash tasks."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}

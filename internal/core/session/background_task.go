@@ -8,6 +8,12 @@ const (
 	BackgroundTaskStatusRunning BackgroundTaskStatus = "running"
 	// BackgroundTaskStatusPending marks one task that is queued or waiting.
 	BackgroundTaskStatusPending BackgroundTaskStatus = "pending"
+	// BackgroundTaskStatusCompleted marks one task that finished successfully.
+	BackgroundTaskStatusCompleted BackgroundTaskStatus = "completed"
+	// BackgroundTaskStatusFailed marks one task that exited with a failure status.
+	BackgroundTaskStatusFailed BackgroundTaskStatus = "failed"
+	// BackgroundTaskStatusStopped marks one task that was explicitly stopped by the host.
+	BackgroundTaskStatusStopped BackgroundTaskStatus = "stopped"
 )
 
 // BackgroundTaskSnapshot carries the minimum read-only task summary shared with `/tasks`.

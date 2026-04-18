@@ -62,6 +62,58 @@ func TestExecutorExecuteTimeout(t *testing.T) {
 	}
 }
 
+// TestExecutorStartSuccess verifies the background executor returns one successful result for a completed command.
+func TestExecutorStartSuccess(t *testing.T) {
+	executor := NewExecutor()
+	process, err := executor.Start(Request{
+		Command: successCommandForTest(),
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	result, ok := <-process.Result()
+	if !ok {
+		t.Fatal("Start() result channel closed without a result")
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("Start() exit code = %d, want 0", result.ExitCode)
+	}
+	if result.TimedOut {
+		t.Fatal("Start() TimedOut = true, want false")
+	}
+	if result.Canceled {
+		t.Fatal("Start() Canceled = true, want false")
+	}
+}
+
+// TestExecutorStartStop verifies explicit stop requests surface as canceled background results.
+func TestExecutorStartStop(t *testing.T) {
+	executor := NewExecutor()
+	process, err := executor.Start(Request{
+		Command: timeoutCommandForTest(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := process.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	result, ok := <-process.Result()
+	if !ok {
+		t.Fatal("Stop() result channel closed without a result")
+	}
+	if !result.Canceled {
+		t.Fatal("Stop() Canceled = false, want true")
+	}
+	if result.ExitCode != exitCodeCanceled {
+		t.Fatalf("Stop() exit code = %d, want %d", result.ExitCode, exitCodeCanceled)
+	}
+}
+
 // successCommandForTest returns a cross-platform shell command that prints one deterministic line.
 func successCommandForTest() string {
 	if runtime.GOOS == "windows" {

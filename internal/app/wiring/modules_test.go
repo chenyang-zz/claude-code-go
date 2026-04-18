@@ -17,12 +17,15 @@ func TestBaseWorkspaceToolsIncludesBash(t *testing.T) {
 
 	modules, err := NewBaseWorkspaceModules(platformfs.NewLocalFS(), policy, coreconfig.PermissionConfig{
 		Allow: []string{"Bash(*)"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("NewBaseWorkspaceModules() error = %v", err)
 	}
 
 	if _, ok := modules.Tools.Get("Bash"); !ok {
 		t.Fatal("NewBaseWorkspaceModules() registry missing Bash tool")
+	}
+	if _, ok := modules.Tools.Get("TaskStop"); !ok {
+		t.Fatal("NewBaseWorkspaceModules() registry missing TaskStop tool")
 	}
 }

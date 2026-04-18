@@ -45,6 +45,8 @@ type Result struct {
 	ExitCode int
 	// TimedOut reports whether the host terminated the process after exceeding Timeout.
 	TimedOut bool
+	// Canceled reports whether the host explicitly canceled the process.
+	Canceled bool
 }
 
 // Executor runs foreground shell commands through the host shell implementation.

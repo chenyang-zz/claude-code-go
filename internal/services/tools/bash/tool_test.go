@@ -13,6 +13,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
+	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 )
 
 // TestToolInvokeSuccess verifies the Bash tool executes one allowed foreground command and returns stable text output.
@@ -37,23 +38,42 @@ func TestToolInvokeSuccess(t *testing.T) {
 	}
 }
 
-// TestToolInvokeRejectsBackgroundExecution verifies the current batch keeps background Bash out of scope with a stable message.
-func TestToolInvokeRejectsBackgroundExecution(t *testing.T) {
-	tool := NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{
+// TestToolInvokeStartsBackgroundExecution verifies run_in_background creates one live background task in the shared runtime store.
+func TestToolInvokeStartsBackgroundExecution(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	tool := NewToolWithRuntime(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{
 		Allow: []string{"Bash(*)"},
-	}))
+	}), "default", store)
 
 	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: "Bash",
 		Input: map[string]any{
-			"command":           successCommandForToolTest(),
+			"command":           timeoutCommandForToolTest(),
 			"run_in_background": true,
 		},
 	})
 	if err != nil {
 		t.Fatalf("Invoke() error = %v", err)
 	}
-	if result.Error != "Background Bash tasks are not available in Claude Code Go yet." {
-		t.Fatalf("Invoke() error = %q, want stable background boundary", result.Error)
+	if result.Error != "" {
+		t.Fatalf("Invoke() error output = %q, want empty", result.Error)
+	}
+	if !strings.Contains(result.Output, "Started background task: task_") {
+		t.Fatalf("Invoke() output = %q, want background task start message", result.Output)
+	}
+
+	tasks := store.List()
+	if len(tasks) != 1 {
+		t.Fatalf("List() len = %d, want 1", len(tasks))
+	}
+	if tasks[0].Type != "bash" {
+		t.Fatalf("List()[0].Type = %q, want bash", tasks[0].Type)
+	}
+	if !tasks[0].ControlsAvailable {
+		t.Fatal("List()[0].ControlsAvailable = false, want true")
+	}
+	if _, err := store.Stop(tasks[0].ID); err != nil {
+		t.Fatalf("Stop() error = %v", err)
 	}
 }
 
