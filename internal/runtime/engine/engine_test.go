@@ -993,3 +993,69 @@ func TestRuntimeRunConcurrentBatchPreservesEventOrder(t *testing.T) {
 		t.Fatalf("second finished = %s, want toolu_glob", globFinished.ID)
 	}
 }
+
+// TestRuntimeRun_AutoCompactDisabled verifies that auto-compact is not triggered
+// when AutoCompact is false (default).
+func TestRuntimeRun_AutoCompactDisabled(t *testing.T) {
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			return newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "response",
+			}), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	// AutoCompact defaults to false.
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var hasCompactDone bool
+	for evt := range out {
+		if evt.Type == event.TypeCompactDone {
+			hasCompactDone = true
+		}
+	}
+	if hasCompactDone {
+		t.Error("expected no compact.done event when AutoCompact is disabled")
+	}
+}
+
+// TestRuntimeRun_AutoCompactSmallMessages verifies that auto-compact does not
+// trigger when messages are small.
+func TestRuntimeRun_AutoCompactSmallMessages(t *testing.T) {
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			return newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "response",
+			}), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "short message",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var hasCompactDone bool
+	for evt := range out {
+		if evt.Type == event.TypeCompactDone {
+			hasCompactDone = true
+		}
+	}
+	if hasCompactDone {
+		t.Error("expected no compact.done for small messages")
+	}
+}

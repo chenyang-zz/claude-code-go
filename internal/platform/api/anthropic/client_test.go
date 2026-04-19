@@ -77,6 +77,63 @@ func TestClientStreamReadsTextDelta(t *testing.T) {
 	}
 }
 
+func TestClientStreamUsesTopLevelSystemAndCustomMaxTokens(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		if got := body["system"]; got != "summarize the conversation" {
+			t.Fatalf("request system = %#v, want summarize the conversation", got)
+		}
+		if got := int(body["max_tokens"].(float64)); got != 20000 {
+			t.Fatalf("request max_tokens = %d, want 20000", got)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 1 {
+			t.Fatalf("request messages = %#v, want 1 user message", body["messages"])
+		}
+		first, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("first message = %#v, want object", messages[0])
+		}
+		if got := first["role"]; got != "user" {
+			t.Fatalf("first message role = %#v, want user", got)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model:           "claude-sonnet-4-5",
+		System:          "summarize the conversation",
+		MaxOutputTokens: 20000,
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("[compact_boundary]"),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	for range stream {
+	}
+}
+
 // TestClientStreamUsesAuthToken verifies Anthropic account auth uses a Bearer header when no API key is configured.
 func TestClientStreamUsesAuthToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

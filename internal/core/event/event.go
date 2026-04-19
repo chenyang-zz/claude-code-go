@@ -14,6 +14,7 @@ const (
 	TypeUsage            Type = "usage"
 	TypeRetryAttempted   Type = "retry.attempted"
 	TypeModelFallback    Type = "model.fallback"
+	TypeCompactDone      Type = "compact.done"
 )
 
 type Event struct {

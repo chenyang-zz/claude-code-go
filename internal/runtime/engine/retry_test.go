@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/compact"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 )
@@ -141,6 +144,73 @@ func TestRuntimeRunUsageAccumulation(t *testing.T) {
 	// ConversationDone should carry cumulative usage.
 	if donePayload.Usage.InputTokens != 300 || donePayload.Usage.OutputTokens != 80 {
 		t.Fatalf("done usage = %+v, want 300/80", donePayload.Usage)
+	}
+}
+
+func TestRuntimeRunUsageIncludesAutoCompactSummaryCall(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "40000")
+
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "<summary>carry forward</summary>"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{InputTokens: 80, OutputTokens: 20}},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{InputTokens: 200, OutputTokens: 30}},
+			),
+		},
+	}
+
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	largeInput := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(strings.Repeat("x", compact.GetAutoCompactThreshold("claude-sonnet-4-20250514")*4)),
+		},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Messages:  []message.Message{largeInput},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var usageEvents []event.UsagePayload
+	var donePayload event.ConversationDonePayload
+	for evt := range out {
+		if evt.Type == event.TypeUsage {
+			p, ok := evt.Payload.(event.UsagePayload)
+			if !ok {
+				t.Fatalf("usage payload type = %T", evt.Payload)
+			}
+			usageEvents = append(usageEvents, p)
+		}
+		if evt.Type == event.TypeConversationDone {
+			p, ok := evt.Payload.(event.ConversationDonePayload)
+			if !ok {
+				t.Fatalf("done payload type = %T", evt.Payload)
+			}
+			donePayload = p
+		}
+	}
+
+	if len(usageEvents) != 2 {
+		t.Fatalf("usage event count = %d, want 2", len(usageEvents))
+	}
+	if usageEvents[0].TurnUsage.InputTokens != 80 || usageEvents[0].TurnUsage.OutputTokens != 20 {
+		t.Fatalf("first turn usage = %+v, want 80/20", usageEvents[0].TurnUsage)
+	}
+	if usageEvents[1].CumulativeUsage.InputTokens != 280 || usageEvents[1].CumulativeUsage.OutputTokens != 50 {
+		t.Fatalf("second cumulative usage = %+v, want 280/50", usageEvents[1].CumulativeUsage)
+	}
+	if donePayload.Usage.InputTokens != 280 || donePayload.Usage.OutputTokens != 50 {
+		t.Fatalf("done usage = %+v, want 280/50", donePayload.Usage)
 	}
 }
 

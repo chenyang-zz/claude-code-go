@@ -4,10 +4,13 @@ import "github.com/sheepzhao/claude-code-go/internal/core/message"
 
 // Request describes the minimum model request supported by the migrated runtime.
 type Request struct {
-	Model    string
-	System   string
-	Messages []message.Message
-	Tools    []ToolDefinition
+	Model  string
+	System string
+	// MaxOutputTokens optionally overrides the provider default output cap.
+	// Zero means "use the client's default".
+	MaxOutputTokens int
+	Messages        []message.Message
+	Tools           []ToolDefinition
 }
 
 // ToolUse keeps the existing tool-use shape available for later engine expansion.

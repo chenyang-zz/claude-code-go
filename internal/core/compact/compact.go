@@ -1,0 +1,292 @@
+package compact
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
+)
+
+// CompactionResult holds the output of a successful compaction.
+// Aligns with TS CompactionResult.
+type CompactionResult struct {
+	// Boundary is the compact boundary marker message.
+	Boundary message.Message
+	// SummaryMessages contains the generated summary message followed by any
+	// preserved tail messages from the active in-progress turn.
+	SummaryMessages []message.Message
+	// PreTokenCount is the estimated token count before compaction.
+	PreTokenCount int
+	// PostTokenCount is the estimated token count after compaction.
+	PostTokenCount int
+	// Usage is the token usage reported by the summary model call.
+	Usage model.Usage
+}
+
+// CompactRequest contains the inputs for a compaction operation.
+type CompactRequest struct {
+	// Messages is the full conversation history to compact.
+	Messages []message.Message
+	// Model is the active model identifier (used for context window calculations).
+	Model string
+	// CustomInstructions are optional user-supplied instructions for the summary.
+	CustomInstructions string
+	// TranscriptPath is the optional path to the full transcript file.
+	TranscriptPath string
+}
+
+// CompactConversation performs a full compaction of the conversation:
+// 1. Strip images/documents from messages
+// 2. Generate a summary via LLM direct streaming
+// 3. Assemble post-compact messages (boundary + summary)
+//
+// This implements the minimum full compact path only — no forked agent,
+// no session memory, no partial compact.
+// Aligns with TS compactConversation (simplified).
+func CompactConversation(ctx context.Context, client model.Client, req CompactRequest) (*CompactionResult, error) {
+	if len(req.Messages) == 0 {
+		return nil, fmt.Errorf("not enough messages to compact")
+	}
+
+	preTokenCount := EstimateTokens(req.Messages)
+
+	logger.DebugCF("compact", "starting compaction", map[string]any{
+		"message_count":   len(req.Messages),
+		"pre_token_count": preTokenCount,
+		"model":           req.Model,
+	})
+
+	// Strip images and documents from messages before sending to summarizer.
+	stripped := stripImagesFromMessages(req.Messages)
+
+	// Build the compact prompt and summary request message.
+	compactPrompt := GetCompactPrompt(req.CustomInstructions)
+	summaryRequest := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(compactPrompt),
+		},
+	}
+
+	// Prepare messages for the summarizer: summarize only the compactable
+	// history after the last boundary, while preserving the active turn tail
+	// so the next model call still sees the exact latest user input/tool loop.
+	messagesToSummarize, preservedTail := splitMessagesForCompaction(stripped)
+	messagesToSummarize = append([]message.Message(nil), messagesToSummarize...)
+	preservedTail = append([]message.Message(nil), preservedTail...)
+	messagesToSummarize = append(messagesToSummarize, summaryRequest)
+
+	// Call LLM to generate summary via direct streaming.
+	summary, usage, err := streamCompactSummary(ctx, client, req.Model, messagesToSummarize)
+	if err != nil {
+		return nil, fmt.Errorf("compact summary generation failed: %w", err)
+	}
+
+	// Format the summary: strip analysis tags, convert <summary> tags.
+	formattedSummary := FormatCompactSummary(summary)
+
+	// Build the result.
+	boundary := CreateBoundaryMessage(TriggerAuto, preTokenCount, len(req.Messages))
+	summaryMsg := CreateSummaryMessage(formattedSummary, req.TranscriptPath)
+	summaryMessages := append([]message.Message{summaryMsg}, preservedTail...)
+	postMessages := BuildPostCompactMessages(boundary, summaryMessages...)
+
+	postTokenCount := EstimateTokens(postMessages)
+
+	logger.DebugCF("compact", "compaction complete", map[string]any{
+		"pre_token_count":  preTokenCount,
+		"post_token_count": postTokenCount,
+		"messages_before":  len(req.Messages),
+		"messages_after":   len(postMessages),
+	})
+
+	return &CompactionResult{
+		Boundary:        boundary,
+		SummaryMessages: summaryMessages,
+		PreTokenCount:   preTokenCount,
+		PostTokenCount:  postTokenCount,
+		Usage:           usage,
+	}, nil
+}
+
+// AutoCompactIfNeeded checks whether auto-compact should trigger and
+// executes it if so. Implements the circuit breaker pattern.
+// Aligns with TS autoCompactIfNeeded.
+func AutoCompactIfNeeded(ctx context.Context, client model.Client, messages []message.Message, modelID string, tracking *TrackingState, transcriptPath string) (*CompactionResult, error) {
+	if isEnvTruthy("DISABLE_COMPACT") {
+		return nil, nil
+	}
+
+	// Circuit breaker: stop retrying after consecutive failures.
+	if tracking != nil && tracking.ConsecutiveFailures >= MaxConsecutiveAutoCompactFailures {
+		logger.DebugCF("compact", "circuit breaker tripped, skipping auto-compact", map[string]any{
+			"consecutive_failures": tracking.ConsecutiveFailures,
+		})
+		return nil, nil
+	}
+
+	if !ShouldAutoCompactWithTracking(messages, modelID, tracking) {
+		return nil, nil
+	}
+
+	result, err := CompactConversation(ctx, client, CompactRequest{
+		Messages:       messages,
+		Model:          modelID,
+		TranscriptPath: transcriptPath,
+	})
+	if err != nil {
+		if tracking != nil {
+			tracking.ConsecutiveFailures++
+		}
+		logger.DebugCF("compact", "auto-compact failed", map[string]any{
+			"error": err.Error(),
+		})
+		return nil, err
+	}
+
+	// Reset failure count on success.
+	if tracking != nil {
+		tracking.ConsecutiveFailures = 0
+		tracking.Compacted = true
+	}
+
+	return result, nil
+}
+
+// streamCompactSummary calls the LLM to generate a compact summary via
+// direct streaming (not forked agent). It consumes the stream and
+// concatenates text deltas into the final summary string.
+// Aligns with TS streamCompactSummary (streaming fallback path only).
+func streamCompactSummary(ctx context.Context, client model.Client, modelID string, messages []message.Message) (string, model.Usage, error) {
+	req := model.Request{
+		Model:           modelID,
+		System:          "You are a helpful AI assistant tasked with summarizing conversations.",
+		MaxOutputTokens: MaxOutputTokensForSummary,
+		Messages:        messages,
+		Tools:           nil, // No tools for summary generation.
+	}
+
+	stream, err := client.Stream(ctx, req)
+	if err != nil {
+		return "", model.Usage{}, fmt.Errorf("failed to open summary stream: %w", err)
+	}
+
+	var summaryBuilder strings.Builder
+	var usage model.Usage
+	for event := range stream {
+		switch event.Type {
+		case model.EventTypeTextDelta:
+			summaryBuilder.WriteString(event.Text)
+		case model.EventTypeError:
+			return "", model.Usage{}, fmt.Errorf("summary stream error: %s", event.Error)
+		case model.EventTypeDone:
+			if event.Usage != nil {
+				usage = *event.Usage
+			}
+		}
+	}
+
+	summary := summaryBuilder.String()
+	if summary == "" {
+		return "", model.Usage{}, fmt.Errorf("summary response did not contain valid text content")
+	}
+
+	return summary, usage, nil
+}
+
+// stripImagesFromMessages replaces image and document content blocks in
+// user messages with text markers before sending for summarization.
+// This prevents the summary request itself from hitting token limits.
+// Aligns with TS stripImagesFromMessages.
+func stripImagesFromMessages(messages []message.Message) []message.Message {
+	result := make([]message.Message, len(messages))
+	for i, msg := range messages {
+		if msg.Role != message.RoleUser {
+			result[i] = msg
+			continue
+		}
+
+		hasMedia := false
+		newContent := make([]message.ContentPart, 0, len(msg.Content))
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "image":
+				hasMedia = true
+				newContent = append(newContent, message.TextPart("[image]"))
+			case "document":
+				hasMedia = true
+				newContent = append(newContent, message.TextPart("[document]"))
+			default:
+				newContent = append(newContent, block)
+			}
+		}
+
+		if hasMedia {
+			result[i] = message.Message{Role: msg.Role, Content: newContent}
+		} else {
+			result[i] = msg
+		}
+	}
+	return result
+}
+
+func splitMessagesForCompaction(messages []message.Message) ([]message.Message, []message.Message) {
+	candidate := GetMessagesAfterCompactBoundary(messages)
+	if len(candidate) == 0 {
+		return nil, nil
+	}
+
+	preserveCount := preservedTailCount(candidate)
+	if preserveCount == 0 {
+		return candidate, nil
+	}
+	if preserveCount >= len(candidate) {
+		return nil, candidate
+	}
+
+	return candidate[:len(candidate)-preserveCount], candidate[len(candidate)-preserveCount:]
+}
+
+func preservedTailCount(messages []message.Message) int {
+	if len(messages) == 0 {
+		return 0
+	}
+
+	last := messages[len(messages)-1]
+	if last.Role != message.RoleUser {
+		return 0
+	}
+
+	preserveCount := 1
+	if !containsToolResult(last) || len(messages) < 2 {
+		return preserveCount
+	}
+
+	prev := messages[len(messages)-2]
+	if prev.Role == message.RoleAssistant && containsToolUse(prev) {
+		preserveCount++
+	}
+
+	return preserveCount
+}
+
+func containsToolResult(msg message.Message) bool {
+	for _, part := range msg.Content {
+		if part.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsToolUse(msg message.Message) bool {
+	for _, part := range msg.Content {
+		if part.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}

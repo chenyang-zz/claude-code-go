@@ -56,12 +56,14 @@ type Client struct {
 
 // chatCompletionsRequest stores the minimal OpenAI-compatible request payload used by the runtime.
 type chatCompletionsRequest struct {
-	Model         string             `json:"model"`
-	Messages      []chatMessage      `json:"messages"`
-	Stream        bool               `json:"stream"`
-	StreamOptions *streamOptionsBody `json:"stream_options,omitempty"`
-	Tools         []toolEnvelope     `json:"tools,omitempty"`
-	ToolChoice    string             `json:"tool_choice,omitempty"`
+	Model               string             `json:"model"`
+	Messages            []chatMessage      `json:"messages"`
+	Stream              bool               `json:"stream"`
+	StreamOptions       *streamOptionsBody `json:"stream_options,omitempty"`
+	MaxCompletionTokens int                `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int                `json:"max_tokens,omitempty"`
+	Tools               []toolEnvelope     `json:"tools,omitempty"`
+	ToolChoice          string             `json:"tool_choice,omitempty"`
 }
 
 type streamOptionsBody struct {
@@ -180,12 +182,14 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	}
 
 	body, err := json.Marshal(chatCompletionsRequest{
-		Model:         req.Model,
-		Messages:      mapMessages(req.System, req.Messages),
-		Stream:        true,
-		StreamOptions: c.streamUsageOption(),
-		Tools:         mapTools(req.Tools),
-		ToolChoice:    renderToolChoice(req.Tools),
+		Model:               req.Model,
+		Messages:            mapMessages(req.System, req.Messages),
+		Stream:              true,
+		StreamOptions:       c.streamUsageOption(),
+		MaxCompletionTokens: c.maxCompletionTokens(req),
+		MaxTokens:           c.maxTokens(req),
+		Tools:               mapTools(req.Tools),
+		ToolChoice:          renderToolChoice(req.Tools),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-compatible request: %w", err)
@@ -508,4 +512,18 @@ func (c *Client) streamUsageOption() *streamOptionsBody {
 		return &streamOptionsBody{IncludeUsage: true}
 	}
 	return nil
+}
+
+func (c *Client) maxCompletionTokens(req model.Request) int {
+	if c.provider != coreconfig.ProviderGLM && req.MaxOutputTokens > 0 {
+		return req.MaxOutputTokens
+	}
+	return 0
+}
+
+func (c *Client) maxTokens(req model.Request) int {
+	if req.MaxOutputTokens > 0 {
+		return req.MaxOutputTokens
+	}
+	return 0
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/compact"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -50,6 +51,13 @@ type Runtime struct {
 	MaxToolIterations int
 	// MaxConcurrentToolCalls caps the number of concurrency-safe tool calls that may execute in parallel within one batch.
 	MaxConcurrentToolCalls int
+	// AutoCompact controls whether auto-compaction is enabled in the engine loop.
+	// When true, the engine checks before each API request whether the conversation
+	// token count exceeds the auto-compact threshold.
+	AutoCompact bool
+	// TranscriptPath is the optional file path for full conversation transcripts,
+	// referenced in post-compact summary messages.
+	TranscriptPath string
 }
 
 // New builds the minimum single-turn engine.
@@ -129,8 +137,55 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 	toolLoops := 0
 	var cumulativeUsage model.Usage
 	activeModel := e.activeModel()
+	var compactTracking compact.TrackingState
 
 	for {
+		// Auto-compact check point: before building the API request,
+		// check if the conversation token count exceeds the threshold.
+		if e.AutoCompact && e.Client != nil {
+			compactResult, compactErr := compact.AutoCompactIfNeeded(
+				ctx,
+				e.Client,
+				history.Messages,
+				activeModel,
+				&compactTracking,
+				e.TranscriptPath,
+			)
+			if compactErr != nil {
+				logger.DebugCF("engine", "auto-compact error (continuing)", map[string]any{
+					"session_id": sessionID,
+					"error":      compactErr.Error(),
+				})
+			}
+			if compactResult != nil {
+				// Replace message history with post-compact messages.
+				history.Messages = append(
+					[]message.Message(nil),
+					compactResult.Boundary,
+				)
+				history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+				out <- event.Event{
+					Type:      event.TypeCompactDone,
+					Timestamp: time.Now(),
+					Payload: event.CompactDonePayload{
+						PreTokenCount:  compactResult.PreTokenCount,
+						PostTokenCount: compactResult.PostTokenCount,
+					},
+				}
+				if !compactResult.Usage.IsZero() {
+					cumulativeUsage = cumulativeUsage.Add(compactResult.Usage)
+					out <- event.Event{
+						Type:      event.TypeUsage,
+						Timestamp: time.Now(),
+						Payload: event.UsagePayload{
+							TurnUsage:       compactResult.Usage,
+							CumulativeUsage: cumulativeUsage,
+						},
+					}
+				}
+			}
+		}
+
 		streamReq := model.Request{
 			Model:    activeModel,
 			Messages: history.Messages,

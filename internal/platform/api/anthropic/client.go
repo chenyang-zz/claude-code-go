@@ -44,6 +44,7 @@ type Client struct {
 type messagesRequest struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
+	System    string             `json:"system,omitempty"`
 	Stream    bool               `json:"stream"`
 	Messages  []anthropicMessage `json:"messages"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
@@ -165,7 +166,8 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 
 	body, err := json.Marshal(messagesRequest{
 		Model:     req.Model,
-		MaxTokens: 1024,
+		MaxTokens: maxOutputTokens(req),
+		System:    req.System,
 		Stream:    true,
 		Messages:  mapMessages(req.Messages),
 		Tools:     mapTools(req.Tools),
@@ -270,6 +272,13 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	}()
 
 	return out, nil
+}
+
+func maxOutputTokens(req model.Request) int {
+	if req.MaxOutputTokens > 0 {
+		return req.MaxOutputTokens
+	}
+	return 1024
 }
 
 // handleSSEEvent maps one Anthropic SSE event into the shared model stream format.

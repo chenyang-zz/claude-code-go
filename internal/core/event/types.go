@@ -65,3 +65,9 @@ type ModelFallbackPayload struct {
 	OriginalModel string
 	FallbackModel string
 }
+
+// CompactDonePayload carries information about a completed auto-compaction.
+type CompactDonePayload struct {
+	PreTokenCount  int
+	PostTokenCount int
+}
