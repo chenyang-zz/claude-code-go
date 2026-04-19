@@ -95,3 +95,13 @@ func TestValidateSettingsContentRejectsUnsupportedEffort(t *testing.T) {
 		t.Fatalf("ValidateSettingsContent() error = %q, want effortLevel enum error", result.Error)
 	}
 }
+
+func TestValidateSettingsContentRejectsInvalidHooks(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"hooks\": {\n    \"Stop\": \"not-an-array\"\n  }\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	if !strings.Contains(result.Error, "- hooks: parse hooks for event Stop:") {
+		t.Fatalf("ValidateSettingsContent() error = %q, want hook parse failure", result.Error)
+	}
+}

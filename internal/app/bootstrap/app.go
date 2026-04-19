@@ -9,9 +9,9 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
-	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
@@ -21,6 +21,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
+	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
@@ -365,6 +366,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			HTTPClient: nil,
 		})
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.Hooks = cfg.Hooks
+		runtime.DisableAllHooks = cfg.DisableAllHooks
+		runtime.HookRunner = runtimehooks.NewRunner()
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
@@ -378,6 +382,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			HTTPClient: nil,
 		})
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.Hooks = cfg.Hooks
+		runtime.DisableAllHooks = cfg.DisableAllHooks
+		runtime.HookRunner = runtimehooks.NewRunner()
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(console.NewPrinter(nil), nil),

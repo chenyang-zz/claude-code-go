@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/compact"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -30,6 +32,12 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, call coretool.Call) (coretool.Result, error)
 	// IsConcurrencySafe reports whether the named tool may run in parallel with other safe tools.
 	IsConcurrencySafe(toolName string) bool
+}
+
+// StopHookRunner executes stop hooks and returns the aggregated results.
+type StopHookRunner interface {
+	// RunStopHooks executes all command hooks for the given stop event.
+	RunStopHooks(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string) []hook.HookResult
 }
 
 // Runtime is the minimum single-turn text engine used by batch-07.
@@ -59,6 +67,12 @@ type Runtime struct {
 	// TranscriptPath is the optional file path for full conversation transcripts,
 	// referenced in post-compact summary messages.
 	TranscriptPath string
+	// Hooks stores the hook configuration loaded from settings.
+	Hooks hook.HooksConfig
+	// DisableAllHooks disables all hook execution when set via policy settings.
+	DisableAllHooks bool
+	// HookRunner executes command hooks during the engine lifecycle.
+	HookRunner StopHookRunner
 }
 
 // New builds the minimum single-turn engine.
@@ -90,7 +104,7 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 	out := make(chan event.Event)
 	go func() {
 		defer close(out)
-		if err := e.runLoop(ctx, req.SessionID, req.TurnTokenBudget, history, out); err != nil {
+		if err := e.runLoop(ctx, req.SessionID, req.CWD, req.TurnTokenBudget, history, out); err != nil {
 			out <- event.Event{
 				Type:      event.TypeError,
 				Timestamp: time.Now(),
@@ -219,7 +233,7 @@ const maxContinuationAttempts = 3
 const continuationUserMessage = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."
 
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
-func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget int, history conversation.History, out chan<- event.Event) error {
+func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, history conversation.History, out chan<- event.Event) error {
 	toolLoops := 0
 	continuationAttempts := 0
 	var cumulativeUsage model.Usage
@@ -235,6 +249,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget
 	if turnTokenBudget > 0 {
 		budgetTracker = NewBudgetTracker()
 	}
+	var stopHookActive bool
 
 	for {
 		// Auto-compact check point: before building the API request,
@@ -433,36 +448,89 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget
 				}}
 				continue
 			}
-				// Token budget continuation: when the model stops normally
-				// (not max_tokens) and a token budget is set, check whether
-				// the model should be nudged to keep producing tokens.
-				if turnTokenBudget > 0 && result.stopReason != model.StopReasonMaxTokens {
-					decision := checkTokenBudget(&budgetTracker, "", turnTokenBudget, responseOutputTokens)
-					if decision.Action == "continue" {
-						logger.DebugCF("engine", "token budget continuation", map[string]any{
-							"session_id":           sessionID,
-							"continuation_count":   decision.ContinuationCount,
-							"pct":                  decision.Pct,
-							"turn_output_tokens":   responseOutputTokens,
-							"turn_token_budget":    turnTokenBudget,
-						})
-						transientMessages = []message.Message{{
+			// Token budget continuation: when the model stops normally
+			// (not max_tokens) and a token budget is set, check whether
+			// the model should be nudged to keep producing tokens.
+			if turnTokenBudget > 0 && result.stopReason != model.StopReasonMaxTokens {
+				decision := checkTokenBudget(&budgetTracker, "", turnTokenBudget, responseOutputTokens)
+				if decision.Action == "continue" {
+					logger.DebugCF("engine", "token budget continuation", map[string]any{
+						"session_id":         sessionID,
+						"continuation_count": decision.ContinuationCount,
+						"pct":                decision.Pct,
+						"turn_output_tokens": responseOutputTokens,
+						"turn_token_budget":  turnTokenBudget,
+					})
+					transientMessages = []message.Message{{
+						Role: message.RoleUser,
+						Content: []message.ContentPart{
+							message.TextPart(decision.NudgeMessage),
+						},
+					}}
+					continue
+				}
+				if decision.CompletionEvent != nil {
+					logger.DebugCF("engine", "token budget completed", map[string]any{
+						"session_id":          sessionID,
+						"pct":                 decision.CompletionEvent.Pct,
+						"tokens":              decision.CompletionEvent.Tokens,
+						"diminishing_returns": decision.CompletionEvent.DiminishingReturns,
+					})
+				}
+			}
+			// Execute stop hooks before emitting ConversationDone.
+			// If a stop hook returns exit code 2 (blocking), the error
+			// message is injected into the conversation and the loop
+			// continues with stopHookActive=true so hooks can detect
+			// re-entry and avoid infinite recursion.
+			stopEvent := hook.EventStop
+			if e.shouldRunStopHooks(stopEvent) {
+				lastAssistantText := extractLastAssistantText(history.Messages)
+				input := hook.StopHookInput{
+					BaseHookInput: hook.BaseHookInput{
+						SessionID:      sessionID,
+						TranscriptPath: e.TranscriptPath,
+						CWD:            e.workingDir(cwd),
+					},
+					HookEventName:        string(stopEvent),
+					StopHookActive:       stopHookActive,
+					LastAssistantMessage: lastAssistantText,
+				}
+				results := e.runStopHooks(ctx, stopEvent, input, cwd)
+				// Check for preventContinuation: if any hook returned
+				// stdout JSON with continue:false, terminate immediately.
+				if hasPreventContinuation(results) {
+					logger.DebugCF("engine", "stop hook preventContinuation", map[string]any{
+						"session_id": sessionID,
+					})
+					out <- event.Event{
+						Type:      event.TypeConversationDone,
+						Timestamp: time.Now(),
+						Payload: event.ConversationDonePayload{
+							History: history.Clone(),
+							Usage:   cumulativeUsage,
+						},
+					}
+					return nil
+				}
+				if len(results) > 0 && hasBlockingHookResult(results) {
+					blockingStderrs := blockingStderrMessages(results)
+					logger.DebugCF("engine", "stop hook blocking, continuing conversation", map[string]any{
+						"session_id":     sessionID,
+						"blocking_count": len(blockingStderrs),
+					})
+					stopHookActive = true
+					for _, stderr := range blockingStderrs {
+						history.Append(message.Message{
 							Role: message.RoleUser,
 							Content: []message.ContentPart{
-								message.TextPart(decision.NudgeMessage),
+								message.TextPart(stderr),
 							},
-						}}
-						continue
-					}
-					if decision.CompletionEvent != nil {
-						logger.DebugCF("engine", "token budget completed", map[string]any{
-							"session_id":           sessionID,
-							"pct":                  decision.CompletionEvent.Pct,
-							"tokens":               decision.CompletionEvent.Tokens,
-							"diminishing_returns":  decision.CompletionEvent.DiminishingReturns,
 						})
 					}
+					continue
 				}
+			}
 			out <- event.Event{
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),
@@ -485,13 +553,13 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget
 		// the model will generate a fresh answer after tool results
 		// are injected, so a new truncation chain may begin.
 		continuationAttempts = 0
-			// Reset budget tracker for the next response phase: the model
-			// starts a fresh generation after tool results, so budget state
-			// from the previous response phase should not carry over.
-			if turnTokenBudget > 0 {
-				responseOutputTokens = 0
-				budgetTracker = NewBudgetTracker()
-			}
+		// Reset budget tracker for the next response phase: the model
+		// starts a fresh generation after tool results, so budget state
+		// from the previous response phase should not carry over.
+		if turnTokenBudget > 0 {
+			responseOutputTokens = 0
+			budgetTracker = NewBudgetTracker()
+		}
 		logger.DebugCF("engine", "executing tool loop iteration", map[string]any{
 			"session_id": sessionID,
 			"tool_count": len(result.toolUses),
@@ -500,6 +568,91 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget
 
 		history.Append(e.executeToolUses(ctx, result.toolUses, out))
 	}
+}
+
+// shouldRunStopHooks reports whether stop hooks should execute for the given event.
+func (e *Runtime) shouldRunStopHooks(event hook.HookEvent) bool {
+	if e == nil {
+		return false
+	}
+	if e.DisableAllHooks {
+		return false
+	}
+	if e.HookRunner == nil {
+		return false
+	}
+	return e.Hooks.HasEvent(event)
+}
+
+// runStopHooks executes stop hooks for the given event via the configured runner.
+func (e *Runtime) runStopHooks(ctx context.Context, event hook.HookEvent, input hook.StopHookInput, cwd string) []hook.HookResult {
+	if e.HookRunner == nil {
+		return nil
+	}
+	return e.HookRunner.RunStopHooks(ctx, e.Hooks, event, input, e.workingDir(cwd))
+}
+
+// workingDir returns the working directory used for hook execution context.
+func (e *Runtime) workingDir(requestCWD string) string {
+	if e == nil {
+		return ""
+	}
+	if trimmed := strings.TrimSpace(requestCWD); trimmed != "" {
+		return trimmed
+	}
+	if transcriptPath := strings.TrimSpace(e.TranscriptPath); transcriptPath != "" {
+		return filepath.Dir(transcriptPath)
+	}
+	return ""
+}
+
+// extractLastAssistantText returns the text content of the last assistant message.
+func extractLastAssistantText(messages []message.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == message.RoleAssistant {
+			var parts []string
+			for _, part := range messages[i].Content {
+				if part.Type == "text" && part.Text != "" {
+					parts = append(parts, part.Text)
+				}
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, "\n")
+			}
+		}
+	}
+	return ""
+}
+
+// hasBlockingHookResult reports whether any hook result indicates a blocking error (exit code 2).
+func hasBlockingHookResult(results []hook.HookResult) bool {
+	for _, r := range results {
+		if r.IsBlocking() {
+			return true
+		}
+	}
+	return false
+}
+
+// blockingStderrMessages collects stderr from all blocking hook results (exit code 2).
+func blockingStderrMessages(results []hook.HookResult) []string {
+	var msgs []string
+	for _, r := range results {
+		if r.IsBlocking() && strings.TrimSpace(r.Stderr) != "" {
+			msgs = append(msgs, r.Stderr)
+		}
+	}
+	return msgs
+}
+
+// hasPreventContinuation reports whether any hook result requests conversation termination.
+func hasPreventContinuation(results []hook.HookResult) bool {
+	for _, r := range results {
+		if r.PreventContinuation {
+			return true
+		}
+	}
+	return false
 }
 
 // activeModel returns the configured model, falling back to DefaultModel.

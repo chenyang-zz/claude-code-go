@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
@@ -98,6 +100,40 @@ func (e stubEngine) Run(ctx context.Context, req conversation.RunRequest) (event
 }
 
 var _ engine.Engine = stubEngine{}
+
+func TestDefaultEngineFactoryWiresHookRuntimeConfig(t *testing.T) {
+	cfg := coreconfig.Config{
+		Provider:        coreconfig.ProviderAnthropic,
+		Model:           "claude-sonnet-4-5",
+		APIKey:          "test-key",
+		ApprovalMode:    "default",
+		DisableAllHooks: true,
+		Hooks: hook.HooksConfig{
+			hook.EventStop: []hook.HookMatcher{{
+				Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo ok"}`)},
+			}},
+		},
+	}
+
+	eng, _, err := DefaultEngineFactory(cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("DefaultEngineFactory() error = %v", err)
+	}
+
+	runtime, ok := eng.(*engine.Runtime)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() engine type = %T, want *engine.Runtime", eng)
+	}
+	if runtime.HookRunner == nil {
+		t.Fatal("DefaultEngineFactory() HookRunner = nil, want runner")
+	}
+	if !runtime.DisableAllHooks {
+		t.Fatal("DefaultEngineFactory() DisableAllHooks = false, want true")
+	}
+	if !reflect.DeepEqual(runtime.Hooks, cfg.Hooks) {
+		t.Fatalf("DefaultEngineFactory() Hooks = %#v, want %#v", runtime.Hooks, cfg.Hooks)
+	}
+}
 
 // TestNewAppWithDependenciesAppliesSettingsEnv verifies bootstrap writes merged settings.env into the current process.
 func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {

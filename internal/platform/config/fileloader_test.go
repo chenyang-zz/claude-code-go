@@ -792,3 +792,26 @@ func TestFileLoaderLoadTracksTransportDiagnostics(t *testing.T) {
 		t.Fatalf("Load() mTLS client key path = %q, want /etc/ssl/client-key.pem", cfg.MTLSClientKeyPath)
 	}
 }
+
+func TestFileLoaderLoadRejectsInvalidHooksConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"hooks":{"Stop":"not-an-array"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+
+	_, err := loader.Load(context.Background())
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid hooks error")
+	}
+	if !strings.Contains(err.Error(), "parse hooks for event Stop") {
+		t.Fatalf("Load() error = %q, want hook parse failure", err.Error())
+	}
+}

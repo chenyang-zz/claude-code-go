@@ -159,6 +159,7 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 	stream, err := r.Engine.Run(ctx, conversation.RunRequest{
 		SessionID: r.sessionID(),
 		Messages:  requestHistory.Messages,
+		CWD:       r.ProjectPath,
 	})
 	if err != nil {
 		return err

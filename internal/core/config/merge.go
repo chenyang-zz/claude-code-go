@@ -1,5 +1,7 @@
 package config
 
+import "github.com/sheepzhao/claude-code-go/internal/core/hook"
+
 func Merge(base, override Config) Config {
 	if override.ProjectPath != "" {
 		base.ProjectPath = override.ProjectPath
@@ -79,6 +81,10 @@ func Merge(base, override Config) Config {
 		base.SessionDBPath = override.SessionDBPath
 	}
 	base.Permissions = mergePermissionConfig(base.Permissions, override.Permissions)
+	base.Hooks = hook.MergeHooksConfig(base.Hooks, override.Hooks)
+	if override.DisableAllHooks {
+		base.DisableAllHooks = true
+	}
 	return base
 }
 

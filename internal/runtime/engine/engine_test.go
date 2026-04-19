@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -73,6 +75,30 @@ func (s *fakeApprovalService) Decide(ctx context.Context, req approval.Request) 
 	_ = ctx
 	s.requests = append(s.requests, req)
 	return s.response, nil
+}
+
+type fakeStopHookRunner struct {
+	results []hook.HookResult
+	calls   []struct {
+		event hook.HookEvent
+		input any
+		cwd   string
+	}
+}
+
+func (r *fakeStopHookRunner) RunStopHooks(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string) []hook.HookResult {
+	_ = ctx
+	_ = config
+	r.calls = append(r.calls, struct {
+		event hook.HookEvent
+		input any
+		cwd   string
+	}{
+		event: event,
+		input: input,
+		cwd:   cwd,
+	})
+	return append([]hook.HookResult(nil), r.results...)
 }
 
 func newModelStream(events ...model.Event) model.Stream {
@@ -166,6 +192,54 @@ func TestRuntimeRunConvertsToolUse(t *testing.T) {
 	errorEvent := <-out
 	if errorEvent.Type != event.TypeError {
 		t.Fatalf("Run() second event type = %q, want error for missing executor", errorEvent.Type)
+	}
+}
+
+func TestRuntimeRunStopHooksUseRequestCWD(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.TranscriptPath = "/tmp/transcript.jsonl"
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventStop: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo ok"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello",
+		CWD:       "/workspace/project",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(hookRunner.calls) != 1 {
+		t.Fatalf("RunStopHooks() call count = %d, want 1", len(hookRunner.calls))
+	}
+	if hookRunner.calls[0].cwd != "/workspace/project" {
+		t.Fatalf("RunStopHooks() cwd = %q, want request cwd", hookRunner.calls[0].cwd)
+	}
+	input, ok := hookRunner.calls[0].input.(hook.StopHookInput)
+	if !ok {
+		t.Fatalf("RunStopHooks() input type = %T, want hook.StopHookInput", hookRunner.calls[0].input)
+	}
+	if input.CWD != "/workspace/project" {
+		t.Fatalf("hook input cwd = %q, want request cwd", input.CWD)
+	}
+	if input.TranscriptPath != "/tmp/transcript.jsonl" {
+		t.Fatalf("hook input transcript path = %q, want runtime transcript path", input.TranscriptPath)
 	}
 }
 

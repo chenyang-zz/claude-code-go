@@ -6,6 +6,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 )
 
 const (
@@ -142,6 +144,16 @@ func SettingsSchemaDocument() map[string]any {
 					"additionalDirectories":        settingsStringArraySchema("Additional directories to include in permission scope"),
 				},
 			},
+			"hooks": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"description":          "Hook configuration mapped by event name",
+				"properties":           map[string]any{},
+			},
+			"disableAllHooks": map[string]any{
+				"type":        "boolean",
+				"description": "Disable all hook execution",
+			},
 		},
 	}
 }
@@ -216,6 +228,12 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			}
 		case "permissions":
 			issues = append(issues, validatePermissionsField(objectValue[key])...)
+		case "hooks":
+			issues = append(issues, validateHooksField(key, objectValue[key])...)
+		case "disableAllHooks":
+			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
 		default:
 			issues = append(issues, ValidationIssue{
 				Path:    key,
@@ -225,6 +243,32 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 	}
 
 	return issues
+}
+
+func validateHooksField(path string, value any) []ValidationIssue {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Invalid hooks configuration: %v", err),
+		}}
+	}
+
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected object, but received invalid hooks value: %v", err),
+		}}
+	}
+
+	if _, err := hook.ParseHooksConfig(decoded); err != nil {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: err.Error(),
+		}}
+	}
+	return nil
 }
 
 // settingsStringArraySchema builds the shared JSON schema for string-array fields.

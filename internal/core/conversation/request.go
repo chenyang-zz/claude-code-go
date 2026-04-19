@@ -15,4 +15,8 @@ type RunRequest struct {
 	// is reached or diminishing returns are detected. Zero or negative means
 	// no budget tracking.
 	TurnTokenBudget int
+	// CWD is the current working directory used for hook execution context.
+	CWD string
+	// PermissionMode is the active permission mode (e.g. "default", "plan").
+	PermissionMode string
 }

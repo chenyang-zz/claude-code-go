@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -52,6 +53,8 @@ type settingsFile struct {
 		AdditionalDirectories        []string `json:"additionalDirectories"`
 		DisableBypassPermissionsMode string   `json:"disableBypassPermissionsMode"`
 	} `json:"permissions"`
+	Hooks           map[string]json.RawMessage `json:"hooks"`
+	DisableAllHooks bool                       `json:"disableAllHooks"`
 }
 
 // NewFileLoader builds a minimal loader with explicit lookup roots.
@@ -330,6 +333,15 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 		additionalDirectorySourceFromSettingSource(settingSource),
 	)
 
+	var hooksCfg hook.HooksConfig
+	if len(parsed.Hooks) > 0 {
+		var err error
+		hooksCfg, err = hook.ParseHooksConfig(parsed.Hooks)
+		if err != nil {
+			return coreconfig.Config{}, fmt.Errorf("parse hooks config in %s: %w", source, err)
+		}
+	}
+
 	return coreconfig.Config{
 		Env:                   cloneStringMap(parsed.Env),
 		Model:                 parsed.Model,
@@ -357,6 +369,8 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 			AdditionalDirectoryEntries:   directoryEntries,
 			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
 		},
+		Hooks:           hooksCfg,
+		DisableAllHooks: parsed.DisableAllHooks,
 	}, nil
 }
 

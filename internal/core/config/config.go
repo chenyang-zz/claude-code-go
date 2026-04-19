@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 )
 
 // Config stores the minimal runtime configuration currently consumed by the Go host.
@@ -71,6 +73,10 @@ type Config struct {
 	RemoteSession RemoteSessionConfig
 	// Permissions stores the migrated read-only permission settings surfaced to slash commands.
 	Permissions PermissionConfig
+	// Hooks stores the hook configuration loaded from settings, keyed by event name.
+	Hooks hook.HooksConfig
+	// DisableAllHooks disables all hook execution when set via policy settings.
+	DisableAllHooks bool
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.
