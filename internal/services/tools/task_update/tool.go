@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 )
 
 const (
@@ -17,6 +19,12 @@ const (
 // StatusDeleted is the special status value that triggers task deletion.
 const StatusDeleted = "deleted"
 
+// HookDispatcher dispatches hook events for task lifecycle hooks.
+type HookDispatcher interface {
+	// RunHooks executes hooks for the given event and returns results.
+	RunHooks(ctx context.Context, event hook.HookEvent, input any, cwd string) []hook.HookResult
+}
+
 // TaskUpdater describes the minimum store capability consumed by the update tool.
 type TaskUpdater interface {
 	Get(ctx context.Context, id string) (*coretask.Task, error)
@@ -26,12 +34,20 @@ type TaskUpdater interface {
 
 // Tool updates an existing task or deletes it when status is "deleted".
 type Tool struct {
-	store TaskUpdater
+	store           TaskUpdater
+	hooks           HookDispatcher
+	hookCfg         hook.HooksConfig
+	disableAllHooks bool
 }
 
 // NewTool constructs a TaskUpdate tool backed by the given store.
 func NewTool(store TaskUpdater) *Tool {
 	return &Tool{store: store}
+}
+
+// NewToolWithHooks constructs a TaskUpdate tool with hook dispatch capability.
+func NewToolWithHooks(store TaskUpdater, dispatcher HookDispatcher, hookCfg hook.HooksConfig, disableAllHooks bool) *Tool {
+	return &Tool{store: store, hooks: dispatcher, hookCfg: hookCfg, disableAllHooks: disableAllHooks}
 }
 
 // Input stores the typed request payload accepted by the TaskUpdate tool.
@@ -262,6 +278,31 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		updatedFields = append(updatedFields, "blockedBy")
 	}
 
+	// TaskCompleted hooks: run before applying the status update to "completed".
+	if updates.Status != nil && *updates.Status == coretask.StatusCompleted && t.shouldRunTaskHooks(hook.EventTaskCompleted) {
+		hookInput := hook.TaskHookInput{
+			BaseHookInput: hook.BaseHookInput{
+				CWD: call.Context.WorkingDir,
+			},
+			HookEventName:   string(hook.EventTaskCompleted),
+			TaskID:          input.TaskID,
+			TaskSubject:     existing.Subject,
+			TaskDescription: existing.Description,
+		}
+		results := t.hooks.RunHooks(ctx, hook.EventTaskCompleted, hookInput, call.Context.WorkingDir)
+		if runtimehooks.HasBlockingResult(results) {
+			errs := runtimehooks.BlockingErrors(results)
+			return coretool.Result{
+				Error: strings.Join(errs, "\n"),
+				Meta: map[string]any{"data": Output{
+					Success: false,
+					TaskID:  input.TaskID,
+					Error:   strings.Join(errs, "\n"),
+				}},
+			}, nil
+		}
+	}
+
 	// Apply all updates and reverse dependency mutations under a single store lock.
 	if len(updatedFields) > 0 {
 		updated, err := t.store.UpdateWithDependencies(ctx, input.TaskID, updates, newBlocks, newBlockedBy)
@@ -333,4 +374,15 @@ func filterNew(existing []string, candidates []string) []string {
 		}
 	}
 	return result
+}
+
+// shouldRunTaskHooks reports whether task lifecycle hooks should execute.
+func (t *Tool) shouldRunTaskHooks(event hook.HookEvent) bool {
+	if t.hooks == nil || t.hookCfg == nil {
+		return false
+	}
+	if t.disableAllHooks {
+		return false
+	}
+	return t.hookCfg.HasEvent(event)
 }

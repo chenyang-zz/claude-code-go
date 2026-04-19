@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -34,10 +36,12 @@ type ToolExecutor interface {
 	IsConcurrencySafe(toolName string) bool
 }
 
-// StopHookRunner executes stop hooks and returns the aggregated results.
-type StopHookRunner interface {
+// HookRunner executes lifecycle hooks and returns the aggregated results.
+type HookRunner interface {
 	// RunStopHooks executes all command hooks for the given stop event.
 	RunStopHooks(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string) []hook.HookResult
+	// RunHooksForTool executes hooks filtered by tool name for tool lifecycle events.
+	RunHooksForTool(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string, toolName string) []hook.HookResult
 }
 
 // Runtime is the minimum single-turn text engine used by batch-07.
@@ -67,12 +71,14 @@ type Runtime struct {
 	// TranscriptPath is the optional file path for full conversation transcripts,
 	// referenced in post-compact summary messages.
 	TranscriptPath string
+	// sessionID is set per-run and used by hook inputs.
+	sessionID string
 	// Hooks stores the hook configuration loaded from settings.
 	Hooks hook.HooksConfig
 	// DisableAllHooks disables all hook execution when set via policy settings.
 	DisableAllHooks bool
 	// HookRunner executes command hooks during the engine lifecycle.
-	HookRunner StopHookRunner
+	HookRunner HookRunner
 }
 
 // New builds the minimum single-turn engine.
@@ -234,6 +240,7 @@ const continuationUserMessage = "Output token limit hit. Resume directly — no 
 
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
 func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, history conversation.History, out chan<- event.Event) error {
+	e.sessionID = sessionID
 	toolLoops := 0
 	continuationAttempts := 0
 	var cumulativeUsage model.Usage
@@ -584,6 +591,11 @@ func (e *Runtime) shouldRunStopHooks(event hook.HookEvent) bool {
 	return e.Hooks.HasEvent(event)
 }
 
+// shouldRunToolHooks reports whether tool-level hooks should execute for the given event.
+func (e *Runtime) shouldRunToolHooks(event hook.HookEvent) bool {
+	return e.shouldRunStopHooks(event)
+}
+
 // runStopHooks executes stop hooks for the given event via the configured runner.
 func (e *Runtime) runStopHooks(ctx context.Context, event hook.HookEvent, input hook.StopHookInput, cwd string) []hook.HookResult {
 	if e.HookRunner == nil {
@@ -917,11 +929,37 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 
 // executeToolUse resolves one tool call and branches into the approval flow when the tool is blocked by a permission ask.
 func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out chan<- event.Event) (coretool.Result, error) {
-	result, invokeErr := e.Executor.Execute(ctx, call)
-	if invokeErr == nil {
-		return result, nil
+	// PreToolUse hooks: run before tool execution, blocking prevents the call.
+	if e.shouldRunToolHooks(hook.EventPreToolUse) {
+		toolInput, _ := json.Marshal(call.Input)
+		input := hook.PreToolHookInput{
+			BaseHookInput: hook.BaseHookInput{
+				SessionID:      e.sessionID,
+				TranscriptPath: e.TranscriptPath,
+				CWD:            e.workingDir(""),
+			},
+			HookEventName: string(hook.EventPreToolUse),
+			ToolName:      call.Name,
+			ToolInput:     toolInput,
+			ToolUseID:     call.ID,
+		}
+		results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPreToolUse, input, e.workingDir(""), call.Name)
+		if runtimehooks.HasBlockingResult(results) {
+			errs := runtimehooks.BlockingErrors(results)
+			return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+		}
+		if runtimehooks.HasErrorResult(results) {
+			for _, msg := range runtimehooks.ErrorMessages(results) {
+				logger.DebugCF("engine", "pre-tool hook error", map[string]any{
+					"tool":   call.Name,
+					"error":  msg,
+					"use_id": call.ID,
+				})
+			}
+		}
 	}
 
+	result, invokeErr := e.Executor.Execute(ctx, call)
 	var permissionErr *corepermission.PermissionError
 	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
 		return e.executeFilesystemApproval(ctx, call, permissionErr, out)
@@ -930,6 +968,59 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 	var bashPermissionErr *corepermission.BashPermissionError
 	if errors.As(invokeErr, &bashPermissionErr) && bashPermissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
 		return e.executeBashApproval(ctx, call, bashPermissionErr, out)
+	}
+
+	if invokeErr == nil && strings.TrimSpace(result.Error) == "" {
+		// PostToolUse hooks: run after successful tool execution.
+		if e.shouldRunToolHooks(hook.EventPostToolUse) {
+			toolInput, _ := json.Marshal(call.Input)
+			toolResponse, _ := json.Marshal(result.Output)
+			input := hook.PostToolHookInput{
+				BaseHookInput: hook.BaseHookInput{
+					SessionID:      e.sessionID,
+					TranscriptPath: e.TranscriptPath,
+					CWD:            e.workingDir(""),
+				},
+				HookEventName: string(hook.EventPostToolUse),
+				ToolName:      call.Name,
+				ToolInput:     toolInput,
+				ToolResponse:  toolResponse,
+				ToolUseID:     call.ID,
+			}
+			results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPostToolUse, input, e.workingDir(""), call.Name)
+			if runtimehooks.HasBlockingResult(results) {
+				errs := runtimehooks.BlockingErrors(results)
+				return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+			}
+		}
+		return result, nil
+	}
+
+	if e.shouldRunToolHooks(hook.EventPostToolUseFailure) {
+		toolInput, _ := json.Marshal(call.Input)
+		toolResponse, _ := json.Marshal(result.Output)
+		input := hook.PostToolFailureHookInput{
+			BaseHookInput: hook.BaseHookInput{
+				SessionID:      e.sessionID,
+				TranscriptPath: e.TranscriptPath,
+				CWD:            e.workingDir(""),
+			},
+			HookEventName: string(hook.EventPostToolUseFailure),
+			ToolName:      call.Name,
+			ToolInput:     toolInput,
+			ToolResponse:  toolResponse,
+			ToolError:     renderToolFailure(result, invokeErr),
+			ToolUseID:     call.ID,
+		}
+		results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPostToolUseFailure, input, e.workingDir(""), call.Name)
+		if runtimehooks.HasBlockingResult(results) {
+			errs := runtimehooks.BlockingErrors(results)
+			return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+		}
+	}
+
+	if invokeErr == nil {
+		return result, nil
 	}
 
 	return result, invokeErr
@@ -1017,15 +1108,22 @@ func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, p
 // renderToolResult normalizes executor success and failure paths into the minimal tool_result payload understood by the model.
 func renderToolResult(result coretool.Result, invokeErr error) (string, bool) {
 	if invokeErr != nil {
-		if strings.TrimSpace(result.Error) != "" {
-			return result.Error, true
-		}
-		return invokeErr.Error(), true
+		return renderToolFailure(result, invokeErr), true
 	}
 	if strings.TrimSpace(result.Error) != "" {
 		return result.Error, true
 	}
 	return result.Output, false
+}
+
+func renderToolFailure(result coretool.Result, invokeErr error) string {
+	if strings.TrimSpace(result.Error) != "" {
+		return result.Error
+	}
+	if invokeErr != nil {
+		return invokeErr.Error()
+	}
+	return ""
 }
 
 // maxToolIterations returns the configured loop cap, falling back to the default minimum when unset.

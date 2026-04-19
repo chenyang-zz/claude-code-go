@@ -1,5 +1,7 @@
 package hook
 
+import "encoding/json"
+
 // HookSource identifies which settings layer contributed a hook.
 type HookSource string
 
@@ -63,6 +65,74 @@ type StopFailureHookInput struct {
 	ErrorDetails string `json:"error_details,omitempty"`
 	// LastAssistantMessage contains the text of the last assistant message, if any.
 	LastAssistantMessage string `json:"last_assistant_message,omitempty"`
+}
+
+// PreToolHookInput is the JSON payload piped to PreToolUse event hooks via stdin.
+// Hooks receive this before the tool is executed and can block the execution
+// by returning exit code 2.
+type PreToolHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PreToolUse".
+	HookEventName string `json:"hook_event_name"`
+	// ToolName is the name of the tool about to be executed.
+	ToolName string `json:"tool_name"`
+	// ToolInput contains the raw tool arguments as JSON.
+	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolUseID is the unique identifier for this tool use call.
+	ToolUseID string `json:"tool_use_id"`
+}
+
+// PostToolHookInput is the JSON payload piped to PostToolUse event hooks via stdin.
+// Hooks receive this after the tool completes successfully and can signal
+// a blocking error by returning exit code 2.
+type PostToolHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PostToolUse".
+	HookEventName string `json:"hook_event_name"`
+	// ToolName is the name of the tool that was executed.
+	ToolName string `json:"tool_name"`
+	// ToolInput contains the raw tool arguments as JSON.
+	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolResponse contains the raw tool response output as JSON.
+	ToolResponse json.RawMessage `json:"tool_response"`
+	// ToolUseID is the unique identifier for this tool use call.
+	ToolUseID string `json:"tool_use_id"`
+}
+
+// PostToolFailureHookInput is the JSON payload piped to PostToolUseFailure hooks via stdin.
+// Hooks receive this after the tool completes with an error result or execution failure.
+type PostToolFailureHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PostToolUseFailure".
+	HookEventName string `json:"hook_event_name"`
+	// ToolName is the name of the tool that was executed.
+	ToolName string `json:"tool_name"`
+	// ToolInput contains the raw tool arguments as JSON.
+	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolResponse contains the raw tool response output as JSON when available.
+	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
+	// ToolError contains the tool error surfaced to the model.
+	ToolError string `json:"tool_error"`
+	// ToolUseID is the unique identifier for this tool use call.
+	ToolUseID string `json:"tool_use_id"`
+}
+
+// TaskHookInput is the shared JSON payload piped to TaskCreated and TaskCompleted
+// event hooks via stdin. Both events use identical fields; only HookEventName differs.
+type TaskHookInput struct {
+	BaseHookInput
+	// HookEventName is "TaskCreated" or "TaskCompleted".
+	HookEventName string `json:"hook_event_name"`
+	// TaskID is the unique identifier of the task.
+	TaskID string `json:"task_id"`
+	// TaskSubject is the task title.
+	TaskSubject string `json:"task_subject"`
+	// TaskDescription is the optional task description.
+	TaskDescription string `json:"task_description,omitempty"`
+	// TeammateName is the optional agent name that created or completed the task.
+	TeammateName string `json:"teammate_name,omitempty"`
+	// TeamName is the optional team name the agent belongs to.
+	TeamName string `json:"team_name,omitempty"`
 }
 
 // HookResult captures the outcome of executing a single hook command.

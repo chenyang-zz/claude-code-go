@@ -350,7 +350,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		}
 		policy.AddReadRoot(expanded)
 	}
-	modules, err := wiring.NewBaseWorkspaceModules(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore)
+
+	hookRunner := runtimehooks.NewRunner()
+	modules, err := wiring.NewBaseWorkspaceModulesWithHooks(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore, hookRunner, cfg.Hooks, cfg.DisableAllHooks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -368,7 +370,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
-		runtime.HookRunner = runtimehooks.NewRunner()
+		runtime.HookRunner = hookRunner
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
@@ -384,7 +386,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
-		runtime.HookRunner = runtimehooks.NewRunner()
+		runtime.HookRunner = hookRunner
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(console.NewPrinter(nil), nil),

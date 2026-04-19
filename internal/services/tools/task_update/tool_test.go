@@ -2,8 +2,11 @@ package task_update
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 )
@@ -474,5 +477,130 @@ func TestUpdateTool_NilReceiver(t *testing.T) {
 	_, err := tool.Invoke(context.Background(), coretool.Call{})
 	if err == nil {
 		t.Fatal("Expected error for nil receiver")
+	}
+}
+
+// mockCompletedHookDispatcher returns blocking results for TaskCompleted events.
+type mockCompletedHookDispatcher struct {
+	called bool
+	events []hook.HookEvent
+}
+
+func (m *mockCompletedHookDispatcher) RunHooks(_ context.Context, event hook.HookEvent, _ any, _ string) []hook.HookResult {
+	m.called = true
+	m.events = append(m.events, event)
+	return []hook.HookResult{{ExitCode: 2, Stderr: "task completion blocked by policy"}}
+}
+
+func TestUpdateTool_TaskCompletedHookBlocking(t *testing.T) {
+	completed := "completed"
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "1",
+			Subject: "Test task",
+			Status:  coretask.StatusInProgress,
+		},
+	}
+	dispatcher := &mockCompletedHookDispatcher{}
+	hookCfg := hook.HooksConfig{
+		hook.EventTaskCompleted: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo block"}`)},
+		}},
+	}
+	tool := NewToolWithHooks(store, dispatcher, hookCfg, false)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "1",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "task completion blocked by policy") {
+		t.Fatalf("Error = %q, want to contain blocking message", result.Error)
+	}
+	if result.Output != "" {
+		t.Fatalf("Output = %q, want empty on blocked completion", result.Output)
+	}
+	if !dispatcher.called {
+		t.Error("HookDispatcher.RunHooks was not called")
+	}
+	// The store should NOT have been updated (blocking prevents status change).
+	if store.updateWithDependenciesCalled {
+		t.Error("store.UpdateWithDependencies was called, but the update should have been blocked")
+	}
+}
+
+func TestUpdateTool_TaskCompletedHookDisabledByPolicy(t *testing.T) {
+	completed := "completed"
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "1",
+			Subject: "Test task",
+			Status:  coretask.StatusInProgress,
+		},
+	}
+	dispatcher := &mockCompletedHookDispatcher{}
+	hookCfg := hook.HooksConfig{
+		hook.EventTaskCompleted: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo block"}`)},
+		}},
+	}
+	tool := NewToolWithHooks(store, dispatcher, hookCfg, true)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "1",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("result.Error = %q, want empty", result.Error)
+	}
+	if dispatcher.called {
+		t.Fatal("HookDispatcher.RunHooks was called, want hooks disabled")
+	}
+	if !store.updateWithDependenciesCalled {
+		t.Fatal("store.UpdateWithDependencies was not called, want task update to proceed")
+	}
+}
+
+func TestUpdateTool_TaskCompletedHookNotTriggeredForOtherStatus(t *testing.T) {
+	inProgress := "in_progress"
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "1",
+			Subject: "Test task",
+			Status:  coretask.StatusPending,
+		},
+	}
+	dispatcher := &mockCompletedHookDispatcher{}
+	hookCfg := hook.HooksConfig{
+		hook.EventTaskCompleted: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo block"}`)},
+		}},
+	}
+	tool := NewToolWithHooks(store, dispatcher, hookCfg, false)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "1",
+			"status": inProgress,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Unexpected error: %q", result.Error)
+	}
+	// TaskCompleted hooks should NOT have been called for a non-completed status change.
+	if dispatcher.called {
+		t.Error("HookDispatcher.RunHooks should not be called for in_progress status")
 	}
 }

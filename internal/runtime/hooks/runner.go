@@ -121,9 +121,35 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 }
 
 // RunStopHooks executes all command hooks for a stop-type event.
-// This method satisfies the engine.StopHookRunner interface.
+// This method satisfies the engine.HookRunner interface.
 func (r *Runner) RunStopHooks(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string) []hook.HookResult {
 	return r.RunHooksForEvent(ctx, config, event, input, cwd)
+}
+
+// RunHooksForTool executes command hooks filtered by tool name for tool lifecycle events.
+// This method satisfies the engine.HookRunner interface.
+func (r *Runner) RunHooksForTool(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string, toolName string) []hook.HookResult {
+	cmdHooks := MatchHooks(config, event, MatchQuery{ToolName: toolName})
+	if len(cmdHooks) == 0 {
+		return nil
+	}
+
+	results := make([]hook.HookResult, 0, len(cmdHooks))
+	for _, cmdHook := range cmdHooks {
+		result, err := r.RunCommand(ctx, cmdHook, input, cwd)
+		if err != nil {
+			logger.DebugCF("hook_runner", "hook execution failed", map[string]any{
+				"event":     string(event),
+				"tool_name": toolName,
+				"command":   cmdHook.Command,
+				"error":     err.Error(),
+			})
+			results = append(results, hook.HookResult{ExitCode: -1, Stderr: err.Error()})
+			continue
+		}
+		results = append(results, result)
+	}
+	return results
 }
 
 // RunHooksForEvent executes all matching command hooks for an event and returns results.

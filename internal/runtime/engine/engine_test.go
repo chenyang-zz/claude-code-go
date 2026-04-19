@@ -78,11 +78,13 @@ func (s *fakeApprovalService) Decide(ctx context.Context, req approval.Request) 
 }
 
 type fakeStopHookRunner struct {
-	results []hook.HookResult
-	calls   []struct {
-		event hook.HookEvent
-		input any
-		cwd   string
+	results     []hook.HookResult
+	toolResults map[hook.HookEvent][]hook.HookResult
+	calls       []struct {
+		event    hook.HookEvent
+		input    any
+		cwd      string
+		toolName string
 	}
 }
 
@@ -90,14 +92,37 @@ func (r *fakeStopHookRunner) RunStopHooks(ctx context.Context, config hook.Hooks
 	_ = ctx
 	_ = config
 	r.calls = append(r.calls, struct {
-		event hook.HookEvent
-		input any
-		cwd   string
+		event    hook.HookEvent
+		input    any
+		cwd      string
+		toolName string
 	}{
 		event: event,
 		input: input,
 		cwd:   cwd,
 	})
+	return append([]hook.HookResult(nil), r.results...)
+}
+
+func (r *fakeStopHookRunner) RunHooksForTool(ctx context.Context, config hook.HooksConfig, event hook.HookEvent, input any, cwd string, toolName string) []hook.HookResult {
+	_ = ctx
+	_ = config
+	r.calls = append(r.calls, struct {
+		event    hook.HookEvent
+		input    any
+		cwd      string
+		toolName string
+	}{
+		event:    event,
+		input:    input,
+		cwd:      cwd,
+		toolName: toolName,
+	})
+	if r.toolResults != nil {
+		if results, ok := r.toolResults[event]; ok {
+			return append([]hook.HookResult(nil), results...)
+		}
+	}
 	return append([]hook.HookResult(nil), r.results...)
 }
 
@@ -2110,5 +2135,176 @@ func TestRuntimeRun_TokenBudgetDoesNotBypassMaxTokensContinuationCap(t *testing.
 	}
 	if callCount != maxContinuationAttempts+1 {
 		t.Fatalf("Stream() call count = %d, want %d", callCount, maxContinuationAttempts+1)
+	}
+}
+
+func TestRuntimeRun_PreToolUseHookBlocking(t *testing.T) {
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Output: "file content"},
+		},
+	}
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "ok"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{
+		toolResults: map[hook.HookEvent][]hook.HookResult{
+			hook.EventPreToolUse: {{ExitCode: 2, Stderr: "blocked by hook"}},
+		},
+	}
+	runtime := New(client, "test-model", executor)
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPreToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo block"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var sawBlockedResult bool
+	for evt := range out {
+		if evt.Type == event.TypeToolCallFinished {
+			payload := evt.Payload.(event.ToolResultPayload)
+			if payload.IsError && strings.Contains(payload.Output, "blocked by hook") {
+				sawBlockedResult = true
+			}
+		}
+	}
+	if !sawBlockedResult {
+		t.Error("expected blocked tool result from PreToolUse hook")
+	}
+	// The tool executor should NOT have been called.
+	if len(executor.calls) != 0 {
+		t.Errorf("executor called %d times, want 0 (tool should be blocked)", len(executor.calls))
+	}
+}
+
+func TestRuntimeRun_PostToolUseHookBlocking(t *testing.T) {
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Output: "file content"},
+		},
+	}
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "ok"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{
+		toolResults: map[hook.HookEvent][]hook.HookResult{
+			hook.EventPostToolUse: {{ExitCode: 2, Stderr: "post-blocked"}},
+		},
+	}
+	runtime := New(client, "test-model", executor)
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPostToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo block"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var sawBlockedResult bool
+	for evt := range out {
+		if evt.Type == event.TypeToolCallFinished {
+			payload := evt.Payload.(event.ToolResultPayload)
+			if payload.IsError && strings.Contains(payload.Output, "post-blocked") {
+				sawBlockedResult = true
+			}
+		}
+	}
+	if !sawBlockedResult {
+		t.Error("expected blocked tool result from PostToolUse hook")
+	}
+	// The tool executor SHOULD have been called (PostToolUse runs after execution).
+	if len(executor.calls) != 1 {
+		t.Errorf("executor called %d times, want 1", len(executor.calls))
+	}
+}
+
+func TestRuntimeRun_PostToolUseFailureHookRunsForHandledToolErrors(t *testing.T) {
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Error: "policy denied"},
+		},
+	}
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "handled"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{}
+	runtime := New(client, "test-model", executor)
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPostToolUseFailure: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo failure"}`)},
+		}},
+		hook.EventPostToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo success"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	var sawSuccessHook, sawFailureHook bool
+	for _, call := range hookRunner.calls {
+		if call.event == hook.EventPostToolUse {
+			sawSuccessHook = true
+		}
+		if call.event == hook.EventPostToolUseFailure {
+			sawFailureHook = true
+		}
+	}
+	if sawSuccessHook {
+		t.Fatal("PostToolUse hook ran for a handled tool failure")
+	}
+	if !sawFailureHook {
+		t.Fatal("PostToolUseFailure hook did not run for a handled tool failure")
 	}
 }
