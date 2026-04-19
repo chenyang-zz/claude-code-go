@@ -2272,6 +2272,184 @@ func TestRuntimeRun_PreToolUseHookAskTriggersApproval(t *testing.T) {
 	}
 }
 
+func TestRuntimeRun_PreToolUseHookAdditionalContext(t *testing.T) {
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Output: "file content"},
+		},
+	}
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{
+		toolResults: map[hook.HookEvent][]hook.HookResult{
+			hook.EventPreToolUse: {{
+				ParsedOutput: &hook.HookOutput{
+					HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"Please note: this file is auto-generated"}`),
+				},
+			}},
+		},
+	}
+	runtime := New(client, "test-model", executor)
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPreToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo ctx"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages[2].Content) != 2 {
+		t.Fatalf("tool result message parts = %d, want 2", len(secondRequest.Messages[2].Content))
+	}
+	additionalContext := secondRequest.Messages[2].Content[0]
+	if additionalContext.Type != "text" || additionalContext.Text != "Please note: this file is auto-generated" {
+		t.Fatalf("additional context part = %#v, want standalone text context", additionalContext)
+	}
+	toolResult := secondRequest.Messages[2].Content[1]
+	if toolResult.IsError {
+		t.Fatalf("tool result is error, want success")
+	}
+	if toolResult.Text != "file content" {
+		t.Fatalf("tool result = %q, want raw tool output", toolResult.Text)
+	}
+}
+
+func TestRuntimeRun_PreToolUseHookAdditionalContextPreservedOnApprovalDenial(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "denied"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{
+		toolResults: map[hook.HookEvent][]hook.HookResult{
+			hook.EventPreToolUse: {{
+				ParsedOutput: &hook.HookOutput{
+					HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"Need explicit approval","additionalContext":"Read blocked by repository policy"}`),
+				},
+			}},
+		},
+	}
+	runtime := New(client, "test-model", &fakeToolExecutor{})
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPreToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo ask"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+	runtime.ApprovalService = &fakeApprovalService{
+		response: approval.Response{Approved: false, Reason: "Approval denied"},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages[2].Content) != 2 {
+		t.Fatalf("tool result message parts = %d, want 2", len(secondRequest.Messages[2].Content))
+	}
+	additionalContext := secondRequest.Messages[2].Content[0]
+	if additionalContext.Type != "text" || additionalContext.Text != "Read blocked by repository policy" {
+		t.Fatalf("additional context part = %#v, want standalone text context", additionalContext)
+	}
+	toolResult := secondRequest.Messages[2].Content[1]
+	if !toolResult.IsError || toolResult.Text != "Approval denied" {
+		t.Fatalf("tool result = %#v, want approval denial error", toolResult)
+	}
+}
+
+func TestRuntimeRun_PreToolUseHookAdditionalContextPreservedOnToolFailure(t *testing.T) {
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{
+			"Read": {Error: "tool failed after hook"},
+		},
+	}
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Read", Input: map[string]any{"file_path": "main.go"}}},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	hookRunner := &fakeStopHookRunner{
+		toolResults: map[hook.HookEvent][]hook.HookResult{
+			hook.EventPreToolUse: {{
+				ParsedOutput: &hook.HookOutput{
+					HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"Please re-check generated files before retrying"}`),
+				},
+			}},
+		},
+	}
+	runtime := New(client, "test-model", executor)
+	runtime.Hooks = hook.HooksConfig{
+		hook.EventPreToolUse: []hook.HookMatcher{{
+			Hooks: []json.RawMessage{json.RawMessage(`{"type":"command","command":"echo ctx"}`)},
+		}},
+	}
+	runtime.HookRunner = hookRunner
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages[2].Content) != 2 {
+		t.Fatalf("tool result message parts = %d, want 2", len(secondRequest.Messages[2].Content))
+	}
+	additionalContext := secondRequest.Messages[2].Content[0]
+	if additionalContext.Type != "text" || additionalContext.Text != "Please re-check generated files before retrying" {
+		t.Fatalf("additional context part = %#v, want standalone text context", additionalContext)
+	}
+	toolResult := secondRequest.Messages[2].Content[1]
+	if !toolResult.IsError || toolResult.Text != "tool failed after hook" {
+		t.Fatalf("tool result = %#v, want handled tool error", toolResult)
+	}
+}
+
 func TestRuntimeRun_PostToolUseHookBlocking(t *testing.T) {
 	executor := &fakeToolExecutor{
 		results: map[string]tool.Result{

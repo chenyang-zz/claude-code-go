@@ -268,11 +268,12 @@ func TestResolvePreToolUsePermission(t *testing.T) {
 	deny := "deny"
 
 	tests := []struct {
-		name        string
-		results     []HookResult
-		wantBehav   string
-		wantReason  string
-		wantUpdated bool
+		name               string
+		results            []HookResult
+		wantBehav          string
+		wantReason         string
+		wantUpdated        bool
+		wantAdditionalCtx  string
 	}{
 		{
 			name:        "no results",
@@ -364,6 +365,60 @@ func TestResolvePreToolUsePermission(t *testing.T) {
 			wantReason:  "",
 			wantUpdated: true,
 		},
+		{
+			name: "additionalContext collected from single hook",
+			results: []HookResult{
+				{
+					ParsedOutput: &HookOutput{
+						HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"extra info"}`),
+					},
+				},
+			},
+			wantBehav:         PermissionAllow,
+			wantAdditionalCtx: "extra info",
+		},
+		{
+			name: "additionalContext joined from multiple hooks",
+			results: []HookResult{
+				{
+					ParsedOutput: &HookOutput{
+						HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"allow","additionalContext":"ctx1"}`),
+					},
+				},
+				{
+					ParsedOutput: &HookOutput{
+						HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","additionalContext":"ctx2"}`),
+					},
+				},
+			},
+			wantBehav:         PermissionAllow,
+			wantAdditionalCtx: "ctx1\nctx2",
+		},
+		{
+			name: "additionalContext collected even with deny",
+			results: []HookResult{
+				{
+					ParsedOutput: &HookOutput{
+						HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"no","additionalContext":"denied info"}`),
+					},
+				},
+			},
+			wantBehav:         PermissionDeny,
+			wantReason:        "no",
+			wantAdditionalCtx: "denied info",
+		},
+		{
+			name: "ask with additionalContext",
+			results: []HookResult{
+				{
+					ParsedOutput: &HookOutput{
+						HookSpecificOutput: json.RawMessage(`{"hookEventName":"PreToolUse","permissionDecision":"ask","additionalContext":"please review"}`),
+					},
+				},
+			},
+			wantBehav:         PermissionAsk,
+			wantAdditionalCtx: "please review",
+		},
 	}
 
 	for _, tt := range tests {
@@ -387,6 +442,9 @@ func TestResolvePreToolUsePermission(t *testing.T) {
 			}
 			if !tt.wantUpdated && len(got.UpdatedInput) > 0 {
 				t.Errorf("expected no UpdatedInput, got %s", string(got.UpdatedInput))
+			}
+			if got.AdditionalContext != tt.wantAdditionalCtx {
+				t.Errorf("AdditionalContext = %q, want %q", got.AdditionalContext, tt.wantAdditionalCtx)
 			}
 		})
 	}

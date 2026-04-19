@@ -6,6 +6,8 @@ type ContentPart struct {
 	Type string
 	// Text stores the plain text payload for text blocks and the rendered content for tool_result blocks.
 	Text string
+	// IsMeta reports whether a text block carries runtime metadata rather than a natural-language user turn.
+	IsMeta bool
 	// ToolUseID stores the correlation identifier shared by tool_use and tool_result blocks.
 	ToolUseID string
 	// ToolName stores the provider-visible tool name for tool_use blocks.
@@ -21,6 +23,16 @@ func TextPart(text string) ContentPart {
 	return ContentPart{
 		Type: "text",
 		Text: text,
+	}
+}
+
+// MetaTextPart builds one text content block that should be delivered to the model
+// but ignored when deriving natural-language user turn semantics.
+func MetaTextPart(text string) ContentPart {
+	return ContentPart{
+		Type:   "text",
+		Text:   text,
+		IsMeta: true,
 	}
 }
 

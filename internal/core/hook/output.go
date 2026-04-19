@@ -141,6 +141,16 @@ func (o *HookOutput) ResolveUpdatedInput() json.RawMessage {
 	return nil
 }
 
+// ResolveAdditionalContext returns the additionalContext from PreToolUse-specific output.
+// Returns empty string if no additionalContext is provided.
+func (o *HookOutput) ResolveAdditionalContext() string {
+	specific, _ := o.ParsePreToolUseOutput()
+	if specific != nil && specific.AdditionalContext != nil {
+		return *specific.AdditionalContext
+	}
+	return ""
+}
+
 // HookPermissionResult aggregates permission decisions from multiple hook results.
 // It implements the same precedence as the TS source: deny > ask > allow.
 type HookPermissionResult struct {
@@ -152,6 +162,8 @@ type HookPermissionResult struct {
 	DenyReason string
 	// UpdatedInput contains modified tool input when a hook provides it.
 	UpdatedInput json.RawMessage
+	// AdditionalContext contains extra context text from hooks to inject into the conversation.
+	AdditionalContext string
 }
 
 // ResolvePreToolUsePermission aggregates permission decisions from multiple PreToolUse
@@ -161,6 +173,7 @@ type HookPermissionResult struct {
 func ResolvePreToolUsePermission(results []HookResult) HookPermissionResult {
 	var aggregated HookPermissionResult
 	var passthroughInput json.RawMessage
+	var additionalContexts []string
 
 	for _, r := range results {
 		if r.ParsedOutput == nil {
@@ -171,6 +184,11 @@ func ResolvePreToolUsePermission(results []HookResult) HookPermissionResult {
 		// Collect updatedInput from hooks that don't make a permission decision (passthrough).
 		if ui := r.ParsedOutput.ResolveUpdatedInput(); len(ui) > 0 && behavior == "" {
 			passthroughInput = ui
+		}
+
+		// Collect additionalContext from all hooks regardless of permission behavior.
+		if ac := r.ParsedOutput.ResolveAdditionalContext(); ac != "" {
+			additionalContexts = append(additionalContexts, ac)
 		}
 
 		switch behavior {
@@ -203,6 +221,11 @@ func ResolvePreToolUsePermission(results []HookResult) HookPermissionResult {
 	// Apply passthrough updatedInput if no decision-bound updatedInput was set.
 	if len(aggregated.UpdatedInput) == 0 && len(passthroughInput) > 0 {
 		aggregated.UpdatedInput = passthroughInput
+	}
+
+	// Join all additionalContext strings, matching TS behavior.
+	if len(additionalContexts) > 0 {
+		aggregated.AdditionalContext = strings.Join(additionalContexts, "\n")
 	}
 
 	return aggregated

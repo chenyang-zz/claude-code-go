@@ -19,10 +19,11 @@ type ToolCallPayload struct {
 
 // ToolResultPayload describes one completed tool execution inside the runtime loop.
 type ToolResultPayload struct {
-	ID      string
-	Name    string
-	Output  string
-	IsError bool
+	ID                string
+	Name              string
+	Output            string
+	AdditionalContext string
+	IsError           bool
 }
 
 // ApprovalPayload describes one runtime approval request emitted before a guarded tool operation can continue.

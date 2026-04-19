@@ -192,6 +192,9 @@ func isToolResultOnlyMessage(msg message.Message) bool {
 		return false
 	}
 	for _, part := range msg.Content {
+		if part.Type == "text" && part.IsMeta {
+			continue
+		}
 		if part.Type != "tool_result" {
 			return false
 		}
@@ -851,16 +854,21 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 	for _, batch := range batches {
 		outcomes := e.executeToolBatch(ctx, batch, out)
 		for _, outcome := range outcomes {
+			additionalContext := toolAdditionalContext(outcome.result)
+			if additionalContext != "" {
+				resultMessage.Content = append(resultMessage.Content, message.MetaTextPart(additionalContext))
+			}
 			content, isError := renderToolResult(outcome.result, outcome.invokeErr)
 			resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(outcome.toolUse.ID, content, isError))
 			out <- event.Event{
 				Type:      event.TypeToolCallFinished,
 				Timestamp: time.Now(),
 				Payload: event.ToolResultPayload{
-					ID:      outcome.toolUse.ID,
-					Name:    outcome.toolUse.Name,
-					Output:  content,
-					IsError: isError,
+					ID:                outcome.toolUse.ID,
+					Name:              outcome.toolUse.Name,
+					Output:            content,
+					AdditionalContext: additionalContext,
+					IsError:           isError,
 				},
 			}
 		}
@@ -929,6 +937,8 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 
 // executeToolUse resolves one tool call and branches into the approval flow when the tool is blocked by a permission ask.
 func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out chan<- event.Event) (coretool.Result, error) {
+	var additionalContext string
+
 	// PreToolUse hooks: run before tool execution, blocking prevents the call.
 	if e.shouldRunToolHooks(hook.EventPreToolUse) {
 		toolInput, _ := json.Marshal(call.Input)
@@ -960,8 +970,9 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 
 		// Resolve structured permission decisions from hook output.
 		permResult := hook.ResolvePreToolUsePermission(results)
+		additionalContext = permResult.AdditionalContext
 		if permResult.Behavior == hook.PermissionDeny {
-			return coretool.Result{Error: permResult.DenyReason}, nil
+			return attachAdditionalContext(coretool.Result{Error: permResult.DenyReason}, additionalContext), nil
 		}
 		// Apply updatedInput if provided by the hook.
 		if len(permResult.UpdatedInput) > 0 {
@@ -979,7 +990,7 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 				return coretool.Result{}, err
 			}
 			if !proceed {
-				return approvalResult, nil
+				return attachAdditionalContext(approvalResult, additionalContext), nil
 			}
 		}
 	}
@@ -1015,10 +1026,10 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 			results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPostToolUse, input, e.workingDir(""), call.Name)
 			if runtimehooks.HasBlockingResult(results) {
 				errs := runtimehooks.BlockingErrors(results)
-				return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+				return attachAdditionalContext(coretool.Result{Error: strings.Join(errs, "\n")}, additionalContext), nil
 			}
 		}
-		return result, nil
+		return attachAdditionalContext(result, additionalContext), nil
 	}
 
 	if e.shouldRunToolHooks(hook.EventPostToolUseFailure) {
@@ -1041,15 +1052,36 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPostToolUseFailure, input, e.workingDir(""), call.Name)
 		if runtimehooks.HasBlockingResult(results) {
 			errs := runtimehooks.BlockingErrors(results)
-			return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+			return attachAdditionalContext(coretool.Result{Error: strings.Join(errs, "\n")}, additionalContext), nil
 		}
 	}
 
 	if invokeErr == nil {
-		return result, nil
+		return attachAdditionalContext(result, additionalContext), nil
 	}
 
-	return result, invokeErr
+	return attachAdditionalContext(result, additionalContext), invokeErr
+}
+
+const additionalContextMetaKey = "additional_context"
+
+func attachAdditionalContext(result coretool.Result, additionalContext string) coretool.Result {
+	if strings.TrimSpace(additionalContext) == "" {
+		return result
+	}
+	if result.Meta == nil {
+		result.Meta = make(map[string]any, 1)
+	}
+	result.Meta[additionalContextMetaKey] = additionalContext
+	return result
+}
+
+func toolAdditionalContext(result coretool.Result) string {
+	if result.Meta == nil {
+		return ""
+	}
+	additionalContext, _ := result.Meta[additionalContextMetaKey].(string)
+	return additionalContext
 }
 
 func (e *Runtime) requestHookApproval(ctx context.Context, call coretool.Call, reason string, out chan<- event.Event) (bool, coretool.Result, error) {

@@ -52,7 +52,7 @@ func firstUserText(messages []message.Message) string {
 func messageText(msg message.Message) string {
 	parts := make([]string, 0, len(msg.Content))
 	for _, part := range msg.Content {
-		if part.Type != "text" {
+		if part.Type != "text" || part.IsMeta {
 			continue
 		}
 		if text := normalizePreview(part.Text); text != "" {
