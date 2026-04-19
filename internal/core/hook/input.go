@@ -111,8 +111,10 @@ type PostToolFailureHookInput struct {
 	ToolInput json.RawMessage `json:"tool_input"`
 	// ToolResponse contains the raw tool response output as JSON when available.
 	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
-	// ToolError contains the tool error surfaced to the model.
-	ToolError string `json:"tool_error"`
+	// Error contains the tool error message surfaced to the hook.
+	Error string `json:"error"`
+	// IsInterrupt indicates whether the failure was caused by a user interrupt (AbortError).
+	IsInterrupt bool `json:"is_interrupt,omitempty"`
 	// ToolUseID is the unique identifier for this tool use call.
 	ToolUseID string `json:"tool_use_id"`
 }
@@ -148,6 +150,9 @@ type HookResult struct {
 	// PreventContinuation reports whether the hook output requests the
 	// conversation to stop (JSON stdout with "continue": false).
 	PreventContinuation bool
+	// ParsedOutput contains the structured JSON output parsed from stdout.
+	// Nil when stdout is not valid JSON or does not start with '{'.
+	ParsedOutput *HookOutput
 }
 
 // IsSuccess reports whether the hook exited with code 0.

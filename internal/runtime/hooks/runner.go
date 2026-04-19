@@ -80,7 +80,11 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 
 	if err == nil {
 		// Parse stdout JSON for structured output.
-		result.PreventContinuation = parsePreventContinuation(result.Stdout)
+		parsed := hook.ParseHookOutput(result.Stdout)
+		result.ParsedOutput = parsed
+		if parsed != nil && parsed.Continue != nil && !*parsed.Continue {
+			result.PreventContinuation = true
+		}
 		logger.DebugCF("hook_runner", "hook command succeeded", map[string]any{
 			"command":    cmdHook.Command,
 			"stdout_len": len(result.Stdout),
@@ -204,25 +208,6 @@ func truncateForLog(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
-}
-
-// parsePreventContinuation checks stdout JSON for "continue": false.
-// Returns true if the hook requests conversation termination.
-func parsePreventContinuation(stdout string) bool {
-	stdout = strings.TrimSpace(stdout)
-	if stdout == "" {
-		return false
-	}
-	var output struct {
-		Continue *bool `json:"continue"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &output); err != nil {
-		return false
-	}
-	if output.Continue != nil && !*output.Continue {
-		return true
-	}
-	return false
 }
 
 // HasBlockingResult reports whether any hook result indicates a blocking error (exit code 2).

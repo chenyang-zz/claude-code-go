@@ -957,6 +957,31 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 				})
 			}
 		}
+
+		// Resolve structured permission decisions from hook output.
+		permResult := hook.ResolvePreToolUsePermission(results)
+		if permResult.Behavior == hook.PermissionDeny {
+			return coretool.Result{Error: permResult.DenyReason}, nil
+		}
+		// Apply updatedInput if provided by the hook.
+		if len(permResult.UpdatedInput) > 0 {
+			if err := json.Unmarshal(permResult.UpdatedInput, &call.Input); err != nil {
+				logger.DebugCF("engine", "failed to apply hook updatedInput", map[string]any{
+					"tool":   call.Name,
+					"error":  err.Error(),
+					"use_id": call.ID,
+				})
+			}
+		}
+		if permResult.Behavior == hook.PermissionAsk {
+			proceed, approvalResult, err := e.requestHookApproval(ctx, call, permResult.Reason, out)
+			if err != nil {
+				return coretool.Result{}, err
+			}
+			if !proceed {
+				return approvalResult, nil
+			}
+		}
 	}
 
 	result, invokeErr := e.Executor.Execute(ctx, call)
@@ -1009,7 +1034,8 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 			ToolName:      call.Name,
 			ToolInput:     toolInput,
 			ToolResponse:  toolResponse,
-			ToolError:     renderToolFailure(result, invokeErr),
+			Error:         renderToolFailure(result, invokeErr),
+			IsInterrupt:   isToolInterrupt(result, invokeErr),
 			ToolUseID:     call.ID,
 		}
 		results := e.HookRunner.RunHooksForTool(ctx, e.Hooks, hook.EventPostToolUseFailure, input, e.workingDir(""), call.Name)
@@ -1024,6 +1050,49 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 	}
 
 	return result, invokeErr
+}
+
+func (e *Runtime) requestHookApproval(ctx context.Context, call coretool.Call, reason string, out chan<- event.Event) (bool, coretool.Result, error) {
+	message := fmt.Sprintf("A PreToolUse hook requested approval before executing %s.", call.Name)
+	if strings.TrimSpace(reason) != "" {
+		message = fmt.Sprintf("%s %s", message, strings.TrimSpace(reason))
+	}
+
+	if e.ApprovalService == nil {
+		return false, coretool.Result{Error: "Approval service is not interactive in the current mode."}, nil
+	}
+
+	out <- event.Event{
+		Type:      event.TypeApprovalRequired,
+		Timestamp: time.Now(),
+		Payload: event.ApprovalPayload{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Path:     call.Name,
+			Action:   "execute",
+			Message:  message,
+		},
+	}
+
+	decision, err := e.ApprovalService.Decide(ctx, approval.Request{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Path:     call.Name,
+		Action:   "execute",
+		Message:  message,
+	})
+	if err != nil {
+		return false, coretool.Result{}, err
+	}
+	if !decision.Approved {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("Permission to execute %s was not granted.", call.Name)
+		}
+		return false, coretool.Result{Error: reason}, nil
+	}
+
+	return true, coretool.Result{}, nil
 }
 
 // executeFilesystemApproval resolves one filesystem approval request through the runtime prompt and one-shot retry flow.
@@ -1124,6 +1193,13 @@ func renderToolFailure(result coretool.Result, invokeErr error) string {
 		return invokeErr.Error()
 	}
 	return ""
+}
+
+func isToolInterrupt(result coretool.Result, invokeErr error) bool {
+	if errors.Is(invokeErr, context.Canceled) {
+		return true
+	}
+	return strings.Contains(renderToolFailure(result, invokeErr), "AbortError")
 }
 
 // maxToolIterations returns the configured loop cap, falling back to the default minimum when unset.
