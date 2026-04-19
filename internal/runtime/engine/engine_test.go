@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1057,5 +1059,982 @@ func TestRuntimeRun_AutoCompactSmallMessages(t *testing.T) {
 	}
 	if hasCompactDone {
 		t.Error("expected no compact.done for small messages")
+	}
+}
+
+// TestRuntimeRun_MaxTokensContinuation verifies that when the model stops with
+// max_tokens and no tool_use, the engine injects a continuation user message
+// and sends another request so the model can finish generating.
+func TestRuntimeRun_MaxTokensContinuation(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " rest"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var textDeltas []string
+	var doneCount int
+	for evt := range out {
+		if evt.Type == event.TypeMessageDelta {
+			textDeltas = append(textDeltas, evt.Payload.(event.MessageDeltaPayload).Text)
+		}
+		if evt.Type == event.TypeConversationDone {
+			doneCount++
+		}
+	}
+	if doneCount != 1 {
+		t.Fatalf("conversation.done count = %d, want 1", doneCount)
+	}
+	if callCount != 2 {
+		t.Fatalf("Stream() call count = %d, want 2 (initial + continuation)", callCount)
+	}
+	got := ""
+	for _, d := range textDeltas {
+		got += d
+	}
+	if got != "partial rest" {
+		t.Fatalf("text deltas = %q, want 'partial rest'", got)
+	}
+}
+
+// TestRuntimeRun_MaxTokensContinuationDoesNotPersistSyntheticUserMessage verifies
+// the continuation instruction is sent to the model but not stored in final history.
+func TestRuntimeRun_MaxTokensContinuationDoesNotPersistSyntheticUserMessage(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " rest"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var donePayload event.ConversationDonePayload
+	for evt := range out {
+		if evt.Type != event.TypeConversationDone {
+			continue
+		}
+		payload, ok := evt.Payload.(event.ConversationDonePayload)
+		if !ok {
+			t.Fatalf("done payload type = %T", evt.Payload)
+		}
+		donePayload = payload
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("Stream() call count = %d, want 2", len(client.requests))
+	}
+	secondRequest := client.requests[1]
+	if len(secondRequest.Messages) != 3 {
+		t.Fatalf("second request message count = %d, want 3", len(secondRequest.Messages))
+	}
+	if got := secondRequest.Messages[2].Content[0].Text; got != continuationUserMessage {
+		t.Fatalf("second request continuation message = %q, want %q", got, continuationUserMessage)
+	}
+
+	if len(donePayload.History.Messages) != 3 {
+		t.Fatalf("done history message count = %d, want 3", len(donePayload.History.Messages))
+	}
+	for _, msg := range donePayload.History.Messages {
+		for _, part := range msg.Content {
+			if part.Text == continuationUserMessage {
+				t.Fatal("final history should not persist synthetic continuation user message")
+			}
+		}
+	}
+}
+
+// TestRuntimeRun_MaxTokensContinuationLimit verifies that continuation stops
+// after maxContinuationAttempts even if the model keeps returning max_tokens.
+func TestRuntimeRun_MaxTokensContinuationLimit(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "chunk"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var doneCount int
+	for range out {
+		doneCount++
+	}
+	// 1 initial + 3 continuations = 4 total calls, then stops.
+	if callCount != maxContinuationAttempts+1 {
+		t.Fatalf("Stream() call count = %d, want %d", callCount, maxContinuationAttempts+1)
+	}
+	// doneCount includes all events, not just conversation.done.
+	// Just verify the run completed without error.
+}
+
+// TestRuntimeRun_MaxTokensWithToolUseNoContinuation verifies that max_tokens
+// with tool_use blocks does NOT trigger continuation.
+func TestRuntimeRun_MaxTokensWithToolUseNoContinuation(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			return newModelStream(
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:    "toolu_1",
+						Name:  "Read",
+						Input: map[string]any{"file_path": "test.go"},
+					},
+				},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+			), nil
+		},
+	}
+	executor := &fakeToolExecutor{
+		results: map[string]tool.Result{"Read": {Output: "ok"}},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "read file",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for range out {
+	}
+	if callCount < 2 {
+		t.Fatalf("Stream() call count = %d, expected at least 2 (tool loop)", callCount)
+	}
+}
+
+// TestRuntimeRun_PromptTooLongRecovery verifies that a prompt-too-long API error
+// triggers emergency compaction and retries with the compressed history.
+func TestRuntimeRun_PromptTooLongRecovery(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				// Note: token counts chosen to avoid accidental substring matches
+				// with isRetriableError patterns (e.g. "500" in "250000").
+				return nil, errors.New("prompt is too long: 250000 tokens > 200000")
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "recovered"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var hasCompactDone bool
+	var hasRecoveredText bool
+	for evt := range out {
+		if evt.Type == event.TypeCompactDone {
+			hasCompactDone = true
+		}
+		if evt.Type == event.TypeMessageDelta {
+			if evt.Payload.(event.MessageDeltaPayload).Text == "recovered" {
+				hasRecoveredText = true
+			}
+		}
+	}
+	if !hasCompactDone {
+		t.Error("expected compact.done event from emergency compaction")
+	}
+	if !hasRecoveredText {
+		t.Error("expected 'recovered' text from post-compact retry")
+	}
+}
+
+// TestRuntimeRun_PromptTooLongRecoveryOnlyOnce verifies that recovery is attempted
+// at most once — if the retry still fails, the error is surfaced.
+func TestRuntimeRun_PromptTooLongRecoveryOnlyOnce(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			return nil, errors.New("prompt is too long: 250000 tokens > 200000")
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Run() error: %v", err)
+	}
+
+	var hasError bool
+	for evt := range out {
+		if evt.Type == event.TypeError {
+			hasError = true
+			payload, ok := evt.Payload.(event.ErrorPayload)
+			if !ok {
+				t.Fatalf("error payload type = %T", evt.Payload)
+			}
+			if !strings.Contains(payload.Message, "prompt is too long") {
+				t.Errorf("error message = %q, want prompt too long", payload.Message)
+			}
+		}
+	}
+	if !hasError {
+		t.Error("expected error event when recovery fails")
+	}
+}
+
+// TestRuntimeRun_PromptTooLongNoAutoCompact verifies prompt-too-long errors
+// are not recovered when AutoCompact is disabled.
+func TestRuntimeRun_PromptTooLongNoAutoCompact(t *testing.T) {
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			return nil, errors.New("prompt is too long: 250000 tokens > 200000")
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = false
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected Run() error: %v", err)
+	}
+
+	var hasError bool
+	for evt := range out {
+		if evt.Type == event.TypeError {
+			hasError = true
+		}
+	}
+	if !hasError {
+		t.Error("expected error event when AutoCompact is disabled and prompt is too long")
+	}
+}
+
+// TestRuntimeRun_MaxTokensContinuationSkipsAutoCompact verifies that auto-compact
+// is skipped when transient continuation messages are pending, preventing the
+// compactor from summarizing away the truncated assistant turn.
+func TestRuntimeRun_MaxTokensContinuationSkipsAutoCompact(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " rest"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+	// Without the fix, AutoCompact would trigger on the continuation iteration,
+	// potentially replacing history with a compacted version (compact event emitted).
+	// With the fix, no compact event should appear during the continuation flow.
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var compactCount int
+	for evt := range out {
+		if evt.Type == event.TypeCompactDone {
+			compactCount++
+		}
+	}
+
+	if callCount != 2 {
+		t.Fatalf("Stream() call count = %d, want 2", callCount)
+	}
+	if compactCount != 0 {
+		t.Errorf("compact events = %d, want 0 (auto-compact should be skipped during continuation)", compactCount)
+	}
+	// Verify the second request still has the truncated assistant content
+	// (i.e. history was not compacted away).
+	secondReq := client.requests[1]
+	if len(secondReq.Messages) != 3 {
+		t.Fatalf("second request message count = %d, want 3 (user + assistant + continuation)", len(secondReq.Messages))
+	}
+}
+
+// TestRuntimeRun_MaxTokensContinuationWithPromptTooLong verifies that when a
+// continuation request triggers prompt-too-long, the emergency compact preserves
+// the continuation instruction in the retry request.
+func TestRuntimeRun_PromptTooLongRecoveryResetsOnSuccess(t *testing.T) {
+	// Verify that hasAttemptedRecovery resets after a successful model call,
+	// so a second prompt-too-long error in the same turn can also be recovered.
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				// First call: prompt too long → recovery compact
+				return nil, errors.New("prompt is too long: 300000 tokens > 200000")
+			}
+			if callCount == 2 {
+				// Compact's internal summary call
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "summary"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+				), nil
+			}
+			if callCount == 3 {
+				// Post-compact retry succeeds
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "answer"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+				), nil
+			}
+			t.Fatalf("unexpected call %d", callCount)
+			return nil, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range out {
+	}
+	if callCount != 3 {
+		t.Fatalf("Stream() call count = %d, want 3", callCount)
+	}
+}
+
+func TestRuntimeRun_PromptTooLongRecoveryNoCorruptOrder(t *testing.T) {
+	// Verify that a plain prompt-too-long error (no continuation) does not
+	// re-append an older assistant message after compact, which would
+	// corrupt message ordering.
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, errors.New("prompt is too long: 300000 tokens > 200000")
+			}
+			if callCount == 2 {
+				// compact summary call
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "summary"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+				), nil
+			}
+			// post-compact retry
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "answer"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range out {
+	}
+
+	// The post-compact retry (request 3) should NOT have an extra assistant
+	// message appended after the user input.
+	retryReq := client.requests[2]
+	for i := 1; i < len(retryReq.Messages); i++ {
+		if retryReq.Messages[i].Role == message.RoleAssistant && retryReq.Messages[i-1].Role == message.RoleUser {
+			t.Errorf("post-compact retry has assistant after user at position %d, message order is corrupted", i)
+		}
+	}
+}
+
+func TestRuntimeRun_PromptTooLongRecoveryPreservesOriginalLastUserTurn(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, errors.New("prompt is too long: 300000 tokens > 200000")
+			}
+			if callCount == 2 {
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "summary"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+				), nil
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "answer"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	originalLastUser := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart("Inspect this screenshot and attached spec."),
+			{Type: "image", Text: "image-bytes"},
+			{Type: "document", Text: "document-bytes"},
+		},
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Messages: []message.Message{
+			{
+				Role:    message.RoleUser,
+				Content: []message.ContentPart{message.TextPart("Earlier request")},
+			},
+			originalLastUser,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range out {
+	}
+
+	if callCount != 3 {
+		t.Fatalf("Stream() call count = %d, want 3", callCount)
+	}
+
+	retryReq := client.requests[2]
+	var foundOriginalUser bool
+	var foundPlaceholderUser bool
+	for _, msg := range retryReq.Messages {
+		if msg.Role != message.RoleUser {
+			continue
+		}
+		if reflect.DeepEqual(msg.Content, originalLastUser.Content) {
+			foundOriginalUser = true
+		}
+		for _, part := range msg.Content {
+			if part.Text == "[image]" || part.Text == "[document]" {
+				foundPlaceholderUser = true
+			}
+		}
+	}
+	if !foundOriginalUser {
+		t.Fatal("post-compact retry is missing the original last user turn with attachments")
+	}
+	if foundPlaceholderUser {
+		t.Fatal("post-compact retry should not preserve stripped attachment placeholders")
+	}
+}
+
+func TestRuntimeRun_ContinuationBudgetResetsOnToolLoop(t *testing.T) {
+	// Verify that continuationAttempts resets when entering the tool loop,
+	// so a truncated response in the next phase gets a fresh budget.
+	callCount := 0
+	toolExecuted := false
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				// Phase 1: text + tool_use (enters tool loop)
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "let me check"},
+					model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "t1", Name: "Read", Input: map[string]any{"path": "/tmp/x"}}},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonToolUse},
+				), nil
+			}
+			if callCount == 2 {
+				// Phase 2: max_tokens (should start fresh continuation chain)
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "long answer"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			}
+			// Phase 2 continuation: succeeds
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " rest"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			toolExecuted = true
+			return tool.Result{Output: "tool result"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", executor)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range out {
+	}
+	if !toolExecuted {
+		t.Fatal("tool was not executed")
+	}
+	// Expected: call 1 = text+tool, call 2 = max_tokens, call 3 = continuation
+	if callCount != 3 {
+		t.Fatalf("Stream() call count = %d, want 3", callCount)
+	}
+	// Verify continuation message was injected in request 3
+	thirdReq := client.requests[2]
+	lastMsg := thirdReq.Messages[len(thirdReq.Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("continuation request last message role = %s, want %s", lastMsg.Role, message.RoleUser)
+	}
+	if !strings.Contains(lastMsg.Content[0].Text, "Resume directly") {
+		t.Errorf("continuation request last message = %q, want continuation instruction", lastMsg.Content[0].Text)
+	}
+}
+
+func TestRuntimeRun_MaxTokensContinuationWithPromptTooLong(t *testing.T) {
+	callCount := 0
+	latestPrompt := "hello"
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				// First call: max_tokens truncation
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			}
+			if callCount == 2 {
+				// Second call (continuation): prompt too long
+				return nil, errors.New("prompt is too long: 250000 tokens > 200000")
+			}
+			// callCount 3: compact's internal summary request
+			// callCount 4: post-compact retry → success
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " rest"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for range out {
+	}
+
+	// Expected calls: 1=initial, 2=continuation(prompt-too-long),
+	// 3=compact summary, 4=post-compact retry with continuation.
+	if callCount != 4 {
+		t.Fatalf("Stream() call count = %d, want 4", callCount)
+	}
+
+	// The fourth request (post-compact retry) should still include the
+	// latest user prompt, the truncated assistant text, and the continuation
+	// user message so the model resumes mid-thought against the exact request.
+	fourthReq := client.requests[3]
+	lastMsg := fourthReq.Messages[len(fourthReq.Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("post-compact retry last message role = %s, want %s", lastMsg.Role, message.RoleUser)
+	}
+	text := lastMsg.Content[0].Text
+	if !strings.Contains(text, "Resume directly") {
+		t.Errorf("post-compact retry last message = %q, want continuation instruction", text)
+	}
+
+	var foundLatestPrompt bool
+	var foundTruncatedAssistant bool
+	for _, msg := range fourthReq.Messages {
+		for _, part := range msg.Content {
+			if msg.Role == message.RoleUser && part.Text == latestPrompt {
+				foundLatestPrompt = true
+			}
+			if msg.Role == message.RoleAssistant && part.Text == "partial" {
+				foundTruncatedAssistant = true
+			}
+		}
+	}
+	if !foundLatestPrompt {
+		t.Error("post-compact retry is missing the latest user prompt text")
+	}
+	if !foundTruncatedAssistant {
+		t.Error("post-compact retry is missing the truncated assistant message with original text")
+	}
+}
+
+func TestRuntimeRun_MaxTokensContinuationWithPromptTooLongPreservesToolLoopContext(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return newModelStream(
+					model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "tool-1", Name: "Read", Input: map[string]any{"path": "/tmp/spec.md"}}},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonToolUse},
+				), nil
+			case 2:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial answer from tool output"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens},
+				), nil
+			case 3:
+				return nil, errors.New("prompt is too long: 250000 tokens > 200000")
+			default:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: " final"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+				), nil
+			}
+		},
+	}
+	executor := &fakeToolExecutor{
+		run: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{Output: "tool output"}, nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", executor)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Input:     "use the tool result",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for range out {
+	}
+
+	if callCount != 5 {
+		t.Fatalf("Stream() call count = %d, want 5", callCount)
+	}
+
+	retryReq := client.requests[4]
+	var foundOriginalUser bool
+	var foundToolUse bool
+	var foundToolResult bool
+	var foundTruncatedAssistant bool
+	for _, msg := range retryReq.Messages {
+		for _, part := range msg.Content {
+			switch {
+			case msg.Role == message.RoleUser && part.Type == "text" && part.Text == "use the tool result":
+				foundOriginalUser = true
+			case msg.Role == message.RoleAssistant && part.Type == "tool_use" && part.ToolUseID == "tool-1":
+				foundToolUse = true
+			case msg.Role == message.RoleUser && part.Type == "tool_result" && part.ToolUseID == "tool-1" && part.Text == "tool output":
+				foundToolResult = true
+			case msg.Role == message.RoleAssistant && part.Type == "text" && part.Text == "partial answer from tool output":
+				foundTruncatedAssistant = true
+			}
+		}
+	}
+	if !foundOriginalUser {
+		t.Fatal("post-compact retry is missing the original user prompt")
+	}
+	if !foundToolUse {
+		t.Fatal("post-compact retry is missing the assistant tool_use message")
+	}
+	if !foundToolResult {
+		t.Fatal("post-compact retry is missing the user tool_result message")
+	}
+	if !foundTruncatedAssistant {
+		t.Fatal("post-compact retry is missing the truncated assistant message")
+	}
+}
+
+// TestRuntimeRun_TokenBudgetContinuation verifies that the engine auto-continues
+// the model when the turn token budget has not been reached.
+func TestRuntimeRun_TokenBudgetContinuation(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				// First call: model produces 500 output tokens, well under budget.
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial work"},
+					model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 500}},
+				), nil
+			}
+			// Second call: model produces enough to exceed 90% threshold.
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " more work"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 9000}},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID:       "cli",
+		Input:           "do work",
+		TurnTokenBudget: 10000,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("expected 2 model calls, got %d", len(client.requests))
+	}
+
+	// The second request should contain a nudge user message.
+	lastMsg := client.requests[1].Messages[len(client.requests[1].Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("second request last message role = %s, want user", lastMsg.Role)
+	}
+	if !strings.Contains(lastMsg.Content[0].Text, "token target") {
+		t.Fatalf("nudge message = %q, want token budget nudge", lastMsg.Content[0].Text)
+	}
+}
+
+// TestRuntimeRun_TokenBudgetNoBudgetNoContinuation verifies that without a
+// budget set, the engine does not trigger budget continuation.
+func TestRuntimeRun_TokenBudgetNoBudgetNoContinuation(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 500}},
+			),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello",
+		// TurnTokenBudget is zero (default) — no budget tracking.
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 1 {
+		t.Fatalf("expected 1 model call with no budget, got %d", len(client.requests))
+	}
+}
+
+// TestRuntimeRun_TokenBudgetStopAtThreshold verifies that the engine stops
+// when the turn output tokens exceed 90% of the budget.
+func TestRuntimeRun_TokenBudgetStopAtThreshold(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 9500}},
+			),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID:       "cli",
+		Input:           "big task",
+		TurnTokenBudget: 10000,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var done event.Event
+	for evt := range out {
+		if evt.Type == event.TypeConversationDone {
+			done = evt
+		}
+	}
+	if done.Type != event.TypeConversationDone {
+		t.Fatal("expected ConversationDone event")
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("expected 1 model call (no continuation at threshold), got %d", len(client.requests))
+	}
+}
+
+func TestRuntimeRun_TokenBudgetIgnoresAutoCompactSummaryUsage(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "50000")
+
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "summary"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn, Usage: &model.Usage{OutputTokens: 8500}},
+				), nil
+			case 2:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial work"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn, Usage: &model.Usage{OutputTokens: 500}},
+				), nil
+			default:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: " more work"},
+					model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn, Usage: &model.Usage{OutputTokens: 9000}},
+				), nil
+			}
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart(strings.Repeat("x", 400000)),
+				},
+			},
+		},
+		TurnTokenBudget: 10000,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 3 {
+		t.Fatalf("expected 3 model calls (compact + response + continuation), got %d", len(client.requests))
+	}
+
+	lastMsg := client.requests[2].Messages[len(client.requests[2].Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("continuation request last message role = %s, want user", lastMsg.Role)
+	}
+	if !strings.Contains(lastMsg.Content[0].Text, "token target") {
+		t.Fatalf("nudge message = %q, want token budget nudge", lastMsg.Content[0].Text)
+	}
+}
+
+func TestRuntimeRun_TokenBudgetDoesNotBypassMaxTokensContinuationCap(t *testing.T) {
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "chunk"},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonMaxTokens, Usage: &model.Usage{OutputTokens: 100}},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID:       "test",
+		Input:           "keep going",
+		TurnTokenBudget: 10000,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if got, want := len(client.requests), maxContinuationAttempts+1; got != want {
+		t.Fatalf("model call count = %d, want %d", got, want)
+	}
+	lastReq := client.requests[len(client.requests)-1]
+	lastMsg := lastReq.Messages[len(lastReq.Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("last request last message role = %s, want user continuation prompt", lastMsg.Role)
+	}
+	if strings.Contains(lastMsg.Content[0].Text, "token target") {
+		t.Fatalf("last request last message = %q, want max_tokens continuation prompt without budget nudge", lastMsg.Content[0].Text)
+	}
+	if callCount != maxContinuationAttempts+1 {
+		t.Fatalf("Stream() call count = %d, want %d", callCount, maxContinuationAttempts+1)
 	}
 }

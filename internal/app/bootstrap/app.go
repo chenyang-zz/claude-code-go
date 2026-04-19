@@ -313,6 +313,9 @@ func dereferenceConfig(cfg *coreconfig.Config) coreconfig.Config {
 }
 
 // resolveTaskStore builds a task store rooted under the effective home directory.
+// By default it uses the stable "default" task list directory so tasks remain
+// visible across separate CLI invocations. An explicit task list override still
+// opts into an isolated directory.
 func resolveTaskStore(loader coreconfig.Loader, homeDir string) coretask.Store {
 	if homeDir == "" {
 		if fl, ok := loader.(*platformconfig.FileLoader); ok {
@@ -325,7 +328,11 @@ func resolveTaskStore(loader coreconfig.Loader, homeDir string) coretask.Store {
 	if homeDir == "" {
 		return nil
 	}
-	return coretask.NewFileStore(filepath.Join(homeDir, ".claude", "tasks", "default"))
+	taskListID := "default"
+	if os.Getenv("CLAUDE_CODE_TASK_LIST_ID") != "" {
+		taskListID = coretask.ResolveTaskListID()
+	}
+	return coretask.NewFileStore(filepath.Join(homeDir, ".claude", "tasks", taskListID))
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.

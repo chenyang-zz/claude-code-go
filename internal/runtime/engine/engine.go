@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +90,7 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 	out := make(chan event.Event)
 	go func() {
 		defer close(out)
-		if err := e.runLoop(ctx, req.SessionID, history, out); err != nil {
+		if err := e.runLoop(ctx, req.SessionID, req.TurnTokenBudget, history, out); err != nil {
 			out <- event.Event{
 				Type:      event.TypeError,
 				Timestamp: time.Now(),
@@ -132,17 +133,118 @@ func buildInitialHistory(req conversation.RunRequest) (conversation.History, err
 	}, nil
 }
 
+// findLatestContinuationUserMessage returns the most recent real user turn
+// that should survive continuation recovery compaction.
+func findLatestContinuationUserMessage(messages []message.Message) *message.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleUser || isToolResultOnlyMessage(msg) {
+			continue
+		}
+		preserved := msg
+		return &preserved
+	}
+	return nil
+}
+
+// findContinuationRecoveryTail returns the message slice that a max_tokens
+// continuation needs to resume correctly after emergency compaction.
+// It starts at the latest natural-language user turn and preserves the
+// following tool loop / assistant context that the truncated reply depends on.
+func findContinuationRecoveryTail(messages []message.Message) []message.Message {
+	start := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == message.RoleUser && !isToolResultOnlyMessage(messages[i]) {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return nil
+	}
+	return append([]message.Message(nil), messages[start:]...)
+}
+
+// isToolResultOnlyMessage reports whether a user message contains only
+// tool_result blocks and therefore is not a natural-language prompt turn.
+func isToolResultOnlyMessage(msg message.Message) bool {
+	if len(msg.Content) == 0 {
+		return false
+	}
+	for _, part := range msg.Content {
+		if part.Type != "tool_result" {
+			return false
+		}
+	}
+	return true
+}
+
+// containsExactMessage reports whether messages already includes target with
+// identical role and content so recovery does not duplicate preserved turns.
+func containsExactMessage(messages []message.Message, target message.Message) bool {
+	for _, msg := range messages {
+		if msg.Role != target.Role {
+			continue
+		}
+		if reflect.DeepEqual(msg.Content, target.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+// appendMissingMessageTail appends the missing suffix of tail onto messages.
+// This avoids duplicating preserved tail messages when compaction already
+// retained part of the recovery context.
+func appendMissingMessageTail(messages []message.Message, tail []message.Message) []message.Message {
+	if len(tail) == 0 {
+		return messages
+	}
+
+	maxOverlap := min(len(messages), len(tail))
+	for overlap := maxOverlap; overlap > 0; overlap-- {
+		if reflect.DeepEqual(messages[len(messages)-overlap:], tail[:overlap]) {
+			return append(messages, tail[overlap:]...)
+		}
+	}
+	return append(messages, tail...)
+}
+
+// maxContinuationAttempts caps how many times the engine will automatically
+// continue generation when the model stops due to max_tokens (output truncated).
+const maxContinuationAttempts = 3
+
+// continuationUserMessage is injected into the conversation history after a
+// truncated assistant response so the model picks up where it left off.
+const continuationUserMessage = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."
+
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
-func (e *Runtime) runLoop(ctx context.Context, sessionID string, history conversation.History, out chan<- event.Event) error {
+func (e *Runtime) runLoop(ctx context.Context, sessionID string, turnTokenBudget int, history conversation.History, out chan<- event.Event) error {
 	toolLoops := 0
+	continuationAttempts := 0
 	var cumulativeUsage model.Usage
 	activeModel := e.activeModel()
 	var compactTracking compact.TrackingState
+	var hasAttemptedRecovery bool
+	var transientMessages []message.Message
+	// responseOutputTokens tracks only user-visible model output for the
+	// current response phase. Internal compact-summary tokens are excluded
+	// so budget continuation decisions reflect the answer, not recovery work.
+	responseOutputTokens := 0
+	var budgetTracker BudgetTracker
+	if turnTokenBudget > 0 {
+		budgetTracker = NewBudgetTracker()
+	}
 
 	for {
 		// Auto-compact check point: before building the API request,
 		// check if the conversation token count exceeds the threshold.
-		if e.AutoCompact && e.Client != nil {
+		// Skip auto-compact when transient continuation messages are pending:
+		// the compactor only sees history.Messages and may summarize away the
+		// truncated assistant turn that the continuation prompt refers to.
+		// If the continuation request is too large, the emergency compact
+		// path below will handle it.
+		if e.AutoCompact && e.Client != nil && len(transientMessages) == 0 {
 			compactResult, compactErr := compact.AutoCompactIfNeeded(
 				ctx,
 				e.Client,
@@ -186,22 +288,112 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 			}
 		}
 
+		requestMessages := append([]message.Message(nil), history.Messages...)
+		requestMessages = append(requestMessages, transientMessages...)
 		streamReq := model.Request{
 			Model:    activeModel,
-			Messages: history.Messages,
+			Messages: requestMessages,
 			Tools:    e.ToolCatalog,
 		}
 
 		result, err := e.streamAndConsume(ctx, streamReq, out)
 		if err != nil {
+			// When the API rejects the request because the prompt is too long,
+			// attempt emergency compaction once and retry with the compressed history.
+			if isPromptTooLongError(err) && !hasAttemptedRecovery && e.AutoCompact && e.Client != nil {
+				hasAttemptedRecovery = true
+				logger.DebugCF("engine", "prompt-too-long recovery: attempting emergency compact", map[string]any{
+					"session_id": sessionID,
+				})
+				// Preserve the last assistant message (the truncated one)
+				// so it survives compact and the model sees the exact
+				// cut-off point when resuming.
+				recoveryTail := findContinuationRecoveryTail(history.Messages)
+				latestRecoverableUser := findLatestContinuationUserMessage(history.Messages)
+				originalLastMessage := history.Messages[len(history.Messages)-1]
+				compactResult, compactErr := compact.CompactConversation(ctx, e.Client, compact.CompactRequest{
+					// Use history.Messages (which includes the truncated
+					// assistant but NOT the synthetic continuation prompt)
+					// so the compactor preserves the real last user message.
+					// The continuation prompt in transientMessages is added
+					// back when the next request is built.
+					Messages:       history.Messages,
+					Model:          activeModel,
+					TranscriptPath: e.TranscriptPath,
+				})
+				if compactErr == nil && compactResult != nil {
+					history.Messages = append(
+						[]message.Message(nil),
+						compactResult.Boundary,
+					)
+					history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+					// Re-append the truncated assistant turn only when this
+					// is a max_tokens continuation that hit prompt-too-long.
+					// Without transientMessages this is a plain oversized
+					// request and the compactor already preserves the
+					// trailing user prompt — re-appending the last assistant
+					// would corrupt message ordering.
+					if len(transientMessages) > 0 {
+						history.Messages = appendMissingMessageTail(history.Messages, recoveryTail)
+					} else if latestRecoverableUser != nil &&
+						originalLastMessage.Role == message.RoleUser &&
+						!isToolResultOnlyMessage(originalLastMessage) &&
+						!containsExactMessage(history.Messages, *latestRecoverableUser) {
+						// CompactConversation strips media blocks before summarizing,
+						// so a preserved multimodal tail user turn may survive only
+						// as placeholder text. Replace that compacted tail with the
+						// original user message before retrying.
+						if len(history.Messages) > 0 {
+							lastHistoryMessage := history.Messages[len(history.Messages)-1]
+							if lastHistoryMessage.Role == message.RoleUser && !isToolResultOnlyMessage(lastHistoryMessage) {
+								history.Messages = history.Messages[:len(history.Messages)-1]
+							}
+						}
+						history.Messages = append(history.Messages, *latestRecoverableUser)
+					}
+					// Do NOT clear transientMessages here: the continuation
+					// instruction must survive emergency compact so the retry
+					// still asks the model to resume mid-thought.
+					out <- event.Event{
+						Type:      event.TypeCompactDone,
+						Timestamp: time.Now(),
+						Payload: event.CompactDonePayload{
+							PreTokenCount:  compactResult.PreTokenCount,
+							PostTokenCount: compactResult.PostTokenCount,
+						},
+					}
+					if !compactResult.Usage.IsZero() {
+						cumulativeUsage = cumulativeUsage.Add(compactResult.Usage)
+						out <- event.Event{
+							Type:      event.TypeUsage,
+							Timestamp: time.Now(),
+							Payload: event.UsagePayload{
+								TurnUsage:       compactResult.Usage,
+								CumulativeUsage: cumulativeUsage,
+							},
+						}
+					}
+					continue
+				}
+				logger.DebugCF("engine", "prompt-too-long recovery: compact failed, surfacing error", map[string]any{
+					"session_id":    sessionID,
+					"compact_error": compactErr,
+				})
+			}
 			return err
 		}
+		transientMessages = nil
+		// A successful model call means the prompt fit within the context
+		// window, so allow a future prompt-too-long recovery if the
+		// conversation grows again.
+		hasAttemptedRecovery = false
 		if result.activeModel != "" {
 			activeModel = result.activeModel
 		}
 
 		// Accumulate usage from this model call.
 		cumulativeUsage = cumulativeUsage.Add(result.usage)
+		responseOutputTokens += result.usage.OutputTokens
 
 		// Emit per-call usage event.
 		if !result.usage.IsZero() {
@@ -220,6 +412,57 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 			history.Append(result.assistant)
 		}
 		if len(result.toolUses) == 0 {
+			// When the model stops due to max_tokens (output truncated),
+			// automatically continue by injecting a recovery user message
+			// and sending another request so the model picks up where it left off.
+			if result.stopReason == model.StopReasonMaxTokens && continuationAttempts < maxContinuationAttempts {
+				continuationAttempts++
+				logger.DebugCF("engine", "max_tokens continuation", map[string]any{
+					"session_id":           sessionID,
+					"continuation_attempt": continuationAttempts,
+					"max_continuation":     maxContinuationAttempts,
+				})
+				// The truncated assistant message was already appended above.
+				// Inject a continuation prompt only into the next model request so
+				// internal recovery instructions are not persisted into session history.
+				transientMessages = []message.Message{{
+					Role: message.RoleUser,
+					Content: []message.ContentPart{
+						message.TextPart(continuationUserMessage),
+					},
+				}}
+				continue
+			}
+				// Token budget continuation: when the model stops normally
+				// (not max_tokens) and a token budget is set, check whether
+				// the model should be nudged to keep producing tokens.
+				if turnTokenBudget > 0 && result.stopReason != model.StopReasonMaxTokens {
+					decision := checkTokenBudget(&budgetTracker, "", turnTokenBudget, responseOutputTokens)
+					if decision.Action == "continue" {
+						logger.DebugCF("engine", "token budget continuation", map[string]any{
+							"session_id":           sessionID,
+							"continuation_count":   decision.ContinuationCount,
+							"pct":                  decision.Pct,
+							"turn_output_tokens":   responseOutputTokens,
+							"turn_token_budget":    turnTokenBudget,
+						})
+						transientMessages = []message.Message{{
+							Role: message.RoleUser,
+							Content: []message.ContentPart{
+								message.TextPart(decision.NudgeMessage),
+							},
+						}}
+						continue
+					}
+					if decision.CompletionEvent != nil {
+						logger.DebugCF("engine", "token budget completed", map[string]any{
+							"session_id":           sessionID,
+							"pct":                  decision.CompletionEvent.Pct,
+							"tokens":               decision.CompletionEvent.Tokens,
+							"diminishing_returns":  decision.CompletionEvent.DiminishingReturns,
+						})
+					}
+				}
 			out <- event.Event{
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),
@@ -238,6 +481,17 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, history convers
 		}
 
 		toolLoops++
+		// Reset continuation budget for the next response phase:
+		// the model will generate a fresh answer after tool results
+		// are injected, so a new truncation chain may begin.
+		continuationAttempts = 0
+			// Reset budget tracker for the next response phase: the model
+			// starts a fresh generation after tool results, so budget state
+			// from the previous response phase should not carry over.
+			if turnTokenBudget > 0 {
+				responseOutputTokens = 0
+				budgetTracker = NewBudgetTracker()
+			}
 		logger.DebugCF("engine", "executing tool loop iteration", map[string]any{
 			"session_id": sessionID,
 			"tool_count": len(result.toolUses),

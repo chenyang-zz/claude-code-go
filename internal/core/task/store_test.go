@@ -403,6 +403,14 @@ func TestSanitizePathComponent(t *testing.T) {
 	}
 }
 
+func TestResolveTaskListIDSanitizesOverride(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TASK_LIST_ID", "../../tmp/evil")
+
+	if got, want := ResolveTaskListID(), "------tmp-evil"; got != want {
+		t.Fatalf("ResolveTaskListID() = %q, want %q", got, want)
+	}
+}
+
 func TestHighwatermarkFileCreated(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

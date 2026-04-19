@@ -261,6 +261,9 @@ func TestIsRetriableError(t *testing.T) {
 		{"forbidden 403", false},
 		{"not found 404", false},
 		{"bad request 400", false},
+		// Token counts should NOT match HTTP status codes.
+		{"prompt is too long: 250000 tokens > 200000", false},
+		{"prompt is too long: 150800 tokens > 128000", false},
 	}
 	for _, tt := range tests {
 		got := isRetriableError(errors.New(tt.errMsg))
@@ -680,5 +683,33 @@ func TestRuntimeRunFallbackOnMidStreamError(t *testing.T) {
 	// Primary tried once, then fallback.
 	if len(modelsUsed) != 2 || modelsUsed[0] != "primary-model" || modelsUsed[1] != "fallback-model" {
 		t.Fatalf("models used = %v, want [primary-model, fallback-model]", modelsUsed)
+	}
+}
+
+// TestIsPromptTooLongError verifies error detection for prompt-too-long API errors.
+func TestIsPromptTooLongError(t *testing.T) {
+	tests := []struct {
+		errMsg string
+		want   bool
+	}{
+		{"prompt is too long: 250000 tokens > 200000", true},
+		{"Prompt is too long", true},
+		{"error: context_length_exceeded", true},
+		{"Context_Length_Exceeded for model", true},
+		{"stop reason: context_window_exceeded", true},
+		{"stop reason: model_context_window_exceeded", true},
+		{"unauthorized 401", false},
+		{"rate_limit exceeded 429", false},
+		{"connection reset", false},
+	}
+	for _, tt := range tests {
+		got := isPromptTooLongError(errors.New(tt.errMsg))
+		if got != tt.want {
+			t.Errorf("isPromptTooLongError(%q) = %v, want %v", tt.errMsg, got, tt.want)
+		}
+	}
+	// nil error should return false.
+	if isPromptTooLongError(nil) {
+		t.Error("isPromptTooLongError(nil) = true, want false")
 	}
 }

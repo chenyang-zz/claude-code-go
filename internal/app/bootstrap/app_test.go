@@ -23,6 +23,26 @@ type stubLoader struct {
 	cfg coreconfig.Config
 }
 
+func TestResolveTaskStoreUsesStableDefaultTaskListPath(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TASK_LIST_ID", "")
+
+	homeDir := t.TempDir()
+	store := resolveTaskStore(stubLoader{}, homeDir)
+	if store == nil {
+		t.Fatal("resolveTaskStore() = nil, want file store")
+	}
+
+	id, err := store.Create(context.Background(), coretask.NewTask{Subject: "persist me"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	taskPath := filepath.Join(homeDir, ".claude", "tasks", "default", id+".json")
+	if _, err := os.Stat(taskPath); err != nil {
+		t.Fatalf("task file %q missing: %v", taskPath, err)
+	}
+}
+
 // TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage verifies /seed-sessions sees the repository once session storage is wired.
 func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testing.T) {
 	loader := stubLoader{

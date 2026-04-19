@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -53,6 +54,10 @@ func (p RetryPolicy) backoffDuration(attempt int) time.Duration {
 	return exp + jitter
 }
 
+// httpStatusRe matches standalone 3-digit HTTP status codes in error messages.
+// Uses word boundaries to avoid false positives like "250000" matching "500".
+var httpStatusRe = regexp.MustCompile(`\b(529|500|502|503|504|429|408)\b`)
+
 // isRetriableError classifies whether an error from Client.Stream should be retried.
 func isRetriableError(err error) bool {
 	if err == nil {
@@ -65,25 +70,32 @@ func isRetriableError(err error) bool {
 		return true
 	}
 
-	// HTTP 5xx (including 529 overloaded).
-	if strings.Contains(msg, "529") || strings.Contains(msg, "overloaded") {
-		return true
-	}
-	if strings.Contains(msg, "500") || strings.Contains(msg, "502") || strings.Contains(msg, "503") || strings.Contains(msg, "504") {
+	// HTTP status codes: 5xx (including 529 overloaded), 429 (rate limit), 408 (timeout).
+	if httpStatusRe.MatchString(msg) {
 		return true
 	}
 
-	// Rate limit.
-	if strings.Contains(msg, "429") || strings.Contains(msg, "rate_limit") {
-		return true
-	}
-
-	// Request timeout.
-	if strings.Contains(msg, "408") || strings.Contains(msg, "timeout") {
+	// Keyword-based fallback for rate limit and timeout messages.
+	if strings.Contains(msg, "overloaded") || strings.Contains(msg, "rate_limit") || strings.Contains(msg, "timeout") {
 		return true
 	}
 
 	return false
+}
+
+// isPromptTooLongError detects API errors indicating the conversation prompt exceeds
+// the model's context window. Covers Anthropic ("prompt is too long"),
+// OpenAI ("context_length_exceeded"), and the streaming stop-reason variant
+// ("context_window_exceeded" / "model_context_window_exceeded").
+func isPromptTooLongError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "prompt is too long") ||
+		strings.Contains(msg, "context_length_exceeded") ||
+		strings.Contains(msg, "model_context_window_exceeded") ||
+		strings.Contains(msg, "context_window_exceeded")
 }
 
 func isNetworkError(err error) bool {

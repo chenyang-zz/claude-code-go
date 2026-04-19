@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/google/uuid"
 )
 
 // Store defines the operations that tools need from the task persistence layer.
@@ -69,6 +71,28 @@ var sanitizeRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
 // are replaced with hyphens.
 func SanitizePathComponent(input string) string {
 	return sanitizeRe.ReplaceAllString(input, "-")
+}
+
+// sessionTaskListID holds the per-process fallback task list ID derived from a
+// UUID. It is computed once via sync.Once so all callers within the same
+// process receive the same value.
+var (
+	sessionTaskListID     string
+	sessionTaskListIDOnce sync.Once
+)
+
+// ResolveTaskListID determines which task list ID to use.
+// Priority:
+//  1. CLAUDE_CODE_TASK_LIST_ID environment variable — explicit override
+//  2. Process-stable UUID fallback — each process gets its own isolated list
+func ResolveTaskListID() string {
+	if id := os.Getenv("CLAUDE_CODE_TASK_LIST_ID"); id != "" {
+		return SanitizePathComponent(id)
+	}
+	sessionTaskListIDOnce.Do(func() {
+		sessionTaskListID = SanitizePathComponent(uuid.NewString())
+	})
+	return sessionTaskListID
 }
 
 // FileStore implements Store using per-task JSON files in a dedicated directory.
@@ -252,21 +276,40 @@ func (s *FileStore) Create(_ context.Context, data NewTask) (string, error) {
 	return id, err
 }
 
-// Get loads a single task by ID.
+// Get loads a single task by ID under a shared lock so concurrent writes
+// cannot produce partially-read JSON.
 func (s *FileStore) Get(_ context.Context, id string) (*Task, error) {
-	if err := s.ensureDir(); err != nil {
-		return nil, err
-	}
-	return s.readTaskFile(s.taskPath(id))
+	var result *Task
+	err := s.withLock(func() error {
+		if err := s.ensureDir(); err != nil {
+			return err
+		}
+		var readErr error
+		result, readErr = s.readTaskFile(s.taskPath(id))
+		return readErr
+	})
+	return result, err
 }
 
-// List loads all tasks in the current task list directory.
+// List loads all tasks in the current task list directory under a shared lock.
 func (s *FileStore) List(_ context.Context) ([]*Task, error) {
+	var tasks []*Task
+	err := s.withLock(func() error {
+		var listErr error
+		tasks, listErr = s.listLocked()
+		return listErr
+	})
+	return tasks, err
+}
+
+// listLocked reads all tasks without acquiring the lock. The caller must
+// already hold the store lock (e.g. from within a withLock callback).
+func (s *FileStore) listLocked() ([]*Task, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(s.tasksDir())
-	if err != nil {
+	entries, readErr := os.ReadDir(s.tasksDir())
+	if readErr != nil {
 		return nil, nil
 	}
 	var tasks []*Task
@@ -275,8 +318,8 @@ func (s *FileStore) List(_ context.Context) ([]*Task, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
-		t, err := s.readTaskFile(s.taskPath(id))
-		if err != nil {
+		t, fileErr := s.readTaskFile(s.taskPath(id))
+		if fileErr != nil {
 			continue
 		}
 		if t != nil {
@@ -438,7 +481,7 @@ func (s *FileStore) Delete(_ context.Context, id string) (bool, error) {
 		deleted = true
 
 		// Clean up references in remaining tasks.
-		tasks, err := s.List(context.Background())
+		tasks, err := s.listLocked()
 		if err != nil {
 			return nil // best-effort cleanup
 		}
