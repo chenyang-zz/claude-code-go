@@ -265,11 +265,25 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 		"command_len": len(command),
 	})
 
-	execResult, err := t.executor.Execute(ctx, platformshell.Request{
+	startTime := time.Now()
+	req := platformshell.Request{
 		Command:    command,
 		WorkingDir: call.Context.WorkingDir,
 		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
-	})
+	}
+
+	// When a progress callback is available in context, stream stdout line-by-line.
+	if progressFn := coretool.GetProgress(ctx); progressFn != nil {
+		req.OnStdoutLine = func(line string) {
+			progressFn(BashProgressData{
+				Output:         line,
+				FullOutput:     "", // FullOutput not tracked per-line in minimal impl
+				ElapsedSeconds: time.Since(startTime).Seconds(),
+			})
+		}
+	}
+
+	execResult, err := t.executor.Execute(ctx, req)
 	if err != nil {
 		return coretool.Result{
 			Error: fmt.Sprintf("bash tool: %v", err),
@@ -570,4 +584,14 @@ func renderStreamDetails(stdout string, stderr string) string {
 	default:
 		return fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", trimmedStdout, trimmedStderr)
 	}
+}
+
+// BashProgressData carries one incremental stdout update emitted by a running Bash command.
+type BashProgressData struct {
+	// Output stores the most recently received stdout lines.
+	Output string `json:"output"`
+	// FullOutput stores the complete stdout accumulated so far.
+	FullOutput string `json:"fullOutput"`
+	// ElapsedSeconds stores the wall-clock seconds since the command started.
+	ElapsedSeconds float64 `json:"elapsedSeconds"`
 }

@@ -995,7 +995,20 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		}
 	}
 
-	result, invokeErr := e.Executor.Execute(ctx, call)
+	// Inject progress callback so tools can emit incremental progress events.
+	toolCtx := coretool.WithProgress(ctx, func(data any) {
+		out <- event.Event{
+			Type:      event.TypeProgress,
+			Timestamp: time.Now(),
+			Payload: event.ProgressPayload{
+				ToolUseID:       call.ID,
+				ParentToolUseID: "",
+				Data:            data,
+			},
+		}
+	})
+
+	result, invokeErr := e.Executor.Execute(toolCtx, call)
 	var permissionErr *corepermission.PermissionError
 	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
 		return e.executeFilesystemApproval(ctx, call, permissionErr, out)

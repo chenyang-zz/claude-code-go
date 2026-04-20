@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -31,6 +32,10 @@ type Request struct {
 	Timeout time.Duration
 	// Env stores optional process-level environment overrides merged on top of the host environment.
 	Env map[string]string
+	// OnStdoutLine is an optional callback invoked for each stdout line produced by the command.
+	// When set, the executor reads stdout through a pipe instead of buffering it all at once,
+	// but still collects the full output in the returned Result.
+	OnStdoutLine func(line string)
 }
 
 // Result stores the normalized foreground shell execution outcome returned to callers.
@@ -89,9 +94,7 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 	cmd.Env = mergeEnvironment(e.environ(), req.Env)
 
-	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	logger.DebugCF("shell_executor", "starting foreground shell command", map[string]any{
@@ -101,15 +104,46 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 		"command_size": len(req.Command),
 	})
 
-	err := cmd.Run()
+	var stdoutStr string
+	var runErr error
+	if req.OnStdoutLine != nil {
+		// Streaming mode: pipe stdout through a reader so callbacks receive line-oriented
+		// updates without changing the exact stdout bytes returned to the caller.
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			return Result{}, fmt.Errorf("shell executor: stdout pipe: %w", err)
+		}
+		if err := cmd.Start(); err != nil {
+			return Result{}, fmt.Errorf("shell executor: start command: %w", err)
+		}
+
+		var stdoutBuf bytes.Buffer
+		readErrCh := make(chan error, 1)
+		go func() {
+			readErrCh <- streamStdout(stdoutPipe, &stdoutBuf, req.OnStdoutLine)
+		}()
+
+		runErr = cmd.Wait()
+		readErr := <-readErrCh
+		if readErr != nil {
+			return Result{}, fmt.Errorf("shell executor: read stdout: %w", readErr)
+		}
+		stdoutStr = stdoutBuf.String()
+	} else {
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		runErr = cmd.Run()
+		stdoutStr = stdout.String()
+	}
+
 	result := Result{
 		Command:  req.Command,
-		Stdout:   stdout.String(),
+		Stdout:   stdoutStr,
 		Stderr:   stderr.String(),
 		ExitCode: exitCodeSuccess,
 	}
 
-	if err == nil {
+	if runErr == nil {
 		logger.DebugCF("shell_executor", "foreground shell command finished", map[string]any{
 			"exit_code":  result.ExitCode,
 			"timed_out":  result.TimedOut,
@@ -119,7 +153,7 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 		return result, nil
 	}
 
-	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) && runErr != nil {
 		result.TimedOut = true
 		result.ExitCode = exitCodeTimeout
 		logger.DebugCF("shell_executor", "foreground shell command timed out", map[string]any{
@@ -131,7 +165,7 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 	}
 
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
+	if errors.As(runErr, &exitErr) {
 		result.ExitCode = exitErr.ExitCode()
 		logger.DebugCF("shell_executor", "foreground shell command exited with failure", map[string]any{
 			"exit_code":  result.ExitCode,
@@ -141,7 +175,50 @@ func (e *Executor) Execute(ctx context.Context, req Request) (Result, error) {
 		return result, nil
 	}
 
-	return Result{}, fmt.Errorf("shell executor: run command: %w", err)
+	return Result{}, fmt.Errorf("shell executor: run command: %w", runErr)
+}
+
+func streamStdout(stdout io.ReadCloser, dst *bytes.Buffer, onLine func(line string)) error {
+	defer stdout.Close()
+
+	var pending bytes.Buffer
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := stdout.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if _, writeErr := dst.Write(chunk); writeErr != nil {
+				return writeErr
+			}
+			if onLine != nil {
+				pending.Write(chunk)
+				for {
+					data := pending.Bytes()
+					idx := bytes.IndexByte(data, '\n')
+					if idx < 0 {
+						break
+					}
+					line := string(data[:idx])
+					if strings.HasSuffix(line, "\r") {
+						line = strings.TrimSuffix(line, "\r")
+					}
+					onLine(line)
+					pending.Next(idx + 1)
+				}
+			}
+		}
+
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if onLine != nil && pending.Len() > 0 {
+				onLine(strings.TrimSuffix(pending.String(), "\r"))
+			}
+			return nil
+		}
+		return err
+	}
 }
 
 // lookupShell resolves the concrete shell executable and argument prefix used for one request.

@@ -15,6 +15,7 @@ const (
 	TypeRetryAttempted   Type = "retry.attempted"
 	TypeModelFallback    Type = "model.fallback"
 	TypeCompactDone      Type = "compact.done"
+	TypeProgress         Type = "tool.progress"
 )
 
 type Event struct {

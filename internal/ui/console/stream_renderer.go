@@ -82,6 +82,14 @@ func (r *StreamRenderer) RenderEvent(evt event.Event) error {
 		if err := r.Printer.PrintLine(fmt.Sprintf("  Approval required: %s", label)); err != nil {
 			return err
 		}
+	case event.TypeProgress:
+		payload, ok := evt.Payload.(event.ProgressPayload)
+		if !ok {
+			return fmt.Errorf("progress payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf("  Tool progress [%s]: %v", payload.ToolUseID, payload.Data)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

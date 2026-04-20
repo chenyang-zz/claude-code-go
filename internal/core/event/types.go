@@ -72,3 +72,13 @@ type CompactDonePayload struct {
 	PreTokenCount  int
 	PostTokenCount int
 }
+
+// ProgressPayload carries one incremental progress update emitted by a running tool.
+type ProgressPayload struct {
+	// ToolUseID identifies the tool invocation this progress belongs to.
+	ToolUseID string
+	// ParentToolUseID links this progress to a parent tool call when nested.
+	ParentToolUseID string
+	// Data holds the type-specific progress details (e.g. BashProgressData).
+	Data any
+}
