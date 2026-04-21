@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/compact"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
@@ -73,6 +74,9 @@ type Runtime struct {
 	TranscriptPath string
 	// sessionID is set per-run and used by hook inputs.
 	sessionID string
+	// sessionStartSessionID tracks which logical session has already received
+	// SessionStart hooks so reused Runtime instances still fire on new sessions.
+	sessionStartSessionID string
 	// Hooks stores the hook configuration loaded from settings.
 	Hooks hook.HooksConfig
 	// DisableAllHooks disables all hook execution when set via policy settings.
@@ -101,6 +105,15 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 		return nil, err
 	}
 
+	// When the TOKEN_BUDGET feature flag is enabled and no explicit budget was
+	// provided, parse the user input for a token budget directive (e.g. "+500k").
+	turnTokenBudget := req.TurnTokenBudget
+	if turnTokenBudget <= 0 && featureflag.IsEnabled(featureflag.FlagTokenBudget) {
+		if budget, ok := parseTokenBudgetFromHistory(history.Messages); ok {
+			turnTokenBudget = budget
+		}
+	}
+
 	logger.DebugCF("engine", "starting single-turn run", map[string]any{
 		"session_id":    req.SessionID,
 		"message_count": len(history.Messages),
@@ -110,7 +123,7 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 	out := make(chan event.Event)
 	go func() {
 		defer close(out)
-		if err := e.runLoop(ctx, req.SessionID, req.CWD, req.TurnTokenBudget, history, out); err != nil {
+		if err := e.runLoop(ctx, req.SessionID, req.CWD, turnTokenBudget, req.SessionStartSource, history, out); err != nil {
 			out <- event.Event{
 				Type:      event.TypeError,
 				Timestamp: time.Now(),
@@ -151,6 +164,28 @@ func buildInitialHistory(req conversation.RunRequest) (conversation.History, err
 			},
 		},
 	}, nil
+}
+
+func parseTokenBudgetFromHistory(messages []message.Message) (int, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleUser || isToolResultOnlyMessage(msg) {
+			continue
+		}
+		for _, part := range msg.Content {
+			if part.Type != "text" || part.IsMeta {
+				continue
+			}
+			text := strings.TrimSpace(part.Text)
+			if text == "" {
+				continue
+			}
+			if budget, ok := ParseTokenBudget(text); ok {
+				return budget, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // findLatestContinuationUserMessage returns the most recent real user turn
@@ -242,8 +277,31 @@ const maxContinuationAttempts = 3
 const continuationUserMessage = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."
 
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
-func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, history conversation.History, out chan<- event.Event) error {
+func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, sessionStartSource string, history conversation.History, out chan<- event.Event) error {
 	e.sessionID = sessionID
+
+	// Dispatch SessionStart hooks once per logical session ID (non-blocking).
+	if e.sessionStartSessionID != sessionID {
+		e.sessionStartSessionID = sessionID
+		if e.shouldRunStopHooks(hook.EventSessionStart) {
+			if strings.TrimSpace(sessionStartSource) == "" {
+				sessionStartSource = "startup"
+			}
+			input := hook.SessionStartHookInput{
+				BaseHookInput: hook.BaseHookInput{
+					SessionID:      sessionID,
+					TranscriptPath: e.TranscriptPath,
+					CWD:            e.workingDir(cwd),
+					AgentType:      "",
+				},
+				HookEventName: string(hook.EventSessionStart),
+				Source:        sessionStartSource,
+				Model:         e.activeModel(),
+			}
+			e.runHooks(ctx, hook.EventSessionStart, input, cwd)
+		}
+	}
+
 	toolLoops := 0
 	continuationAttempts := 0
 	var cumulativeUsage model.Usage
@@ -256,10 +314,19 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 	// so budget continuation decisions reflect the answer, not recovery work.
 	responseOutputTokens := 0
 	var budgetTracker BudgetTracker
-	if turnTokenBudget > 0 {
+	if featureflag.IsEnabled(featureflag.FlagTokenBudget) && turnTokenBudget > 0 {
 		budgetTracker = NewBudgetTracker()
 	}
 	var stopHookActive bool
+	// taskBudgetRemaining tracks the remaining API-side task budget across
+	// compaction boundaries. Undefined (0) until the first compact fires;
+	// while context is uncompacted the server can see the full history and
+	// handles the countdown from {total} itself. After compaction the server
+	// sees only the summary and would under-count, so remaining tells it the
+	// pre-compact window that was summarized away.
+	taskBudgetRemaining := 0
+	// hasTaskBudget tracks whether an API-side task_budget should be sent.
+	hasTaskBudget := featureflag.IsEnabled(featureflag.FlagTokenBudget) && turnTokenBudget > 0
 
 	for {
 		// Auto-compact check point: before building the API request,
@@ -285,12 +352,51 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				})
 			}
 			if compactResult != nil {
+				if e.shouldRunStopHooks(hook.EventPreCompact) {
+					preInput := hook.PreCompactHookInput{
+						BaseHookInput: hook.BaseHookInput{
+							SessionID:      sessionID,
+							TranscriptPath: e.TranscriptPath,
+							CWD:            e.workingDir(cwd),
+						},
+						HookEventName: string(hook.EventPreCompact),
+						Trigger:       string(compact.TriggerAuto),
+					}
+					e.runHooks(ctx, hook.EventPreCompact, preInput, cwd)
+				}
+
 				// Replace message history with post-compact messages.
 				history.Messages = append(
 					[]message.Message(nil),
 					compactResult.Boundary,
 				)
 				history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+
+				// Update task_budget remaining after compaction: the server's
+				// budget countdown is context-based, so remaining decrements
+				// by the pre-compact context window that got summarized away.
+				if hasTaskBudget && !compactResult.Usage.IsZero() {
+					taskBudgetRemaining = ComputeTaskBudgetRemaining(
+						taskBudgetRemaining, turnTokenBudget,
+						compactResult.Usage.InputTokens, compactResult.Usage.OutputTokens,
+					)
+				}
+
+				// Dispatch PostCompact hooks after successful compaction (non-blocking).
+				if e.shouldRunStopHooks(hook.EventPostCompact) {
+					postInput := hook.PostCompactHookInput{
+						BaseHookInput: hook.BaseHookInput{
+							SessionID:      sessionID,
+							TranscriptPath: e.TranscriptPath,
+							CWD:            e.workingDir(cwd),
+						},
+						HookEventName:  string(hook.EventPostCompact),
+						Trigger:        string(compact.TriggerAuto),
+						CompactSummary: compactResult.Summary,
+					}
+					e.runHooks(ctx, hook.EventPostCompact, postInput, cwd)
+				}
+
 				out <- event.Event{
 					Type:      event.TypeCompactDone,
 					Timestamp: time.Now(),
@@ -321,6 +427,22 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			Tools:    e.ToolCatalog,
 		}
 
+		// Attach API-side task_budget when the feature flag is enabled and
+		// a token budget is active. The remaining field is only set after
+		// the first compaction.
+		if hasTaskBudget {
+			var remaining *int
+			if taskBudgetRemaining > 0 {
+				r := taskBudgetRemaining
+				remaining = &r
+			}
+			streamReq.TaskBudget = &model.TaskBudgetParam{
+				Type:      "tokens",
+				Total:     turnTokenBudget,
+				Remaining: remaining,
+			}
+		}
+
 		result, err := e.streamAndConsume(ctx, streamReq, out)
 		if err != nil {
 			// When the API rejects the request because the prompt is too long,
@@ -336,6 +458,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				recoveryTail := findContinuationRecoveryTail(history.Messages)
 				latestRecoverableUser := findLatestContinuationUserMessage(history.Messages)
 				originalLastMessage := history.Messages[len(history.Messages)-1]
+
 				compactResult, compactErr := compact.CompactConversation(ctx, e.Client, compact.CompactRequest{
 					// Use history.Messages (which includes the truncated
 					// assistant but NOT the synthetic continuation prompt)
@@ -347,11 +470,49 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 					TranscriptPath: e.TranscriptPath,
 				})
 				if compactErr == nil && compactResult != nil {
+					if e.shouldRunStopHooks(hook.EventPreCompact) {
+						preInput := hook.PreCompactHookInput{
+							BaseHookInput: hook.BaseHookInput{
+								SessionID:      sessionID,
+								TranscriptPath: e.TranscriptPath,
+								CWD:            e.workingDir(cwd),
+							},
+							HookEventName: string(hook.EventPreCompact),
+							Trigger:       string(compact.TriggerAuto),
+						}
+						e.runHooks(ctx, hook.EventPreCompact, preInput, cwd)
+					}
+
+					// Dispatch PostCompact hooks after emergency compaction (non-blocking).
+					if e.shouldRunStopHooks(hook.EventPostCompact) {
+						postInput := hook.PostCompactHookInput{
+							BaseHookInput: hook.BaseHookInput{
+								SessionID:      sessionID,
+								TranscriptPath: e.TranscriptPath,
+								CWD:            e.workingDir(cwd),
+							},
+							HookEventName:  string(hook.EventPostCompact),
+							Trigger:        string(compact.TriggerAuto),
+							CompactSummary: compactResult.Summary,
+						}
+						e.runHooks(ctx, hook.EventPostCompact, postInput, cwd)
+					}
+
 					history.Messages = append(
 						[]message.Message(nil),
 						compactResult.Boundary,
 					)
 					history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+
+					// Update task_budget remaining after emergency compaction
+					// (same carryover as the proactive path above).
+					if hasTaskBudget && !compactResult.Usage.IsZero() {
+						taskBudgetRemaining = ComputeTaskBudgetRemaining(
+							taskBudgetRemaining, turnTokenBudget,
+							compactResult.Usage.InputTokens, compactResult.Usage.OutputTokens,
+						)
+					}
+
 					// Re-append the truncated assistant turn only when this
 					// is a max_tokens continuation that hit prompt-too-long.
 					// Without transientMessages this is a plain oversized
@@ -461,7 +622,8 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			// Token budget continuation: when the model stops normally
 			// (not max_tokens) and a token budget is set, check whether
 			// the model should be nudged to keep producing tokens.
-			if turnTokenBudget > 0 && result.stopReason != model.StopReasonMaxTokens {
+			// Gated by the TOKEN_BUDGET feature flag.
+			if featureflag.IsEnabled(featureflag.FlagTokenBudget) && turnTokenBudget > 0 && result.stopReason != model.StopReasonMaxTokens {
 				decision := checkTokenBudget(&budgetTracker, "", turnTokenBudget, responseOutputTokens)
 				if decision.Action == "continue" {
 					logger.DebugCF("engine", "token budget continuation", map[string]any{
@@ -566,7 +728,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		// Reset budget tracker for the next response phase: the model
 		// starts a fresh generation after tool results, so budget state
 		// from the previous response phase should not carry over.
-		if turnTokenBudget > 0 {
+		if featureflag.IsEnabled(featureflag.FlagTokenBudget) && turnTokenBudget > 0 {
 			responseOutputTokens = 0
 			budgetTracker = NewBudgetTracker()
 		}
@@ -576,7 +738,14 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			"iteration":  toolLoops,
 		})
 
-		history.Append(e.executeToolUses(ctx, result.toolUses, out))
+		// When the streaming executor was used, tools already ran during
+		// streaming. Build the tool_result message from its tracked state
+		// instead of executing tools again.
+		if result.streamingExec != nil {
+			history.Append(result.streamingExec.BuildToolResultMessage())
+		} else {
+			history.Append(e.executeToolUses(ctx, result.toolUses, out))
+		}
 	}
 }
 
@@ -605,6 +774,53 @@ func (e *Runtime) runStopHooks(ctx context.Context, event hook.HookEvent, input 
 		return nil
 	}
 	return e.HookRunner.RunStopHooks(ctx, e.Hooks, event, input, e.workingDir(cwd))
+}
+
+// runHooks executes hooks for the given event with arbitrary input type.
+// Unlike runStopHooks, it accepts any hook input struct (not just StopHookInput).
+func (e *Runtime) runHooks(ctx context.Context, event hook.HookEvent, input any, cwd string) []hook.HookResult {
+	if e.HookRunner == nil {
+		return nil
+	}
+	return e.HookRunner.RunStopHooks(ctx, e.Hooks, event, input, e.workingDir(cwd))
+}
+
+// RunSessionEndHooks dispatches SessionEnd hooks. This is a non-blocking event
+// intended to be called by the REPL/app layer when the session terminates.
+func (e *Runtime) RunSessionEndHooks(ctx context.Context, reason string, cwd string) {
+	if !e.shouldRunStopHooks(hook.EventSessionEnd) {
+		return
+	}
+	input := hook.SessionEndHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventSessionEnd),
+		Reason:        reason,
+	}
+	e.runHooks(ctx, hook.EventSessionEnd, input, cwd)
+}
+
+// RunNotificationHooks dispatches Notification hooks. This is a non-blocking,
+// fire-and-forget event intended to be called from notification senders.
+func (e *Runtime) RunNotificationHooks(ctx context.Context, message string, title string, notificationType string, cwd string) {
+	if !e.shouldRunStopHooks(hook.EventNotification) {
+		return
+	}
+	input := hook.NotificationHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName:    string(hook.EventNotification),
+		Message:          message,
+		Title:            title,
+		NotificationType: notificationType,
+	}
+	e.runHooks(ctx, hook.EventNotification, input, cwd)
 }
 
 // workingDir returns the working directory used for hook execution context.
@@ -680,23 +896,34 @@ func (e *Runtime) activeModel() string {
 
 // streamResult holds the aggregated output from one model stream consumption.
 type streamResult struct {
-	assistant   message.Message
-	toolUses    []model.ToolUse
-	stopReason  model.StopReason
-	usage       model.Usage
-	activeModel string        // non-empty if fallback was triggered
-	events      []event.Event // collected events, forwarded only on success
+	assistant     message.Message
+	toolUses      []model.ToolUse
+	stopReason    model.StopReason
+	usage         model.Usage
+	activeModel   string                 // non-empty if fallback was triggered
+	events        []event.Event          // collected events, forwarded only on success
+	streamingExec *StreamingToolExecutor // non-nil when streaming tool execution was used
 }
 
 // streamAndConsume opens a model stream, consumes it, and handles both connection errors
 // and mid-stream errors through the retry and fallback paths.
 // MaxAttempts is the number of extra retries beyond the initial attempt (0 = single attempt, no retry).
 // Partial events from failed attempts are discarded — only successful attempt events are forwarded.
+// When a ToolExecutor is configured, a StreamingToolExecutor is created so tools begin
+// executing as soon as their tool_use blocks arrive during streaming.
 func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out chan<- event.Event) (streamResult, error) {
 	policy := e.RetryPolicy
 	retries := policy.MaxAttempts
 	if retries < 0 {
 		retries = 0
+	}
+
+	// Create a streaming tool executor if a tool executor is configured.
+	// The streaming executor starts tool invocations immediately when
+	// complete tool_use blocks are detected during stream consumption.
+	var streamingExec *StreamingToolExecutor
+	if e.Executor != nil {
+		streamingExec = e.newStreamingExecutor(ctx, out)
 	}
 
 	lastErr := error(nil)
@@ -728,15 +955,29 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 			continue
 		}
 
-		result, streamErr := e.consumeModelStream(modelStream)
+		result, streamErr := e.consumeModelStream(modelStream, streamingExec, ctx)
 		if streamErr == nil {
 			// Success — forward collected events to caller.
 			for _, evt := range result.events {
 				out <- evt
 			}
+			// Only start tool execution after the provider stream succeeds so
+			// discarded retry/fallback attempts cannot run tools.
+			if streamingExec != nil {
+				for _, toolUse := range result.toolUses {
+					streamingExec.AddTool(ctx, toolUse)
+				}
+				for _, evt := range streamingExec.AwaitAll(ctx) {
+					out <- evt
+				}
+			}
 			return result, nil
 		}
-		// Stream error — discard partial events, retry if retriable.
+		// Stream error — discard partial events and running tools, retry if retriable.
+		if streamingExec != nil {
+			streamingExec.Discard()
+			streamingExec = e.newStreamingExecutor(ctx, out)
+		}
 		if !isRetriableError(streamErr) {
 			return streamResult{}, streamErr
 		}
@@ -764,7 +1005,12 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 
 	// All retries exhausted — try fallback.
 	if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
-		fbResult, fbErr := e.consumeModelStream(fb.stream)
+		// Create a fresh streaming executor for the fallback attempt.
+		if streamingExec != nil {
+			streamingExec.Discard()
+			streamingExec = e.newStreamingExecutor(ctx, out)
+		}
+		fbResult, fbErr := e.consumeModelStream(fb.stream, streamingExec, ctx)
 		if fbErr != nil {
 			return streamResult{}, fbErr
 		}
@@ -779,15 +1025,40 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 		for _, evt := range fbResult.events {
 			out <- evt
 		}
+		if streamingExec != nil {
+			for _, toolUse := range fbResult.toolUses {
+				streamingExec.AddTool(ctx, toolUse)
+			}
+			for _, evt := range streamingExec.AwaitAll(ctx) {
+				out <- evt
+			}
+		}
 		fbResult.activeModel = fb.model
 		return fbResult, nil
 	}
 	return streamResult{}, fmt.Errorf("stream failed after %d retries: %w", retries, lastErr)
 }
 
+// newStreamingExecutor creates a StreamingToolExecutor wired to this runtime's tool execution pipeline.
+// The ctx parameter is used as the parent for the sibling cascade context.
+func (e *Runtime) newStreamingExecutor(ctx context.Context, out chan<- event.Event) *StreamingToolExecutor {
+	return NewStreamingToolExecutor(
+		ctx,
+		func(ctx context.Context, call coretool.Call, evCh chan<- event.Event) (coretool.Result, error) {
+			return e.executeToolUse(ctx, call, evCh)
+		},
+		func(toolName string) bool {
+			return e.Executor.IsConcurrencySafe(toolName)
+		},
+		out,
+		e.maxConcurrentToolCalls(),
+	)
+}
+
 // consumeModelStream aggregates one provider response into an assistant message plus any completed tool_use blocks.
 // Events are collected into the result and NOT forwarded to any channel — the caller decides whether to emit them.
-func (e *Runtime) consumeModelStream(modelStream model.Stream) (streamResult, error) {
+// Tool execution is deferred until the full stream succeeds so retried attempts cannot run discarded tools.
+func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *StreamingToolExecutor, ctx context.Context) (streamResult, error) {
 	assistant := message.Message{Role: message.RoleAssistant}
 	var toolUses []model.ToolUse
 	var stopReason model.StopReason
@@ -838,11 +1109,12 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream) (streamResult, er
 	}
 
 	return streamResult{
-		assistant:  assistant,
-		toolUses:   toolUses,
-		stopReason: stopReason,
-		usage:      usage,
-		events:     events,
+		assistant:     assistant,
+		toolUses:      toolUses,
+		stopReason:    stopReason,
+		usage:         usage,
+		events:        events,
+		streamingExec: streamingExec,
 	}, nil
 }
 
@@ -906,6 +1178,11 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 		"max_concurrency": e.maxConcurrentToolCalls(),
 	})
 
+	// Create a sibling cascade so that a Bash tool error cancels sibling tools.
+	// The cascade context is derived from the parent ctx; cancelling it does not
+	// affect the parent, matching the TS siblingAbortController design.
+	cascade := NewSiblingCascade(ctx)
+
 	outcomes := make([]toolExecutionOutcome, len(batch.toolUses))
 	sem := make(chan struct{}, e.maxConcurrentToolCalls())
 	var wg sync.WaitGroup
@@ -923,7 +1200,12 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 				Input:  pending.Input,
 				Source: "model",
 			}
-			result, invokeErr := e.executeToolUse(ctx, call, out)
+			// Use cascade context for execution so sibling cancellation propagates.
+			result, invokeErr := e.executeToolUse(cascade.Context(), call, out)
+
+			// Trigger cascade if this is a Bash tool error.
+			cascade.TriggerOnBashError(pending.Name, pending.Input, result, invokeErr)
+
 			outcomes[index] = toolExecutionOutcome{
 				toolUse:   pending,
 				result:    result,
@@ -932,6 +1214,21 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 		}(idx, toolUse)
 	}
 	wg.Wait()
+
+	// Replace context.Canceled errors from sibling cascade with synthetic error messages.
+	// The Bash tool that triggered the cascade keeps its real error; only siblings that
+	// were cancelled by the cascade context get the synthetic message.
+	if cascade.IsErrored() {
+		desc := cascade.ErroredToolDesc()
+		for i := range outcomes {
+			if errors.Is(outcomes[i].invokeErr, context.Canceled) {
+				syntheticMsg := FormatCascadeErrorMessage(desc)
+				outcomes[i].result = coretool.Result{Error: syntheticMsg}
+				outcomes[i].invokeErr = nil
+			}
+		}
+	}
+
 	return outcomes
 }
 

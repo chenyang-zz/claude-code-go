@@ -19,4 +19,7 @@ type RunRequest struct {
 	CWD string
 	// PermissionMode is the active permission mode (e.g. "default", "plan").
 	PermissionMode string
+	// SessionStartSource identifies why a new logical session is starting
+	// ("startup", "resume", "clear", or "compact").
+	SessionStartSource string
 }

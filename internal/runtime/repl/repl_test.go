@@ -25,6 +25,10 @@ import (
 type recordingEngine struct {
 	lastRequest conversation.RunRequest
 	stream      event.Stream
+	sessionEnds []struct {
+		reason string
+		cwd    string
+	}
 }
 
 type stubWorktreeLister struct {
@@ -65,6 +69,17 @@ type recordingSessionRepository struct {
 func (e *recordingEngine) Run(ctx context.Context, req conversation.RunRequest) (event.Stream, error) {
 	e.lastRequest = req
 	return e.stream, nil
+}
+
+func (e *recordingEngine) RunSessionEndHooks(ctx context.Context, reason string, cwd string) {
+	_ = ctx
+	e.sessionEnds = append(e.sessionEnds, struct {
+		reason string
+		cwd    string
+	}{
+		reason: reason,
+		cwd:    cwd,
+	})
 }
 
 func (s stubWorktreeLister) ListWorktrees(ctx context.Context, cwd string) ([]string, error) {
@@ -1757,8 +1772,20 @@ func TestRunnerRunClearStartsFreshSession(t *testing.T) {
 	if eng.lastRequest.SessionID != runner.SessionID {
 		t.Fatalf("Run(prompt after clear) session id = %q, want %q", eng.lastRequest.SessionID, runner.SessionID)
 	}
+	if eng.lastRequest.SessionStartSource != "clear" {
+		t.Fatalf("Run(prompt after clear) start source = %q, want clear", eng.lastRequest.SessionStartSource)
+	}
 	if len(eng.lastRequest.Messages) != 1 || eng.lastRequest.Messages[0].Content[0].Text != "fresh prompt" {
 		t.Fatalf("Run(prompt after clear) messages = %#v, want fresh prompt only", eng.lastRequest.Messages)
+	}
+	if len(eng.sessionEnds) != 1 {
+		t.Fatalf("session end hook calls = %d, want 1", len(eng.sessionEnds))
+	}
+	if eng.sessionEnds[0].reason != "clear" {
+		t.Fatalf("session end reason = %q, want clear", eng.sessionEnds[0].reason)
+	}
+	if eng.sessionEnds[0].cwd != "/repo" {
+		t.Fatalf("session end cwd = %q, want /repo", eng.sessionEnds[0].cwd)
 	}
 	if len(repo.saved) != 1 {
 		t.Fatalf("autosave saved count = %d, want 1", len(repo.saved))
@@ -1873,6 +1900,63 @@ func TestRunnerRunClearUpdatesLatestSessionForContinue(t *testing.T) {
 	}
 	if continueEngine.lastRequest.Messages[2].Content[0].Text != "follow-up" {
 		t.Fatalf("Run(--continue) last message = %#v, want follow-up", continueEngine.lastRequest.Messages[2])
+	}
+}
+
+func TestRunnerRunResumeWithPromptSetsResumeStartSource(t *testing.T) {
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload: event.MessageDeltaPayload{
+			Text: "resumed reply",
+		},
+	}
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("follow up")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("resumed reply")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	repo := &recordingSessionRepository{
+		loadResult: coresession.Session{
+			ID:          "session-old",
+			ProjectPath: "/repo",
+			Messages: []message.Message{
+				{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("old prompt")}},
+				{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("old reply")}},
+			},
+		},
+	}
+	manager := runtimesession.NewManager(repo)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+	runner.SessionID = "session-old"
+	runner.SessionManager = manager
+	registerSlashCommands(t, runner, NewResumeCommandAdapter(runner))
+
+	if err := runner.Run(context.Background(), []string{"/resume", "session-old", "follow", "up"}); err != nil {
+		t.Fatalf("Run(/resume) error = %v", err)
+	}
+
+	if eng.lastRequest.SessionID != "session-old" {
+		t.Fatalf("Run(/resume) session id = %q, want session-old", eng.lastRequest.SessionID)
+	}
+	if eng.lastRequest.SessionStartSource != "resume" {
+		t.Fatalf("Run(/resume) start source = %q, want resume", eng.lastRequest.SessionStartSource)
 	}
 }
 

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -101,10 +100,7 @@ func checkTokenBudget(
 		tracker.LastDeltaTokens = deltaSinceLastCheck
 		tracker.LastGlobalTurnTokens = globalTurnTokens
 
-		nudge := fmt.Sprintf(
-			"Stopped at %d%% of token target (%d / %d). Keep working — do not summarize.",
-			pct, globalTurnTokens, budget,
-		)
+		nudge := FormatBudgetNudgeMessage(pct, globalTurnTokens, budget)
 		return TokenBudgetDecision{
 			Action:            "continue",
 			NudgeMessage:      nudge,

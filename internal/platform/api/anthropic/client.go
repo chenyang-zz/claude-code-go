@@ -27,6 +27,10 @@ type Config struct {
 	BaseURL string
 	// HTTPClient allows tests to inject a local transport.
 	HTTPClient *http.Client
+	// IsFirstParty indicates whether this client connects to the first-party
+	// Anthropic API (as opposed to Vertex AI or Bedrock). First-party-only
+	// beta headers like task-budgets are only included when true.
+	IsFirstParty bool
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -39,15 +43,18 @@ type Client struct {
 	baseURL string
 	// httpClient performs HTTP requests.
 	httpClient *http.Client
+	// isFirstParty indicates first-party Anthropic API for beta header gating.
+	isFirstParty bool
 }
 
 type messagesRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Stream    bool               `json:"stream"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      string             `json:"system,omitempty"`
+	Stream      bool               `json:"stream"`
+	Messages    []anthropicMessage `json:"messages"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
+	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -71,6 +78,22 @@ type anthropicTool struct {
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema"`
 }
+
+// anthropicOutputConfig carries the output_config field sent in the API request body.
+type anthropicOutputConfig struct {
+	TaskBudget *anthropicTaskBudget `json:"task_budget,omitempty"`
+}
+
+// anthropicTaskBudget is the wire format for output_config.task_budget.
+// See API schema api/api/schemas/messages/request/output_config.py.
+type anthropicTaskBudget struct {
+	Type      string `json:"type"`
+	Total     int    `json:"total"`
+	Remaining *int   `json:"remaining,omitempty"`
+}
+
+// taskBudgetsBetaHeader is the beta header that enables the task_budget feature.
+const taskBudgetsBetaHeader = "task-budgets-2026-03-13"
 
 type streamContentBlock struct {
 	blockType string
@@ -151,10 +174,11 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		apiKey:     cfg.APIKey,
-		authToken:  cfg.AuthToken,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		apiKey:       cfg.APIKey,
+		authToken:    cfg.AuthToken,
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		httpClient:   httpClient,
+		isFirstParty: cfg.IsFirstParty,
 	}
 }
 
@@ -164,14 +188,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		return nil, fmt.Errorf("missing Anthropic auth credential")
 	}
 
-	body, err := json.Marshal(messagesRequest{
-		Model:     req.Model,
-		MaxTokens: maxOutputTokens(req),
-		System:    req.System,
-		Stream:    true,
-		Messages:  mapMessages(req.Messages),
-		Tools:     mapTools(req.Tools),
-	})
+	body, err := json.Marshal(c.buildMessagesRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
@@ -190,6 +207,12 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		httpReq.Header.Set("authorization", "Bearer "+c.authToken)
 	}
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+	// Inject task-budgets beta header when task budget is configured
+	// and this is a first-party Anthropic request.
+	if req.TaskBudget != nil && c.isFirstParty {
+		httpReq.Header.Set("anthropic-beta", taskBudgetsBetaHeader)
+	}
 
 	logger.DebugCF("anthropic_client", "starting anthropic stream", map[string]any{
 		"model":         req.Model,
@@ -279,6 +302,32 @@ func maxOutputTokens(req model.Request) int {
 		return req.MaxOutputTokens
 	}
 	return 1024
+}
+
+// buildMessagesRequest constructs the wire-format request body from the shared model request.
+func (c *Client) buildMessagesRequest(req model.Request) messagesRequest {
+	msgReq := messagesRequest{
+		Model:     req.Model,
+		MaxTokens: maxOutputTokens(req),
+		System:    req.System,
+		Stream:    true,
+		Messages:  mapMessages(req.Messages),
+		Tools:     mapTools(req.Tools),
+	}
+
+	// Include output_config.task_budget when the caller provides one
+	// and this is a first-party Anthropic request.
+	if req.TaskBudget != nil && c.isFirstParty {
+		msgReq.OutputConfig = &anthropicOutputConfig{
+			TaskBudget: &anthropicTaskBudget{
+				Type:      "tokens",
+				Total:     req.TaskBudget.Total,
+				Remaining: req.TaskBudget.Remaining,
+			},
+		}
+	}
+
+	return msgReq
 }
 
 // handleSSEEvent maps one Anthropic SSE event into the shared model stream format.

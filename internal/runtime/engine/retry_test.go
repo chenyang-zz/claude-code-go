@@ -641,6 +641,56 @@ func TestRuntimeRunRetriesMidStreamError(t *testing.T) {
 	}
 }
 
+// TestRuntimeRunMidStreamRetryDoesNotExecuteDiscardedAttemptTools verifies tool_use
+// blocks from a failed stream attempt do not execute before the retry succeeds.
+func TestRuntimeRunMidStreamRetryDoesNotExecuteDiscardedAttemptTools(t *testing.T) {
+	var attempts int32
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n == 1 {
+			return newModelStream(
+				model.Event{Type: model.EventTypeToolUse, ToolUse: &model.ToolUse{ID: "toolu_1", Name: "Write", Input: map[string]any{"file_path": "/tmp/x"}}},
+				model.Event{Type: model.EventTypeError, Error: "503 service unavailable"},
+			), nil
+		}
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "recovered"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	executor := &fakeToolExecutor{
+		results: map[string]coretool.Result{
+			"Write": {Output: "wrote file"},
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", executor)
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    1,
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for range out {
+	}
+
+	if got := len(executor.calls); got != 0 {
+		t.Fatalf("executor calls = %d, want 0 for discarded attempt tools", got)
+	}
+	if atomic.LoadInt32(&attempts) != 2 {
+		t.Fatalf("total attempts = %d, want 2", atomic.LoadInt32(&attempts))
+	}
+}
+
 // TestRuntimeRunFallbackOnMidStreamError verifies fallback triggers when a mid-stream
 // retriable error exhausts retries.
 func TestRuntimeRunFallbackOnMidStreamError(t *testing.T) {
@@ -683,6 +733,76 @@ func TestRuntimeRunFallbackOnMidStreamError(t *testing.T) {
 	// Primary tried once, then fallback.
 	if len(modelsUsed) != 2 || modelsUsed[0] != "primary-model" || modelsUsed[1] != "fallback-model" {
 		t.Fatalf("models used = %v, want [primary-model, fallback-model]", modelsUsed)
+	}
+}
+
+func TestRuntimeRunFallbackExecutesToolUses(t *testing.T) {
+	var modelsUsed []string
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		modelsUsed = append(modelsUsed, req.Model)
+		if len(modelsUsed) == 1 {
+			return nil, errors.New("529 overloaded")
+		}
+		if len(modelsUsed) == 2 {
+			return newModelStream(
+				model.Event{
+					Type: model.EventTypeToolUse,
+					ToolUse: &model.ToolUse{
+						ID:    "toolu_1",
+						Name:  "Read",
+						Input: map[string]any{"file_path": "main.go"},
+					},
+				},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonToolUse},
+			), nil
+		}
+
+		if len(req.Messages) == 0 {
+			t.Fatal("expected tool_result message in follow-up request")
+		}
+		last := req.Messages[len(req.Messages)-1]
+		if last.Role != message.RoleUser {
+			t.Fatalf("last message role = %q, want user", last.Role)
+		}
+		if len(last.Content) != 1 || last.Content[0].Type != "tool_result" || last.Content[0].ToolUseID != "toolu_1" {
+			t.Fatalf("last message = %#v, want one tool_result for toolu_1", last)
+		}
+
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "done"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	executor := &fakeToolExecutor{
+		results: map[string]coretool.Result{
+			"Read": {Output: "package main"},
+		},
+	}
+	runtime := New(client, "primary-model", executor)
+	runtime.FallbackModel = "fallback-model"
+	runtime.RetryPolicy = RetryPolicy{MaxAttempts: 0}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for range out {
+	}
+
+	if len(executor.calls) != 1 {
+		t.Fatalf("executor calls = %d, want 1", len(executor.calls))
+	}
+	if executor.calls[0].Name != "Read" {
+		t.Fatalf("executor call tool = %q, want Read", executor.calls[0].Name)
+	}
+	if len(modelsUsed) != 3 || modelsUsed[0] != "primary-model" || modelsUsed[1] != "fallback-model" || modelsUsed[2] != "fallback-model" {
+		t.Fatalf("models used = %v, want [primary-model fallback-model fallback-model]", modelsUsed)
 	}
 }
 

@@ -321,3 +321,158 @@ func TestClientStreamReadsErrorEvent(t *testing.T) {
 		t.Fatalf("Stream() first event = %#v, want error bad request", evt)
 	}
 }
+
+// TestClientStreamTaskBudget verifies that task_budget is included in the
+// request body output_config and the task-budgets beta header is sent when
+// the client is first-party and TaskBudget is provided.
+func TestClientStreamTaskBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify beta header.
+		if got := r.Header.Get("anthropic-beta"); got != "task-budgets-2026-03-13" {
+			t.Fatalf("anthropic-beta = %q, want task-budgets-2026-03-13", got)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		// Verify output_config.task_budget.
+		outputConfig, ok := body["output_config"].(map[string]any)
+		if !ok {
+			t.Fatalf("output_config = %#v, want object", body["output_config"])
+		}
+		taskBudget, ok := outputConfig["task_budget"].(map[string]any)
+		if !ok {
+			t.Fatalf("task_budget = %#v, want object", outputConfig["task_budget"])
+		}
+		if taskBudget["type"] != "tokens" {
+			t.Fatalf("task_budget.type = %q, want tokens", taskBudget["type"])
+		}
+		if taskBudget["total"] != float64(500000) {
+			t.Fatalf("task_budget.total = %v, want 500000", taskBudget["total"])
+		}
+		remaining, hasRemaining := taskBudget["remaining"]
+		if !hasRemaining {
+			t.Fatal("task_budget.remaining missing, expected to be set")
+		}
+		if remaining != float64(200000) {
+			t.Fatalf("task_budget.remaining = %v, want 200000", remaining)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:       "test-key",
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		IsFirstParty: true,
+	})
+
+	remaining := 200000
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		TaskBudget: &model.TaskBudgetParam{
+			Type:      "tokens",
+			Total:     500_000,
+			Remaining: &remaining,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
+// TestClientStreamTaskBudgetNotFirstParty verifies that task_budget is NOT
+// included when the client is not first-party (e.g. Vertex/Bedrock).
+func TestClientStreamTaskBudgetNotFirstParty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Should NOT have beta header.
+		if got := r.Header.Get("anthropic-beta"); got != "" {
+			t.Fatalf("anthropic-beta = %q, want empty for non-first-party", got)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		// Should NOT have output_config.
+		if _, ok := body["output_config"]; ok {
+			t.Fatal("output_config should not be present for non-first-party")
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:       "test-key",
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		IsFirstParty: false,
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		TaskBudget: &model.TaskBudgetParam{
+			Type:  "tokens",
+			Total: 500_000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
+// TestClientStreamTaskBudgetNoRemaining verifies that remaining is omitted
+// from the wire format when not set.
+func TestClientStreamTaskBudgetNoRemaining(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		outputConfig, ok := body["output_config"].(map[string]any)
+		if !ok {
+			t.Fatalf("output_config = %#v, want object", body["output_config"])
+		}
+		taskBudget, ok := outputConfig["task_budget"].(map[string]any)
+		if !ok {
+			t.Fatalf("task_budget = %#v, want object", outputConfig["task_budget"])
+		}
+		if _, hasRemaining := taskBudget["remaining"]; hasRemaining {
+			t.Fatal("task_budget.remaining should be omitted when nil")
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:       "test-key",
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		IsFirstParty: true,
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		TaskBudget: &model.TaskBudgetParam{
+			Type:  "tokens",
+			Total: 500_000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}

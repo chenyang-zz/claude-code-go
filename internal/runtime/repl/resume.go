@@ -46,6 +46,7 @@ func (r *Runner) resumeSessionWithPrompt(ctx context.Context, sessionID string, 
 			return err
 		}
 	}
+	r.endActiveSession(ctx, "resume", recovered.Snapshot.Session.ID)
 	history, err := r.consumeRecoveredSnapshot("resume_command", recovered, forkSession)
 	if err != nil {
 		return err
@@ -163,7 +164,9 @@ func (r *Runner) resumeMatchedSummary(ctx context.Context, query string, summary
 			return err
 		}
 		if sameRepoWorktree {
+			r.endActiveSession(ctx, "resume", summary.ID)
 			r.SessionID = summary.ID
+			r.nextSessionStartSource = "resume"
 			if summary.ProjectPath != "" {
 				r.ProjectPath = summary.ProjectPath
 			}
@@ -186,7 +189,9 @@ func (r *Runner) resumeMatchedSummary(ctx context.Context, query string, summary
 		return r.Renderer.RenderLine(strings.Join(lines, "\n"))
 	}
 
+	r.endActiveSession(ctx, "resume", summary.ID)
 	r.SessionID = summary.ID
+	r.nextSessionStartSource = "resume"
 	if summary.ProjectPath != "" {
 		r.ProjectPath = summary.ProjectPath
 	}

@@ -362,10 +362,11 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
 	case coreconfig.ProviderAnthropic:
 		client := anthropic.NewClient(anthropic.Config{
-			APIKey:     cfg.APIKey,
-			AuthToken:  cfg.AuthToken,
-			BaseURL:    cfg.APIBaseURL,
-			HTTPClient: nil,
+			APIKey:       cfg.APIKey,
+			AuthToken:    cfg.AuthToken,
+			BaseURL:      cfg.APIBaseURL,
+			HTTPClient:   nil,
+			IsFirstParty: true,
 		})
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.Hooks = cfg.Hooks

@@ -1702,6 +1702,7 @@ func TestRuntimeRun_PromptTooLongRecoveryPreservesOriginalLastUserTurn(t *testin
 }
 
 func TestRuntimeRun_ContinuationBudgetResetsOnToolLoop(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
 	// Verify that continuationAttempts resets when entering the tool loop,
 	// so a truncated response in the next phase gets a fresh budget.
 	callCount := 0
@@ -1928,6 +1929,7 @@ func TestRuntimeRun_MaxTokensContinuationWithPromptTooLongPreservesToolLoopConte
 // TestRuntimeRun_TokenBudgetContinuation verifies that the engine auto-continues
 // the model when the turn token budget has not been reached.
 func TestRuntimeRun_TokenBudgetContinuation(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
 	callCount := 0
 	client := &fakeModelClient{
 		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
@@ -1973,6 +1975,56 @@ func TestRuntimeRun_TokenBudgetContinuation(t *testing.T) {
 	}
 }
 
+func TestRuntimeRun_TokenBudgetParsesDirectiveFromMessages(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			if callCount == 1 {
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "partial work"},
+					model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 500}},
+				), nil
+			}
+			return newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: " more work"},
+				model.Event{Type: model.EventTypeDone, Usage: &model.Usage{OutputTokens: 9000}},
+			), nil
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("+10k analyze this"),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("expected 2 model calls from parsed message budget, got %d", len(client.requests))
+	}
+
+	lastMsg := client.requests[1].Messages[len(client.requests[1].Messages)-1]
+	if lastMsg.Role != message.RoleUser {
+		t.Fatalf("second request last message role = %s, want user", lastMsg.Role)
+	}
+	if !strings.Contains(lastMsg.Content[0].Text, "token target") {
+		t.Fatalf("nudge message = %q, want token budget nudge", lastMsg.Content[0].Text)
+	}
+}
+
 // TestRuntimeRun_TokenBudgetNoBudgetNoContinuation verifies that without a
 // budget set, the engine does not trigger budget continuation.
 func TestRuntimeRun_TokenBudgetNoBudgetNoContinuation(t *testing.T) {
@@ -2005,6 +2057,7 @@ func TestRuntimeRun_TokenBudgetNoBudgetNoContinuation(t *testing.T) {
 // TestRuntimeRun_TokenBudgetStopAtThreshold verifies that the engine stops
 // when the turn output tokens exceed 90% of the budget.
 func TestRuntimeRun_TokenBudgetStopAtThreshold(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
 	client := &fakeModelClient{
 		streams: []model.Stream{
 			newModelStream(
@@ -2039,6 +2092,7 @@ func TestRuntimeRun_TokenBudgetStopAtThreshold(t *testing.T) {
 }
 
 func TestRuntimeRun_TokenBudgetIgnoresAutoCompactSummaryUsage(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
 	t.Setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "50000")
 
 	callCount := 0
@@ -2098,7 +2152,71 @@ func TestRuntimeRun_TokenBudgetIgnoresAutoCompactSummaryUsage(t *testing.T) {
 	}
 }
 
+func TestRuntimeRun_TaskBudgetRemainingUsesSummaryRequestUsage(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
+	t.Setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "50000")
+
+	callCount := 0
+	client := &fakeModelClient{
+		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {
+			callCount++
+			switch callCount {
+			case 1:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "summary"},
+					model.Event{
+						Type: model.EventTypeDone,
+						Usage: &model.Usage{
+							InputTokens:  250_000,
+							OutputTokens: 10_000,
+						},
+					},
+				), nil
+			default:
+				return newModelStream(
+					model.Event{Type: model.EventTypeTextDelta, Text: "answer"},
+					model.Event{
+						Type: model.EventTypeDone,
+						Usage: &model.Usage{OutputTokens: 950_000},
+					},
+				), nil
+			}
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-20250514", nil)
+	runtime.AutoCompact = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "test",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart(strings.Repeat("x", 400000)),
+				},
+			},
+		},
+		TurnTokenBudget: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("expected 2 model calls (compact + request), got %d", len(client.requests))
+	}
+	if client.requests[1].TaskBudget == nil || client.requests[1].TaskBudget.Remaining == nil {
+		t.Fatal("post-compact request task budget remaining = nil, want populated remaining budget")
+	}
+	if got, want := *client.requests[1].TaskBudget.Remaining, 740_000; got != want {
+		t.Fatalf("post-compact task budget remaining = %d, want %d", got, want)
+	}
+}
+
 func TestRuntimeRun_TokenBudgetDoesNotBypassMaxTokensContinuationCap(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_TOKEN_BUDGET", "1")
 	callCount := 0
 	client := &fakeModelClient{
 		streamFn: func(ctx context.Context, req model.Request) (model.Stream, error) {

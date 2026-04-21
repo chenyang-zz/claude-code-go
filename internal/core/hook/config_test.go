@@ -14,6 +14,7 @@ func TestHookEventIsValid(t *testing.T) {
 		{EventSubagentStop, true},
 		{EventStopFailure, true},
 		{EventPreToolUse, true},
+		{EventNotification, true},
 		{HookEvent("Unknown"), false},
 		{HookEvent(""), false},
 	}
@@ -26,8 +27,9 @@ func TestHookEventIsValid(t *testing.T) {
 
 func TestParseHooksConfig(t *testing.T) {
 	raw := map[string]json.RawMessage{
-		"Stop": json.RawMessage(`[{"hooks":[{"type":"command","command":"echo hello"}]}]`),
-		"Unknown": json.RawMessage(`[{"hooks":[]}]`),
+		"Stop":         json.RawMessage(`[{"hooks":[{"type":"command","command":"echo hello"}]}]`),
+		"Notification": json.RawMessage(`[{"hooks":[{"type":"command","command":"echo ignored"}]}]`),
+		"Unknown":      json.RawMessage(`[{"hooks":[]}]`),
 	}
 	cfg, err := ParseHooksConfig(raw)
 	if err != nil {
@@ -39,6 +41,13 @@ func TestParseHooksConfig(t *testing.T) {
 	cmds := cfg.CommandHooks(EventStop)
 	if len(cmds) != 1 || cmds[0].Command != "echo hello" {
 		t.Errorf("CommandHooks(Stop) = %v, want 1 command with 'echo hello'", cmds)
+	}
+	if !cfg.HasEvent(EventNotification) {
+		t.Fatal("expected Notification event in config")
+	}
+	cmds = cfg.CommandHooks(EventNotification)
+	if len(cmds) != 1 || cmds[0].Command != "echo ignored" {
+		t.Errorf("CommandHooks(Notification) = %v, want 1 command with 'echo ignored'", cmds)
 	}
 }
 

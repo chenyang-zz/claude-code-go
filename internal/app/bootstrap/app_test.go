@@ -15,6 +15,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -379,6 +380,29 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 	}
 	if runtime.ApprovalService == nil {
 		t.Fatal("DefaultEngineFactory() approval service = nil, want injected service")
+	}
+}
+
+func TestDefaultEngineFactoryMarksAnthropicClientFirstParty(t *testing.T) {
+	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+		Provider:     coreconfig.ProviderAnthropic,
+		Model:        "claude-sonnet-4-5",
+		ApprovalMode: approval.ModeBypassPermissions,
+	}, runtimesession.NewBackgroundTaskStore(), nil)
+	if err != nil {
+		t.Fatalf("DefaultEngineFactory() error = %v", err)
+	}
+
+	runtime, ok := eng.(*engine.Runtime)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+	}
+	client, ok := runtime.Client.(*anthropic.Client)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() client = %T, want *anthropic.Client", runtime.Client)
+	}
+	if !reflect.ValueOf(client).Elem().FieldByName("isFirstParty").Bool() {
+		t.Fatal("DefaultEngineFactory() anthropic client isFirstParty = false, want true")
 	}
 }
 

@@ -99,7 +99,8 @@ func AllEvents() []HookEvent {
 func (e HookEvent) IsValid() bool {
 	switch e {
 	case EventPreToolUse, EventPostToolUse, EventPostToolUseFailure,
-		EventNotification, EventUserPromptSubmit,
+		EventNotification,
+		EventUserPromptSubmit,
 		EventSessionStart, EventSessionEnd,
 		EventStop, EventStopFailure,
 		EventSubagentStart, EventSubagentStop,

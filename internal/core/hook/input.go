@@ -137,6 +137,66 @@ type TaskHookInput struct {
 	TeamName string `json:"team_name,omitempty"`
 }
 
+// PreCompactHookInput is the JSON payload piped to PreCompact event hooks via stdin.
+// Hooks receive this before context compaction and can inspect or modify the trigger.
+type PreCompactHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PreCompact".
+	HookEventName string `json:"hook_event_name"`
+	// Trigger indicates whether the compaction was "manual" or "auto".
+	Trigger string `json:"trigger"`
+	// CustomInstructions contains any custom instructions for the compaction, or nil.
+	CustomInstructions *string `json:"custom_instructions"`
+}
+
+// PostCompactHookInput is the JSON payload piped to PostCompact event hooks via stdin.
+// Hooks receive this after context compaction completes.
+type PostCompactHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PostCompact".
+	HookEventName string `json:"hook_event_name"`
+	// Trigger indicates whether the compaction was "manual" or "auto".
+	Trigger string `json:"trigger"`
+	// CompactSummary contains the summary text produced by the compaction.
+	CompactSummary string `json:"compact_summary"`
+}
+
+// NotificationHookInput is the JSON payload piped to Notification event hooks via stdin.
+// Hooks receive this when a notification is emitted. This is a fire-and-forget event.
+type NotificationHookInput struct {
+	BaseHookInput
+	// HookEventName is always "Notification".
+	HookEventName string `json:"hook_event_name"`
+	// Message is the notification body text.
+	Message string `json:"message"`
+	// Title is the optional notification title.
+	Title string `json:"title,omitempty"`
+	// NotificationType categorizes the notification (e.g. "elicitation_complete").
+	NotificationType string `json:"notification_type"`
+}
+
+// SessionStartHookInput is the JSON payload piped to SessionStart event hooks via stdin.
+// Hooks receive this at session startup or resume.
+type SessionStartHookInput struct {
+	BaseHookInput
+	// HookEventName is always "SessionStart".
+	HookEventName string `json:"hook_event_name"`
+	// Source indicates the startup trigger: "startup", "resume", "clear", or "compact".
+	Source string `json:"source"`
+	// Model is the model identifier in use, if available.
+	Model string `json:"model,omitempty"`
+}
+
+// SessionEndHookInput is the JSON payload piped to SessionEnd event hooks via stdin.
+// Hooks receive this when the session ends.
+type SessionEndHookInput struct {
+	BaseHookInput
+	// HookEventName is always "SessionEnd".
+	HookEventName string `json:"hook_event_name"`
+	// Reason indicates why the session ended (e.g. "clear", "resume", "shutdown").
+	Reason string `json:"reason"`
+}
+
 // HookResult captures the outcome of executing a single hook command.
 type HookResult struct {
 	// ExitCode is the process exit code.

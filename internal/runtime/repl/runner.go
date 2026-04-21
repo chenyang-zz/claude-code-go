@@ -27,6 +27,10 @@ type WorktreeLister interface {
 	ListWorktrees(ctx context.Context, cwd string) ([]string, error)
 }
 
+type sessionLifecycleEngine interface {
+	RunSessionEndHooks(ctx context.Context, reason string, cwd string)
+}
+
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
 type Runner struct {
 	// Engine handles normal prompt execution.
@@ -53,6 +57,9 @@ type Runner struct {
 	inputReader *bufio.Reader
 	// WorktreeLister resolves same-repo worktree membership for cross-project resume decisions.
 	WorktreeLister WorktreeLister
+	// nextSessionStartSource is attached to the next engine request when the
+	// runner has just switched to a new logical session.
+	nextSessionStartSource string
 }
 
 // NewRunner builds a runner from explicit dependencies.
@@ -134,7 +141,9 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 		return err
 	}
 	if result.NewSessionID != "" {
+		r.endActiveSession(ctx, parsed.Command, result.NewSessionID)
 		r.SessionID = result.NewSessionID
+		r.nextSessionStartSource = parsed.Command
 		logger.DebugCF("repl", "switched active session from slash command", map[string]any{
 			"command":    parsed.Command,
 			"session_id": r.SessionID,
@@ -157,9 +166,10 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 	})
 
 	stream, err := r.Engine.Run(ctx, conversation.RunRequest{
-		SessionID: r.sessionID(),
-		Messages:  requestHistory.Messages,
-		CWD:       r.ProjectPath,
+		SessionID:          r.sessionID(),
+		Messages:           requestHistory.Messages,
+		CWD:                r.ProjectPath,
+		SessionStartSource: r.consumeSessionStartSource(),
 	})
 	if err != nil {
 		return err
@@ -236,6 +246,9 @@ func (r *Runner) restoreHistory(ctx context.Context, explicitContinue bool, fork
 		"message_count": len(snapshot.Session.Messages),
 		"resumed":       snapshot.Resumed,
 	})
+	if snapshot.Resumed {
+		r.nextSessionStartSource = "resume"
+	}
 	return conversation.History{Messages: snapshot.Session.Messages}, nil
 }
 
@@ -261,11 +274,13 @@ func (r *Runner) restoreContinueHistory(ctx context.Context, forkSession bool) (
 	if err != nil {
 		return conversation.History{}, false, err
 	}
+	r.nextSessionStartSource = "resume"
 	return history, true, nil
 }
 
 // consumeRecoveredSnapshot normalizes one recovered snapshot into the runnable history consumed by the next prompt.
 func (r *Runner) consumeRecoveredSnapshot(action string, recovered runtimesession.RecoveredSnapshot, forkSession bool) (conversation.History, error) {
+	r.nextSessionStartSource = "resume"
 	r.SessionID = recovered.Snapshot.Session.ID
 	if recovered.Snapshot.Session.ProjectPath != "" {
 		r.ProjectPath = recovered.Snapshot.Session.ProjectPath
@@ -286,6 +301,33 @@ func (r *Runner) consumeRecoveredSnapshot(action string, recovered runtimesessio
 		"history_ends_on_user": len(history.Messages) > 0 && history.Messages[len(history.Messages)-1].Role == message.RoleUser,
 	})
 	return history, nil
+}
+
+func (r *Runner) consumeSessionStartSource() string {
+	if r == nil {
+		return "startup"
+	}
+	source := strings.TrimSpace(r.nextSessionStartSource)
+	r.nextSessionStartSource = ""
+	if source == "" {
+		return "startup"
+	}
+	return source
+}
+
+func (r *Runner) endActiveSession(ctx context.Context, reason string, nextSessionID string) {
+	if r == nil {
+		return
+	}
+	currentSessionID := strings.TrimSpace(r.SessionID)
+	if currentSessionID == "" || currentSessionID == strings.TrimSpace(nextSessionID) {
+		return
+	}
+	lifecycle, ok := r.Engine.(sessionLifecycleEngine)
+	if !ok {
+		return
+	}
+	lifecycle.RunSessionEndHooks(ctx, reason, r.ProjectPath)
 }
 
 func (r *Runner) forkSnapshot(ctx context.Context, snapshot coresession.Snapshot) (coresession.Snapshot, error) {
