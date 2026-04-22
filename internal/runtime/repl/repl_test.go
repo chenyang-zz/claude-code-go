@@ -258,6 +258,10 @@ func (s *stubRemoteLifecycle) Subscribe(ctx context.Context, session coreconfig.
 
 func (s *stubRemoteLifecycle) ActiveSubscriptionCount() int { return 0 }
 func (s *stubRemoteLifecycle) IsClosed() bool               { return false }
+func (s *stubRemoteLifecycle) ConnectionState() string      { return "connected" }
+func (s *stubRemoteLifecycle) ReconnectCount() int          { return 0 }
+func (s *stubRemoteLifecycle) LastDisconnectError() error   { return nil }
+func (s *stubRemoteLifecycle) LastDisconnectTime() time.Time { return time.Time{} }
 
 func (c staticCommand) Metadata() command.Metadata {
 	return c.meta

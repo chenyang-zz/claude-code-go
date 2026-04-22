@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
@@ -17,6 +18,14 @@ type RemoteStateProvider interface {
 	ActiveSubscriptionCount() int
 	// IsClosed reports whether the remote lifecycle manager has been globally closed.
 	IsClosed() bool
+	// ConnectionState returns the current resilient stream connection state label.
+	ConnectionState() string
+	// ReconnectCount returns the number of successful reconnections since startup.
+	ReconnectCount() int
+	// LastDisconnectError returns the error that caused the most recent disconnect, or nil.
+	LastDisconnectError() error
+	// LastDisconnectTime returns the timestamp of the most recent disconnect, or zero time.
+	LastDisconnectTime() time.Time
 }
 
 // SessionCommand renders the text-only /session behavior including remote session URL, QR code, and subscription state.
@@ -69,7 +78,16 @@ func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStat
 	b.WriteString(remote.URL)
 	if state != nil {
 		b.WriteString("\n\nConnection state:\n")
+		b.WriteString(fmt.Sprintf("  Status: %s\n", state.ConnectionState()))
 		b.WriteString(fmt.Sprintf("  Subscriptions active: %d\n", state.ActiveSubscriptionCount()))
+		b.WriteString(fmt.Sprintf("  Reconnections: %d\n", state.ReconnectCount()))
+		if lastErr := state.LastDisconnectError(); lastErr != nil {
+			b.WriteString(fmt.Sprintf("  Last disconnect: %s", lastErr.Error()))
+			if !state.LastDisconnectTime().IsZero() {
+				b.WriteString(fmt.Sprintf(" (%s ago)", time.Since(state.LastDisconnectTime()).Round(time.Second).String()))
+			}
+			b.WriteString("\n")
+		}
 		closedStr := "no"
 		if state.IsClosed() {
 			closedStr = "yes (closed)"

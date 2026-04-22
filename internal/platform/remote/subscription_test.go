@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -125,5 +126,73 @@ func TestSubscriptionManagerClose(t *testing.T) {
 	_, err = manager.Subscribe(context.Background(), newFakeStream(), nil, nil)
 	if err == nil {
 		t.Fatalf("Subscribe() after close should fail")
+	}
+}
+
+// TestSubscriptionManager_ResilientStreamDisconnected verifies that a
+// subscription survives ErrStreamDisconnected and resumes event delivery
+// once the underlying stream reconnects.
+func TestSubscriptionManager_ResilientStreamDisconnected(t *testing.T) {
+	t.Parallel()
+
+	manager := NewSubscriptionManager()
+
+	// Stream returns: event1, ErrStreamDisconnected, event2.
+	stream := newMockStream([]mockResult{
+		{event: Event{Transport: TransportSSE, Type: "event1", Data: []byte("a")}},
+		{err: ErrStreamDisconnected},
+		{event: Event{Transport: TransportSSE, Type: "event2", Data: []byte("b")}},
+	})
+
+	var events []Event
+	var gotErrors []error
+	var mu sync.Mutex
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	subscriptionID, err := manager.Subscribe(ctx, stream, func(event Event) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+	}, func(err error) {
+		mu.Lock()
+		gotErrors = append(gotErrors, err)
+		mu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+
+	// Poll until both events are delivered.
+	for {
+		mu.Lock()
+		done := len(events) >= 2
+		mu.Unlock()
+		if done {
+			break
+		}
+		select {
+		case <-time.After(50 * time.Millisecond):
+			continue
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for events, got %d events and %d errors", len(events), len(gotErrors))
+		}
+	}
+
+	mu.Lock()
+	if len(events) != 2 {
+		t.Fatalf("len(events) = %d, want 2", len(events))
+	}
+	if events[0].Type != "event1" || events[1].Type != "event2" {
+		t.Fatalf("events = %v, want [event1, event2]", events)
+	}
+	if len(gotErrors) != 1 || !errors.Is(gotErrors[0], ErrStreamDisconnected) {
+		t.Fatalf("errors = %v, want [ErrStreamDisconnected]", gotErrors)
+	}
+	mu.Unlock()
+
+	if err := manager.Unsubscribe(subscriptionID); err != nil {
+		t.Fatalf("Unsubscribe() error = %v", err)
 	}
 }

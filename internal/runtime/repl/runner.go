@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -41,6 +42,14 @@ type RemoteLifecycle interface {
 	ActiveSubscriptionCount() int
 	// IsClosed reports whether the lifecycle manager has been globally closed.
 	IsClosed() bool
+	// ConnectionState returns the current connection state label.
+	ConnectionState() string
+	// ReconnectCount returns the number of successful reconnections since startup.
+	ReconnectCount() int
+	// LastDisconnectError returns the error that caused the most recent disconnect, or nil.
+	LastDisconnectError() error
+	// LastDisconnectTime returns the timestamp of the most recent disconnect, or zero time.
+	LastDisconnectTime() time.Time
 }
 
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.

@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
@@ -63,12 +65,19 @@ func TestSessionCommandExecuteRendersRemoteSession(t *testing.T) {
 
 // stubRemoteStateProvider implements RemoteStateProvider for test assertions.
 type stubRemoteStateProvider struct {
-	activeCount int
-	closed      bool
+	activeCount       int
+	closed            bool
+	connectionState   string
+	reconnectCount    int
+	lastDisconnectErr error
 }
 
 func (s *stubRemoteStateProvider) ActiveSubscriptionCount() int { return s.activeCount }
 func (s *stubRemoteStateProvider) IsClosed() bool               { return s.closed }
+func (s *stubRemoteStateProvider) ConnectionState() string      { return s.connectionState }
+func (s *stubRemoteStateProvider) ReconnectCount() int          { return s.reconnectCount }
+func (s *stubRemoteStateProvider) LastDisconnectError() error   { return s.lastDisconnectErr }
+func (s *stubRemoteStateProvider) LastDisconnectTime() time.Time { return time.Time{} }
 
 // TestSessionCommandExecuteRendersRemoteSessionWithState verifies `/session` exposes subscription and lifecycle state when a provider is wired.
 func TestSessionCommandExecuteRendersRemoteSessionWithState(t *testing.T) {
@@ -114,5 +123,38 @@ func TestSessionCommandExecuteRendersRemoteSessionClosedState(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, "Lifecycle closed: yes (closed)") {
 		t.Fatalf("Execute() output = %q, want lifecycle closed=yes", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteRendersConnectionDetails verifies `/session` surfaces
+// resilient stream connection details including status, reconnect count, and
+// last disconnect error.
+func TestSessionCommandExecuteRendersConnectionDetails(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		StateProvider: &stubRemoteStateProvider{
+			activeCount:       1,
+			closed:            false,
+			connectionState:   "disconnected",
+			reconnectCount:    3,
+			lastDisconnectErr: fmt.Errorf("read timeout"),
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Status: disconnected") {
+		t.Fatalf("Execute() output = %q, want status", result.Output)
+	}
+	if !strings.Contains(result.Output, "Reconnections: 3") {
+		t.Fatalf("Execute() output = %q, want reconnect count", result.Output)
+	}
+	if !strings.Contains(result.Output, "Last disconnect: read timeout") {
+		t.Fatalf("Execute() output = %q, want last disconnect error", result.Output)
 	}
 }

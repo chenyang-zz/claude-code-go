@@ -40,8 +40,10 @@ func TestLifecycleManagerSubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
-	if !factory.called {
-		t.Fatalf("stream factory should be called")
+	// ResilientEventStream defers the initial dial until the first Recv,
+	// so the factory is not called at Subscribe time.
+	if manager.ActiveSubscriptionCount() != 1 {
+		t.Fatalf("expected 1 active subscription, got %d", manager.ActiveSubscriptionCount())
 	}
 
 	if err := unsubscribe(); err != nil {

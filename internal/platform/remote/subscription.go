@@ -159,6 +159,16 @@ func (m *SubscriptionManager) runSubscription(
 			if errors.Is(err, context.Canceled) || errors.Is(err, ErrStreamClosed) {
 				return
 			}
+			// Transient disconnect (e.g. network blip with an automatic
+			// reconnection in progress). Notify the caller via onError but
+			// keep the subscription alive so Recv resumes once the stream
+			// reconnects.
+			if errors.Is(err, ErrStreamDisconnected) {
+				if onError != nil {
+					onError(err)
+				}
+				continue
+			}
 			if onError != nil {
 				onError(err)
 			}
