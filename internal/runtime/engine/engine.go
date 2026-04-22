@@ -20,6 +20,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -279,6 +280,23 @@ const continuationUserMessage = "Output token limit hit. Resume directly — no 
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
 func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, sessionStartSource string, history conversation.History, out chan<- event.Event) error {
 	e.sessionID = sessionID
+	e.resolveTranscriptPath(sessionID, cwd)
+
+	transcriptWriter := e.openTranscriptWriter()
+	if transcriptWriter != nil {
+		defer func() {
+			if err := transcriptWriter.Close(); err != nil {
+				logger.WarnCF("engine", "failed to close transcript writer", map[string]any{
+					"session_id": sessionID,
+					"error":      err.Error(),
+				})
+			}
+		}()
+	}
+
+	if latestUser := findLatestContinuationUserMessage(history.Messages); latestUser != nil {
+		e.writeTranscriptMessage(transcriptWriter, *latestUser)
+	}
 
 	// Dispatch SessionStart hooks once per logical session ID (non-blocking).
 	if e.sessionStartSessionID != sessionID {
@@ -371,6 +389,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 					compactResult.Boundary,
 				)
 				history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+				e.writeCompactTranscriptEntries(transcriptWriter, compactResult, string(compact.TriggerAuto))
 
 				// Update task_budget remaining after compaction: the server's
 				// budget countdown is context-based, so remaining decrements
@@ -503,6 +522,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 						compactResult.Boundary,
 					)
 					history.Messages = append(history.Messages, compactResult.SummaryMessages...)
+					e.writeCompactTranscriptEntries(transcriptWriter, compactResult, string(compact.TriggerAuto))
 
 					// Update task_budget remaining after emergency compaction
 					// (same carryover as the proactive path above).
@@ -595,7 +615,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		}
 
 		if len(result.assistant.Content) > 0 {
-			history.Append(result.assistant)
+			e.appendHistoryWithTranscript(&history, result.assistant, transcriptWriter)
 		}
 		if len(result.toolUses) == 0 {
 			// When the model stops due to max_tokens (output truncated),
@@ -694,12 +714,12 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 					})
 					stopHookActive = true
 					for _, stderr := range blockingStderrs {
-						history.Append(message.Message{
+						e.appendHistoryWithTranscript(&history, message.Message{
 							Role: message.RoleUser,
 							Content: []message.ContentPart{
 								message.TextPart(stderr),
 							},
-						})
+						}, transcriptWriter)
 					}
 					continue
 				}
@@ -744,10 +764,93 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		// streaming. Build the tool_result message from its tracked state
 		// instead of executing tools again.
 		if result.streamingExec != nil {
-			history.Append(result.streamingExec.BuildToolResultMessage())
+			e.appendHistoryWithTranscript(&history, result.streamingExec.BuildToolResultMessage(), transcriptWriter)
 		} else {
-			history.Append(e.executeToolUses(ctx, result.toolUses, out))
+			e.appendHistoryWithTranscript(&history, e.executeToolUses(ctx, result.toolUses, out), transcriptWriter)
 		}
+	}
+}
+
+// resolveTranscriptPath lazily computes the transcript file path when runtime
+// wiring did not inject one explicitly.
+func (e *Runtime) resolveTranscriptPath(sessionID string, cwd string) {
+	if e == nil || strings.TrimSpace(e.TranscriptPath) != "" {
+		return
+	}
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	trimmedCWD := strings.TrimSpace(cwd)
+	if trimmedSessionID == "" || trimmedCWD == "" {
+		return
+	}
+	e.TranscriptPath = transcript.GetTranscriptPath(trimmedSessionID, trimmedCWD)
+}
+
+// openTranscriptWriter opens the configured transcript path and returns nil when
+// transcript persistence is unavailable.
+func (e *Runtime) openTranscriptWriter() *transcript.Writer {
+	if e == nil {
+		return nil
+	}
+	path := strings.TrimSpace(e.TranscriptPath)
+	if path == "" {
+		return nil
+	}
+	writer, err := transcript.NewWriter(path)
+	if err != nil {
+		logger.WarnCF("engine", "failed to open transcript writer", map[string]any{
+			"path":  path,
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return writer
+}
+
+// appendHistoryWithTranscript appends a message to runtime history and mirrors it
+// into transcript JSONL entries.
+func (e *Runtime) appendHistoryWithTranscript(history *conversation.History, msg message.Message, writer *transcript.Writer) {
+	if history == nil {
+		return
+	}
+	history.Append(msg)
+	e.writeTranscriptMessage(writer, msg)
+}
+
+// writeTranscriptMessage writes transcript entries derived from one normalized
+// conversation message. Write failures are logged and ignored.
+func (e *Runtime) writeTranscriptMessage(writer *transcript.Writer, msg message.Message) {
+	if writer == nil {
+		return
+	}
+	timestamp := time.Now().UTC()
+	for _, entry := range transcript.EntriesFromMessage(timestamp, msg) {
+		if err := writer.WriteEntry(entry); err != nil {
+			logger.WarnCF("engine", "failed to write transcript message entry", map[string]any{
+				"type":  fmt.Sprintf("%T", entry),
+				"error": err.Error(),
+			})
+			return
+		}
+	}
+}
+
+// writeCompactTranscriptEntries writes the summary + compact boundary records
+// emitted by a successful compaction.
+func (e *Runtime) writeCompactTranscriptEntries(writer *transcript.Writer, result *compact.CompactionResult, trigger string) {
+	if writer == nil || result == nil {
+		return
+	}
+	timestamp := time.Now().UTC()
+	if err := writer.WriteEntry(transcript.NewSummaryEntry(timestamp, result.Summary)); err != nil {
+		logger.WarnCF("engine", "failed to write compact summary transcript entry", map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	if err := writer.WriteEntry(transcript.NewCompactBoundaryEntry(timestamp, trigger, result.PreTokenCount, result.PostTokenCount)); err != nil {
+		logger.WarnCF("engine", "failed to write compact boundary transcript entry", map[string]any{
+			"error": err.Error(),
+		})
 	}
 }
 
