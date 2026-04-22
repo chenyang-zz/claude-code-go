@@ -235,6 +235,25 @@ type staticCommand struct {
 	result command.Result
 }
 
+type stubRemoteLifecycle struct {
+	subscribeCalls   int
+	unsubscribeCalls int
+	subscribeErr     error
+}
+
+func (s *stubRemoteLifecycle) Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig) (func() error, error) {
+	_ = ctx
+	_ = session
+	s.subscribeCalls++
+	if s.subscribeErr != nil {
+		return nil, s.subscribeErr
+	}
+	return func() error {
+		s.unsubscribeCalls++
+		return nil
+	}, nil
+}
+
 func (c staticCommand) Metadata() command.Metadata {
 	return c.meta
 }
@@ -255,6 +274,93 @@ func registerSlashCommands(t *testing.T, runner *Runner, commands ...command.Com
 		}
 	}
 	runner.Commands = registry
+}
+
+// TestRunnerRunPromptSubscribesAndUnsubscribesRemoteStream verifies one prompt turn opens and closes remote subscriptions.
+func TestRunnerRunPromptSubscribesAndUnsubscribesRemoteStream(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan event.Event, 2)
+	stream <- event.Event{
+		Type: event.TypeMessageDelta,
+		Payload: event.MessageDeltaPayload{
+			Text: "hello",
+		},
+	}
+	stream <- event.Event{
+		Type: event.TypeConversationDone,
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{
+						Role: message.RoleUser,
+						Content: []message.ContentPart{
+							message.TextPart("hello"),
+						},
+					},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	eng := &recordingEngine{stream: stream}
+	var buf bytes.Buffer
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.RemoteSession = coreconfig.RemoteSessionConfig{
+		Enabled:   true,
+		SessionID: "session_remote",
+		StreamURL: "ws://remote/session_remote",
+	}
+	lifecycle := &stubRemoteLifecycle{}
+	runner.RemoteLifecycle = lifecycle
+
+	if err := runner.Run(context.Background(), []string{"hello"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if lifecycle.subscribeCalls != 1 {
+		t.Fatalf("subscribeCalls = %d, want 1", lifecycle.subscribeCalls)
+	}
+	if lifecycle.unsubscribeCalls != 1 {
+		t.Fatalf("unsubscribeCalls = %d, want 1", lifecycle.unsubscribeCalls)
+	}
+}
+
+// TestRunnerRunPromptContinuesWhenRemoteSubscribeFails verifies prompt execution continues when remote subscription setup fails.
+func TestRunnerRunPromptContinuesWhenRemoteSubscribeFails(t *testing.T) {
+	t.Parallel()
+
+	stream := make(chan event.Event, 1)
+	stream <- event.Event{
+		Type: event.TypeConversationDone,
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{},
+		},
+	}
+	close(stream)
+
+	eng := &recordingEngine{stream: stream}
+	var buf bytes.Buffer
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.RemoteSession = coreconfig.RemoteSessionConfig{
+		Enabled:   true,
+		SessionID: "session_remote_fail",
+		StreamURL: "ws://remote/session_remote_fail",
+	}
+	lifecycle := &stubRemoteLifecycle{
+		subscribeErr: context.DeadlineExceeded,
+	}
+	runner.RemoteLifecycle = lifecycle
+
+	if err := runner.Run(context.Background(), []string{"hello"}); err != nil {
+		t.Fatalf("Run() error = %v, want nil when subscription fails", err)
+	}
+	if lifecycle.subscribeCalls != 1 {
+		t.Fatalf("subscribeCalls = %d, want 1", lifecycle.subscribeCalls)
+	}
+	if lifecycle.unsubscribeCalls != 0 {
+		t.Fatalf("unsubscribeCalls = %d, want 0 when subscribe fails", lifecycle.unsubscribeCalls)
+	}
 }
 
 // TestParseArgsParsesSlashCommand verifies slash input is split into command and body.

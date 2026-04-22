@@ -107,6 +107,8 @@ type RemoteSessionConfig struct {
 	SessionID string
 	// URL stores the browser-visible remote session URL consumed by `/session`.
 	URL string
+	// StreamURL stores the optional machine-consumable remote stream endpoint used by runtime subscription wiring.
+	StreamURL string
 	// InitialPrompt preserves the optional `--remote` description for future runtime wiring.
 	InitialPrompt string
 }

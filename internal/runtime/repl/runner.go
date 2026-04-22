@@ -31,6 +31,12 @@ type sessionLifecycleEngine interface {
 	RunSessionEndHooks(ctx context.Context, reason string, cwd string)
 }
 
+// RemoteLifecycle wires remote stream subscription lifecycle into one REPL turn.
+type RemoteLifecycle interface {
+	// Subscribe opens one remote subscription and returns its unsubscribe handle.
+	Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig) (func() error, error)
+}
+
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
 type Runner struct {
 	// Engine handles normal prompt execution.
@@ -43,6 +49,8 @@ type Runner struct {
 	ProjectPath string
 	// RemoteSession stores the minimum remote-mode context injected during bootstrap.
 	RemoteSession coreconfig.RemoteSessionConfig
+	// RemoteLifecycle manages optional remote stream subscribe/unsubscribe around one prompt turn.
+	RemoteLifecycle RemoteLifecycle
 	// SessionID identifies the current logical CLI session.
 	SessionID string
 	// SessionManager restores previously persisted conversation history when available.
@@ -157,6 +165,18 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 
 // runPrompt appends one user prompt onto the supplied history, executes the engine and persists the final history.
 func (r *Runner) runPrompt(ctx context.Context, history conversation.History, prompt string) error {
+	remoteUnsubscribe := r.subscribeRemoteStream(ctx)
+	if remoteUnsubscribe != nil {
+		defer func() {
+			if err := remoteUnsubscribe(); err != nil {
+				logger.WarnCF("repl", "failed to unsubscribe remote stream", map[string]any{
+					"session_id": r.sessionID(),
+					"error":      err.Error(),
+				})
+			}
+		}()
+	}
+
 	requestHistory := history.Clone()
 	requestHistory.Append(message.Message{
 		Role: message.RoleUser,
@@ -185,6 +205,22 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		}
 	}
 	return nil
+}
+
+func (r *Runner) subscribeRemoteStream(ctx context.Context) func() error {
+	if r == nil || !r.RemoteSession.Enabled || r.RemoteLifecycle == nil {
+		return nil
+	}
+
+	unsubscribe, err := r.RemoteLifecycle.Subscribe(ctx, r.RemoteSession)
+	if err != nil {
+		logger.WarnCF("repl", "failed to subscribe remote stream", map[string]any{
+			"session_id": r.sessionID(),
+			"error":      err.Error(),
+		})
+		return nil
+	}
+	return unsubscribe
 }
 
 // restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.

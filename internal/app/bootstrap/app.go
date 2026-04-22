@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -17,6 +18,7 @@ import (
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
+	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -82,6 +84,9 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
 	runner.RemoteSession = cfg.RemoteSession
+	if cfg.RemoteSession.Enabled && strings.TrimSpace(cfg.RemoteSession.StreamURL) != "" {
+		runner.RemoteLifecycle = platformremote.NewLifecycleManager(nil, nil)
+	}
 	runner.Input = os.Stdin
 	runner.WorktreeLister = platformgit.NewClient()
 
