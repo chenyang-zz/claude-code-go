@@ -1,0 +1,41 @@
+internal/platform/remote/subscription_test.go
+  eabc5e70be1dc0a7 5,131-198
+internal/platform/remote/resilient_test.go
+  eabc5e70be1dc0a7 1-413
+internal/services/commands/session.go
+  eabc5e70be1dc0a7 8,21-28,81,83-90
+internal/platform/remote/lifecycle.go
+  eabc5e70be1dc0a7 7-8,41-42,48-52,73-74,81-84,87-92,118-176
+internal/platform/remote/subscription.go
+  eabc5e70be1dc0a7 162-171
+internal/services/commands/session_test.go
+  eabc5e70be1dc0a7 5,9,68-72,77-80,128-160
+internal/platform/remote/resilient.go
+  eabc5e70be1dc0a7 1-560
+internal/runtime/repl/runner.go
+  eabc5e70be1dc0a7 10,45-52
+internal/runtime/repl/repl_test.go
+  eabc5e70be1dc0a7 261-264
+internal/platform/remote/lifecycle_test.go
+  eabc5e70be1dc0a7 43-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "e80d0f18069a53cba76aa40f967bbf43d25b1dd0",
+  "prompts": {
+    "eabc5e70be1dc0a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71b5047c-64e9-4ee4-ad20-f95dff4c6514",
+        "model": "kimi-for-coding"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1243,
+      "total_deletions": 38,
+      "accepted_lines": 1213,
+      "overriden_lines": 0
+    }
+  }
+}
