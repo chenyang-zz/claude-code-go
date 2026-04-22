@@ -227,7 +227,14 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.MCPCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.SessionCommand{RemoteSession: cfg.RemoteSession}); err != nil {
+	var stateProvider servicecommands.RemoteStateProvider
+	if runner != nil {
+		stateProvider = runner.RemoteLifecycle
+	}
+	if err := registry.Register(servicecommands.SessionCommand{
+		RemoteSession: cfg.RemoteSession,
+		StateProvider: stateProvider,
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.BranchCommand{}); err != nil {

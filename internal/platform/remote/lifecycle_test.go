@@ -36,7 +36,7 @@ func TestLifecycleManagerSubscribe(t *testing.T) {
 		Enabled:   true,
 		SessionID: "session_test",
 		StreamURL: "ws://localhost/test",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}

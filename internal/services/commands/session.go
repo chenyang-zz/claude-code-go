@@ -11,10 +11,20 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// SessionCommand renders the minimum text-only /session behavior available before remote mode exists in the Go host.
+// RemoteStateProvider exposes observable remote subscription and lifecycle state for /session reporting.
+type RemoteStateProvider interface {
+	// ActiveSubscriptionCount returns the number of currently active remote stream subscriptions.
+	ActiveSubscriptionCount() int
+	// IsClosed reports whether the remote lifecycle manager has been globally closed.
+	IsClosed() bool
+}
+
+// SessionCommand renders the text-only /session behavior including remote session URL, QR code, and subscription state.
 type SessionCommand struct {
 	// RemoteSession stores the current remote-mode context surfaced by bootstrap.
 	RemoteSession coreconfig.RemoteSessionConfig
+	// StateProvider supplies optional live remote subscription and lifecycle state for observability output.
+	StateProvider RemoteStateProvider
 }
 
 // Metadata returns the canonical slash descriptor for /session.
@@ -37,7 +47,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 			"remote_session_url":    c.RemoteSession.URL,
 		})
 		return command.Result{
-			Output: renderRemoteSession(c.RemoteSession),
+			Output: renderRemoteSession(c.RemoteSession, c.StateProvider),
 		}, nil
 	}
 
@@ -50,9 +60,23 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 	}, nil
 }
 
-// renderRemoteSession formats the minimum source-aligned remote session details for the text-only Go host.
-func renderRemoteSession(remote coreconfig.RemoteSessionConfig) string {
-	return fmt.Sprintf("Remote session\n%s\nOpen in browser: %s", renderTextQRCode(remote.URL), remote.URL)
+// renderRemoteSession formats the remote session details including QR code, URL, and optional live state.
+func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider) string {
+	var b strings.Builder
+	b.WriteString("Remote session\n")
+	b.WriteString(renderTextQRCode(remote.URL))
+	b.WriteString("\nOpen in browser: ")
+	b.WriteString(remote.URL)
+	if state != nil {
+		b.WriteString("\n\nConnection state:\n")
+		b.WriteString(fmt.Sprintf("  Subscriptions active: %d\n", state.ActiveSubscriptionCount()))
+		closedStr := "no"
+		if state.IsClosed() {
+			closedStr = "yes (closed)"
+		}
+		b.WriteString(fmt.Sprintf("  Lifecycle closed: %s", closedStr))
+	}
+	return b.String()
 }
 
 // renderTextQRCode emits one stable ASCII QR-like block so `/session` remains observable in the text host.

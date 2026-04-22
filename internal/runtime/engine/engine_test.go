@@ -2735,3 +2735,60 @@ func TestRuntimeRun_PostToolUseFailureHookMarksInterrupt(t *testing.T) {
 
 	t.Fatal("PostToolUseFailure hook did not run")
 }
+
+// mockGatedTool is a tool that can report itself as disabled.
+type mockGatedTool struct {
+	name      string
+	schema    tool.InputSchema
+	enabled   bool
+}
+
+func (m *mockGatedTool) Name() string              { return m.name }
+func (m *mockGatedTool) Description() string       { return "mock tool" }
+func (m *mockGatedTool) InputSchema() tool.InputSchema { return m.schema }
+func (m *mockGatedTool) IsReadOnly() bool          { return true }
+func (m *mockGatedTool) IsConcurrencySafe() bool   { return true }
+func (m *mockGatedTool) Invoke(context.Context, tool.Call) (tool.Result, error) {
+	return tool.Result{}, nil
+}
+func (m *mockGatedTool) IsEnabled() bool { return m.enabled }
+
+// memoryRegistry is a simple in-memory tool registry for tests.
+type memoryRegistry struct {
+	tools []tool.Tool
+}
+
+func (r *memoryRegistry) Register(t tool.Tool) error {
+	r.tools = append(r.tools, t)
+	return nil
+}
+
+func (r *memoryRegistry) Get(name string) (tool.Tool, bool) {
+	for _, t := range r.tools {
+		if t.Name() == name {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
+func (r *memoryRegistry) List() []tool.Tool { return r.tools }
+
+// TestDescribeTools_SkipsDisabledTools verifies that DescribeTools filters out
+// tools whose IsEnabled() returns false.
+func TestDescribeTools_SkipsDisabledTools(t *testing.T) {
+	registry := &memoryRegistry{
+		tools: []tool.Tool{
+			&mockGatedTool{name: "EnabledTool", enabled: true},
+			&mockGatedTool{name: "DisabledTool", enabled: false},
+		},
+	}
+
+	descs := DescribeTools(registry)
+	if len(descs) != 1 {
+		t.Fatalf("expected 1 tool definition, got %d", len(descs))
+	}
+	if descs[0].Name != "EnabledTool" {
+		t.Fatalf("expected EnabledTool, got %s", descs[0].Name)
+	}
+}

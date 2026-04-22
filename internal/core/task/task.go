@@ -74,6 +74,55 @@ func (t *Task) ToSummary() Summary {
 	}
 }
 
+// ClaimReason describes why a claim attempt failed.
+type ClaimReason string
+
+const (
+	// ClaimReasonTaskNotFound indicates the requested task does not exist.
+	ClaimReasonTaskNotFound ClaimReason = "task_not_found"
+	// ClaimReasonAlreadyClaimed indicates the task is owned by a different agent.
+	ClaimReasonAlreadyClaimed ClaimReason = "already_claimed"
+	// ClaimReasonAlreadyResolved indicates the task is already completed.
+	ClaimReasonAlreadyResolved ClaimReason = "already_resolved"
+	// ClaimReasonBlocked indicates the task has unresolved blockers.
+	ClaimReasonBlocked ClaimReason = "blocked"
+	// ClaimReasonAgentBusy indicates the claimant already owns other open tasks.
+	ClaimReasonAgentBusy ClaimReason = "agent_busy"
+)
+
+// ClaimTaskResult holds the outcome of a claim attempt.
+type ClaimTaskResult struct {
+	// Success is true when the task was claimed.
+	Success bool `json:"success"`
+	// Reason explains why the claim failed (empty when Success is true).
+	Reason ClaimReason `json:"reason,omitempty"`
+	// Task is the task state at the time of the claim attempt.
+	Task *Task `json:"task,omitempty"`
+	// BusyWithTasks lists task IDs the agent is busy with when Reason is agent_busy.
+	BusyWithTasks []string `json:"busyWithTasks,omitempty"`
+	// BlockedByTasks lists task IDs blocking this task when Reason is blocked.
+	BlockedByTasks []string `json:"blockedByTasks,omitempty"`
+}
+
+// ClaimTaskOptions holds optional parameters for a claim attempt.
+type ClaimTaskOptions struct {
+	// CheckAgentBusy, when true, checks whether the claimant already owns
+	// other unresolved tasks before allowing the claim.
+	CheckAgentBusy bool
+}
+
+// UnassignResult holds the outcome of unassigning a teammate's tasks.
+type UnassignResult struct {
+	// UnassignedTasks lists the tasks that were reset to pending.
+	UnassignedTasks []UnassignedTask `json:"unassignedTasks"`
+}
+
+// UnassignedTask is a lightweight record of a task that was unassigned.
+type UnassignedTask struct {
+	ID      string `json:"id"`
+	Subject string `json:"subject"`
+}
+
 // IsInternal reports whether the task carries the _internal metadata flag,
 // indicating it should be hidden from user-facing listings.
 func (t *Task) IsInternal() bool {

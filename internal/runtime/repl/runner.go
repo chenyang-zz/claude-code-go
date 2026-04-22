@@ -15,6 +15,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
@@ -34,7 +35,12 @@ type sessionLifecycleEngine interface {
 // RemoteLifecycle wires remote stream subscription lifecycle into one REPL turn.
 type RemoteLifecycle interface {
 	// Subscribe opens one remote subscription and returns its unsubscribe handle.
-	Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig) (func() error, error)
+	// onEvent is called for each remote event received; nil is accepted and events are discarded.
+	Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig, onEvent func(remote.Event)) (func() error, error)
+	// ActiveSubscriptionCount returns the number of currently active remote stream subscriptions.
+	ActiveSubscriptionCount() int
+	// IsClosed reports whether the lifecycle manager has been globally closed.
+	IsClosed() bool
 }
 
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
@@ -212,7 +218,8 @@ func (r *Runner) subscribeRemoteStream(ctx context.Context) func() error {
 		return nil
 	}
 
-	unsubscribe, err := r.RemoteLifecycle.Subscribe(ctx, r.RemoteSession)
+	bridge := &RemoteEventBridge{Renderer: r.Renderer}
+	unsubscribe, err := r.RemoteLifecycle.Subscribe(ctx, r.RemoteSession, bridge.OnEvent())
 	if err != nil {
 		logger.WarnCF("repl", "failed to subscribe remote stream", map[string]any{
 			"session_id": r.sessionID(),

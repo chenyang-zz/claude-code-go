@@ -170,6 +170,26 @@ func (m *SubscriptionManager) runSubscription(
 	}
 }
 
+// ActiveCount returns the number of currently active subscriptions.
+func (m *SubscriptionManager) ActiveCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.subscriptions)
+}
+
+// IsClosed reports whether the manager has been globally closed.
+func (m *SubscriptionManager) IsClosed() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
+}
+
 func (m *SubscriptionManager) removeSubscription(subscriptionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

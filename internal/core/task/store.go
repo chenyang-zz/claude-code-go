@@ -38,6 +38,15 @@ type Store interface {
 	// BlockTask establishes a bidirectional dependency: fromID blocks toID.
 	// Both tasks must exist. Returns false when either task is not found.
 	BlockTask(ctx context.Context, fromID, toID string) (bool, error)
+	// ClaimTask attempts to claim a task for an agent. Returns a detailed
+	// result indicating success or the reason for failure.
+	ClaimTask(ctx context.Context, id, claimantAgentID string, opts ClaimTaskOptions) (*ClaimTaskResult, error)
+	// ResetTaskList clears all tasks and saves the highest ID to the highwatermark
+	// file to prevent ID reuse after reset.
+	ResetTaskList(ctx context.Context) error
+	// UnassignTeammateTasks resets all unresolved tasks owned by teammateID to
+	// pending with no owner.
+	UnassignTeammateTasks(ctx context.Context, teammateID string) (*UnassignResult, error)
 }
 
 // NewTask holds the caller-provided fields for creating a new task.
@@ -532,6 +541,165 @@ func (s *FileStore) BlockTask(_ context.Context, fromID, toID string) (bool, err
 		return nil
 	})
 	return ok, err
+}
+
+// ClaimTask attempts to claim a task for an agent.
+// When opts.CheckAgentBusy is true, it atomically checks whether the claimant
+// already owns other unresolved tasks before allowing the claim.
+func (s *FileStore) ClaimTask(_ context.Context, id, claimantAgentID string, opts ClaimTaskOptions) (*ClaimTaskResult, error) {
+	var result *ClaimTaskResult
+	err := s.withLock(func() error {
+		// Read the target task.
+		task, err := s.readTaskFile(s.taskPath(id))
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			result = &ClaimTaskResult{Success: false, Reason: ClaimReasonTaskNotFound}
+			return nil
+		}
+
+		var allTasks []*Task
+		if opts.CheckAgentBusy {
+			// Need the full task list for busy check and blocker resolution.
+			allTasks, err = s.listLocked()
+			if err != nil {
+				return err
+			}
+		}
+
+		// Check if already claimed by another agent.
+		if task.Owner != "" && task.Owner != claimantAgentID {
+			result = &ClaimTaskResult{Success: false, Reason: ClaimReasonAlreadyClaimed, Task: task}
+			return nil
+		}
+
+		// Check if already resolved.
+		if task.Status == StatusCompleted {
+			result = &ClaimTaskResult{Success: false, Reason: ClaimReasonAlreadyResolved, Task: task}
+			return nil
+		}
+
+		// Build unresolved task set for blocker detection.
+		var unresolved map[string]bool
+		if opts.CheckAgentBusy {
+			unresolved = make(map[string]bool, len(allTasks))
+			for _, t := range allTasks {
+				if t.Status != StatusCompleted {
+					unresolved[t.ID] = true
+				}
+			}
+		} else {
+			// Fallback: read all tasks to check blockers.
+			allTasks, err = s.listLocked()
+			if err != nil {
+				return err
+			}
+			unresolved = make(map[string]bool, len(allTasks))
+			for _, t := range allTasks {
+				if t.Status != StatusCompleted {
+					unresolved[t.ID] = true
+				}
+			}
+		}
+
+		var blockedByTasks []string
+		for _, blockerID := range task.BlockedBy {
+			if unresolved[blockerID] {
+				blockedByTasks = append(blockedByTasks, blockerID)
+			}
+		}
+		if len(blockedByTasks) > 0 {
+			result = &ClaimTaskResult{Success: false, Reason: ClaimReasonBlocked, Task: task, BlockedByTasks: blockedByTasks}
+			return nil
+		}
+
+		// Check if agent is busy with other unresolved tasks.
+		if opts.CheckAgentBusy {
+			var busyWithTasks []string
+			for _, t := range allTasks {
+				if t.Status != StatusCompleted && t.Owner == claimantAgentID && t.ID != id {
+					busyWithTasks = append(busyWithTasks, t.ID)
+				}
+			}
+			if len(busyWithTasks) > 0 {
+				result = &ClaimTaskResult{Success: false, Reason: ClaimReasonAgentBusy, Task: task, BusyWithTasks: busyWithTasks}
+				return nil
+			}
+		}
+
+		// Claim the task.
+		task.Owner = claimantAgentID
+		if err := s.writeTaskFile(task); err != nil {
+			return err
+		}
+		result = &ClaimTaskResult{Success: true, Task: task}
+		return nil
+	})
+	return result, err
+}
+
+// ResetTaskList clears all tasks and saves the highest ID to the highwatermark
+// file to prevent ID reuse after reset.
+func (s *FileStore) ResetTaskList(_ context.Context) error {
+	return s.withLock(func() error {
+		// Find the current highest ID and save it to the highwatermark file.
+		currentHighest, err := s.findHighestTaskID()
+		if err != nil {
+			return err
+		}
+		if currentHighest > 0 {
+			existingMark := s.readHighwatermark()
+			if currentHighest > existingMark {
+				if err := s.writeHighwatermark(currentHighest); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Delete all task JSON files.
+		entries, err := os.ReadDir(s.tasksDir())
+		if err != nil {
+			return nil // directory may not exist yet
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(s.tasksDir(), e.Name())
+			_ = os.Remove(path) // best-effort cleanup
+		}
+		return nil
+	})
+}
+
+// UnassignTeammateTasks resets all unresolved tasks owned by teammateID to
+// pending with no owner.
+func (s *FileStore) UnassignTeammateTasks(_ context.Context, teammateID string) (*UnassignResult, error) {
+	var result *UnassignResult
+	err := s.withLock(func() error {
+		tasks, err := s.listLocked()
+		if err != nil {
+			return err
+		}
+
+		var unassigned []UnassignedTask
+		pending := StatusPending
+		emptyOwner := ""
+		for _, t := range tasks {
+			if t.Status != StatusCompleted && t.Owner == teammateID {
+				t.Owner = emptyOwner
+				t.Status = pending
+				if err := s.writeTaskFile(t); err != nil {
+					return err
+				}
+				unassigned = append(unassigned, UnassignedTask{ID: t.ID, Subject: t.Subject})
+			}
+		}
+		result = &UnassignResult{UnassignedTasks: unassigned}
+		return nil
+	})
+	return result, err
 }
 
 // containsString reports whether slice contains s.

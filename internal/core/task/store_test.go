@@ -447,3 +447,239 @@ func TestListEmpty(t *testing.T) {
 		t.Fatalf("List() on empty store returned %d tasks, want 0", len(tasks))
 	}
 }
+
+func TestClaimTask(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, err := s.Create(ctx, NewTask{Subject: "Task 1", Description: "desc"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Successful claim.
+	result, err := s.ClaimTask(ctx, id, "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("ClaimTask() success = false, want true")
+	}
+	if result.Task.Owner != "agent-a" {
+		t.Errorf("owner = %q, want %q", result.Task.Owner, "agent-a")
+	}
+
+	// Re-claim by same agent should succeed (idempotent).
+	result, err = s.ClaimTask(ctx, id, "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("re-claim by same agent failed")
+	}
+
+	// Claim by different agent should fail.
+	result, err = s.ClaimTask(ctx, id, "agent-b", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("claim by different agent should fail")
+	}
+	if result.Reason != ClaimReasonAlreadyClaimed {
+		t.Errorf("reason = %q, want %q", result.Reason, ClaimReasonAlreadyClaimed)
+	}
+}
+
+func TestClaimTaskNotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	result, err := s.ClaimTask(ctx, "99", "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("claim of nonexistent task should fail")
+	}
+	if result.Reason != ClaimReasonTaskNotFound {
+		t.Errorf("reason = %q, want %q", result.Reason, ClaimReasonTaskNotFound)
+	}
+}
+
+func TestClaimTaskAlreadyResolved(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id, _ := s.Create(ctx, NewTask{Subject: "Task", Description: "desc"})
+	completed := StatusCompleted
+	s.Update(ctx, id, Updates{Status: &completed})
+
+	result, err := s.ClaimTask(ctx, id, "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("claim of completed task should fail")
+	}
+	if result.Reason != ClaimReasonAlreadyResolved {
+		t.Errorf("reason = %q, want %q", result.Reason, ClaimReasonAlreadyResolved)
+	}
+}
+
+func TestClaimTaskBlocked(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id1, _ := s.Create(ctx, NewTask{Subject: "Blocker", Description: "desc"})
+	id2, _ := s.Create(ctx, NewTask{Subject: "Blocked", Description: "desc"})
+	// Make id1 block id2.
+	s.BlockTask(ctx, id1, id2)
+
+	result, err := s.ClaimTask(ctx, id2, "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("claim of blocked task should fail")
+	}
+	if result.Reason != ClaimReasonBlocked {
+		t.Errorf("reason = %q, want %q", result.Reason, ClaimReasonBlocked)
+	}
+	if len(result.BlockedByTasks) != 1 || result.BlockedByTasks[0] != id1 {
+		t.Errorf("blockedByTasks = %v, want [%s]", result.BlockedByTasks, id1)
+	}
+}
+
+func TestClaimTaskWithBusyCheck(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id1, _ := s.Create(ctx, NewTask{Subject: "Task 1", Description: "desc"})
+	id2, _ := s.Create(ctx, NewTask{Subject: "Task 2", Description: "desc"})
+
+	// Claim first task.
+	result, err := s.ClaimTask(ctx, id1, "agent-a", ClaimTaskOptions{CheckAgentBusy: true})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("first claim should succeed")
+	}
+
+	// Claim second task with busy check should fail.
+	result, err = s.ClaimTask(ctx, id2, "agent-a", ClaimTaskOptions{CheckAgentBusy: true})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("second claim with busy check should fail")
+	}
+	if result.Reason != ClaimReasonAgentBusy {
+		t.Errorf("reason = %q, want %q", result.Reason, ClaimReasonAgentBusy)
+	}
+	if len(result.BusyWithTasks) != 1 || result.BusyWithTasks[0] != id1 {
+		t.Errorf("busyWithTasks = %v, want [%s]", result.BusyWithTasks, id1)
+	}
+}
+
+func TestClaimTaskWithoutBusyCheckAllowsMultiple(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id1, _ := s.Create(ctx, NewTask{Subject: "Task 1", Description: "desc"})
+	id2, _ := s.Create(ctx, NewTask{Subject: "Task 2", Description: "desc"})
+
+	_, _ = s.ClaimTask(ctx, id1, "agent-a", ClaimTaskOptions{})
+	result, err := s.ClaimTask(ctx, id2, "agent-a", ClaimTaskOptions{})
+	if err != nil {
+		t.Fatalf("ClaimTask() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatal("second claim without busy check should succeed")
+	}
+}
+
+func TestResetTaskList(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, _ = s.Create(ctx, NewTask{Subject: "Task 1", Description: "desc"})
+	_, _ = s.Create(ctx, NewTask{Subject: "Task 2", Description: "desc"})
+
+	if err := s.ResetTaskList(ctx); err != nil {
+		t.Fatalf("ResetTaskList() error = %v", err)
+	}
+
+	tasks, err := s.List(ctx)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("List() after reset returned %d tasks, want 0", len(tasks))
+	}
+
+	// Highwatermark should be set to prevent ID reuse.
+	hwmPath := filepath.Join(s.dir, ".highwatermark")
+	data, err := os.ReadFile(hwmPath)
+	if err != nil {
+		t.Fatalf("ReadFile(highwatermark) error = %v", err)
+	}
+	if string(data) != "2" {
+		t.Errorf("highwatermark = %q, want %q", string(data), "2")
+	}
+
+	// Next creation should start after the highwatermark.
+	id3, _ := s.Create(ctx, NewTask{Subject: "Task 3", Description: "desc"})
+	if id3 != "3" {
+		t.Errorf("next id = %q, want %q", id3, "3")
+	}
+}
+
+func TestUnassignTeammateTasks(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	id1, _ := s.Create(ctx, NewTask{Subject: "Task 1", Description: "desc"})
+	id2, _ := s.Create(ctx, NewTask{Subject: "Task 2", Description: "desc"})
+	id3, _ := s.Create(ctx, NewTask{Subject: "Task 3", Description: "desc"})
+
+	// Claim tasks for agent-a.
+	_, _ = s.ClaimTask(ctx, id1, "agent-a", ClaimTaskOptions{})
+	_, _ = s.ClaimTask(ctx, id2, "agent-a", ClaimTaskOptions{})
+	// Complete one task.
+	completed := StatusCompleted
+	_, _ = s.Update(ctx, id2, Updates{Status: &completed})
+
+	result, err := s.UnassignTeammateTasks(ctx, "agent-a")
+	if err != nil {
+		t.Fatalf("UnassignTeammateTasks() error = %v", err)
+	}
+	if len(result.UnassignedTasks) != 1 {
+		t.Fatalf("unassigned tasks = %d, want 1", len(result.UnassignedTasks))
+	}
+	if result.UnassignedTasks[0].ID != id1 {
+		t.Errorf("unassigned task id = %q, want %q", result.UnassignedTasks[0].ID, id1)
+	}
+
+	// Verify the unassigned task is now pending with no owner.
+	task, _ := s.Get(ctx, id1)
+	if task.Owner != "" {
+		t.Errorf("owner = %q, want empty", task.Owner)
+	}
+	if task.Status != StatusPending {
+		t.Errorf("status = %q, want %q", task.Status, StatusPending)
+	}
+
+	// Completed task should remain unchanged.
+	task2, _ := s.Get(ctx, id2)
+	if task2.Status != StatusCompleted {
+		t.Errorf("completed task status = %q, want %q", task2.Status, StatusCompleted)
+	}
+
+	// Unclaimed task should remain unchanged.
+	task3, _ := s.Get(ctx, id3)
+	if task3.Owner != "" {
+		t.Errorf("unclaimed task owner = %q, want empty", task3.Owner)
+	}
+}

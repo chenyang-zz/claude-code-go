@@ -1677,6 +1677,10 @@ func DescribeTools(registry coretool.Registry) []model.ToolDefinition {
 		if item == nil {
 			continue
 		}
+		// Skip tools that declare themselves disabled via IsEnabled().
+		if gated, ok := item.(interface{ IsEnabled() bool }); ok && !gated.IsEnabled() {
+			continue
+		}
 		descriptions = append(descriptions, model.ToolDefinition{
 			Name:        item.Name(),
 			Description: item.Description(),

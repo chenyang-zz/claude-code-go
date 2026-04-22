@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -115,6 +116,12 @@ func (t *Tool) IsReadOnly() bool {
 // IsConcurrencySafe reports that create requests are safe alongside other tools.
 func (t *Tool) IsConcurrencySafe() bool {
 	return true
+}
+
+// IsEnabled reports whether the TodoV2 feature flag allows this tool to be
+// exposed to the provider tool catalog.
+func (t *Tool) IsEnabled() bool {
+	return featureflag.IsTodoV2Enabled()
 }
 
 // Invoke validates input, creates a new task, and returns the result.

@@ -55,4 +55,64 @@ func TestSessionCommandExecuteRendersRemoteSession(t *testing.T) {
 	if !strings.Contains(result.Output, "Open in browser: https://claude.ai/code/session_test123?m=0") {
 		t.Fatalf("Execute() output = %q, want remote session url", result.Output)
 	}
+	// Without a StateProvider, connection state section should not be present.
+	if strings.Contains(result.Output, "Connection state:") {
+		t.Fatalf("Execute() output unexpectedly contains connection state without provider")
+	}
+}
+
+// stubRemoteStateProvider implements RemoteStateProvider for test assertions.
+type stubRemoteStateProvider struct {
+	activeCount int
+	closed      bool
+}
+
+func (s *stubRemoteStateProvider) ActiveSubscriptionCount() int { return s.activeCount }
+func (s *stubRemoteStateProvider) IsClosed() bool               { return s.closed }
+
+// TestSessionCommandExecuteRendersRemoteSessionWithState verifies `/session` exposes subscription and lifecycle state when a provider is wired.
+func TestSessionCommandExecuteRendersRemoteSessionWithState(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		StateProvider: &stubRemoteStateProvider{activeCount: 2, closed: false},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Connection state:") {
+		t.Fatalf("Execute() output = %q, want connection state section", result.Output)
+	}
+	if !strings.Contains(result.Output, "Subscriptions active: 2") {
+		t.Fatalf("Execute() output = %q, want active subscription count", result.Output)
+	}
+	if !strings.Contains(result.Output, "Lifecycle closed: no") {
+		t.Fatalf("Execute() output = %q, want lifecycle closed=no", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteRendersRemoteSessionClosedState verifies `/session` reflects a closed lifecycle state.
+func TestSessionCommandExecuteRendersRemoteSessionClosedState(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		StateProvider: &stubRemoteStateProvider{activeCount: 0, closed: true},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Subscriptions active: 0") {
+		t.Fatalf("Execute() output = %q, want active subscription count 0", result.Output)
+	}
+	if !strings.Contains(result.Output, "Lifecycle closed: yes (closed)") {
+		t.Fatalf("Execute() output = %q, want lifecycle closed=yes", result.Output)
+	}
 }

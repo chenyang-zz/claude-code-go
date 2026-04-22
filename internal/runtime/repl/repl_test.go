@@ -16,6 +16,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
@@ -241,9 +242,10 @@ type stubRemoteLifecycle struct {
 	subscribeErr     error
 }
 
-func (s *stubRemoteLifecycle) Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig) (func() error, error) {
+func (s *stubRemoteLifecycle) Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig, onEvent func(remote.Event)) (func() error, error) {
 	_ = ctx
 	_ = session
+	_ = onEvent
 	s.subscribeCalls++
 	if s.subscribeErr != nil {
 		return nil, s.subscribeErr
@@ -253,6 +255,9 @@ func (s *stubRemoteLifecycle) Subscribe(ctx context.Context, session coreconfig.
 		return nil
 	}, nil
 }
+
+func (s *stubRemoteLifecycle) ActiveSubscriptionCount() int { return 0 }
+func (s *stubRemoteLifecycle) IsClosed() bool               { return false }
 
 func (c staticCommand) Metadata() command.Metadata {
 	return c.meta

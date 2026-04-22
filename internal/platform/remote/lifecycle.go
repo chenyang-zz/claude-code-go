@@ -62,7 +62,8 @@ func NewLifecycleManager(subscriptions *SubscriptionManager, streamFactory Strea
 }
 
 // Subscribe opens one remote stream, starts subscription delivery, and returns one unsubscribe function.
-func (m *LifecycleManager) Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig) (func() error, error) {
+// onEvent is called for each remote event received; nil is accepted and events are discarded.
+func (m *LifecycleManager) Subscribe(ctx context.Context, session coreconfig.RemoteSessionConfig, onEvent func(Event)) (func() error, error) {
 	if m == nil {
 		return nil, fmt.Errorf("remote lifecycle manager is nil")
 	}
@@ -72,7 +73,7 @@ func (m *LifecycleManager) Subscribe(ctx context.Context, session coreconfig.Rem
 		return nil, err
 	}
 
-	subscriptionID, err := m.subscriptions.Subscribe(ctx, stream, nil, func(err error) {
+	subscriptionID, err := m.subscriptions.Subscribe(ctx, stream, onEvent, func(err error) {
 		logger.WarnCF("remote_lifecycle", "remote subscription loop stopped with error", map[string]any{
 			"session_id": session.SessionID,
 			"error":      err.Error(),
@@ -95,6 +96,22 @@ func (m *LifecycleManager) Subscribe(ctx context.Context, session coreconfig.Rem
 		})
 		return m.subscriptions.Unsubscribe(subscriptionID)
 	}, nil
+}
+
+// ActiveSubscriptionCount returns the number of active subscriptions managed by this lifecycle manager.
+func (m *LifecycleManager) ActiveSubscriptionCount() int {
+	if m == nil {
+		return 0
+	}
+	return m.subscriptions.ActiveCount()
+}
+
+// IsClosed reports whether the underlying subscription manager has been closed.
+func (m *LifecycleManager) IsClosed() bool {
+	if m == nil {
+		return false
+	}
+	return m.subscriptions.IsClosed()
 }
 
 // Close releases all active subscriptions tracked by this lifecycle manager.
