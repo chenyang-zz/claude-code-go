@@ -31,6 +31,7 @@ type TaskUpdater interface {
 	Get(ctx context.Context, id string) (*coretask.Task, error)
 	UpdateWithDependencies(ctx context.Context, taskID string, updates coretask.Updates, addBlocks []string, addBlockedBy []string) (*coretask.Task, error)
 	Delete(ctx context.Context, id string) (bool, error)
+	List(ctx context.Context) ([]*coretask.Task, error)
 }
 
 // Tool updates an existing task or deletes it when status is "deleted".
@@ -85,6 +86,9 @@ type Output struct {
 	Error string `json:"error,omitempty"`
 	// StatusChange records the before/after status when the status field changed.
 	StatusChange *StatusChange `json:"statusChange,omitempty"`
+	// VerificationNudgeNeeded is true when the main-thread agent just closed out
+	// a 3+ task list with no verification step, prompting them to spawn a verifier.
+	VerificationNudgeNeeded bool `json:"verificationNudgeNeeded,omitempty"`
 }
 
 // StatusChange records the before and after status when a task status transitions.
@@ -330,15 +334,51 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		}
 	}
 
+	// Structural verification nudge: if the main-thread agent just closed
+	// out a 3+ task list and none of those tasks was a verification step,
+	// append a reminder to the tool result.
+	verificationNudgeNeeded := false
+	if featureflag.IsEnabled(featureflag.FlagVerificationAgent) &&
+		updates.Status != nil && *updates.Status == coretask.StatusCompleted {
+		allTasks, err := t.store.List(ctx)
+		if err == nil {
+			allDone := true
+			for _, t := range allTasks {
+				if t.Status != coretask.StatusCompleted {
+					allDone = false
+					break
+				}
+			}
+			if allDone && len(allTasks) >= 3 {
+				hasVerification := false
+				for _, t := range allTasks {
+					if strings.Contains(strings.ToLower(t.Subject), "verif") {
+						hasVerification = true
+						break
+					}
+				}
+				if !hasVerification {
+					verificationNudgeNeeded = true
+				}
+			}
+		}
+	}
+
 	result := Output{
-		Success:       true,
-		TaskID:        input.TaskID,
-		UpdatedFields: updatedFields,
-		StatusChange:  statusChange,
+		Success:                 true,
+		TaskID:                  input.TaskID,
+		UpdatedFields:           updatedFields,
+		StatusChange:            statusChange,
+		VerificationNudgeNeeded: verificationNudgeNeeded,
+	}
+
+	output := fmt.Sprintf("Updated task #%s %s", input.TaskID, strings.Join(updatedFields, ", "))
+	if verificationNudgeNeeded {
+		output += "\n\nNOTE: You just closed out 3+ tasks and none of them was a verification step. Before writing your final summary, spawn the verification agent (subagent_type=\"verification\"). You cannot self-assign PARTIAL by listing caveats in your summary — only the verifier issues a verdict."
 	}
 
 	return coretool.Result{
-		Output: fmt.Sprintf("Updated task #%s %s", input.TaskID, strings.Join(updatedFields, ", ")),
+		Output: output,
 		Meta:   map[string]any{"data": result},
 	}, nil
 }

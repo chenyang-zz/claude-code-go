@@ -83,6 +83,10 @@ func (m *mockUpdateStore) Update(_ context.Context, id string, updates coretask.
 			}
 		}
 	}
+	// Sync back to tasksByID so List reflects updates.
+	if m.tasksByID != nil {
+		m.tasksByID[id] = t
+	}
 	m.updated = t
 	return t, nil
 }
@@ -98,6 +102,16 @@ func (m *mockUpdateStore) UpdateWithDependencies(_ context.Context, id string, u
 
 func (m *mockUpdateStore) Delete(_ context.Context, _ string) (bool, error) {
 	return m.deleted, m.deleteErr
+}
+
+func (m *mockUpdateStore) List(_ context.Context) ([]*coretask.Task, error) {
+	var tasks []*coretask.Task
+	if m.tasksByID != nil {
+		for _, t := range m.tasksByID {
+			tasks = append(tasks, t)
+		}
+	}
+	return tasks, nil
 }
 
 func TestUpdateTool_StatusChange(t *testing.T) {
@@ -602,5 +616,217 @@ func TestUpdateTool_TaskCompletedHookNotTriggeredForOtherStatus(t *testing.T) {
 	// TaskCompleted hooks should NOT have been called for a non-completed status change.
 	if dispatcher.called {
 		t.Error("HookDispatcher.RunHooks should not be called for in_progress status")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_Triggers(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "3",
+			Subject: "Deploy app",
+			Status:  coretask.StatusInProgress,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusCompleted},
+			"2": {ID: "2", Subject: "Refactor code", Status: coretask.StatusCompleted},
+			"3": {ID: "3", Subject: "Deploy app", Status: coretask.StatusInProgress},
+		},
+	}
+	tool := NewTool(store)
+
+	completed := "completed"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "3",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Unexpected error: %q", result.Error)
+	}
+	if !strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should contain verification nudge, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if !data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be true")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_NotEnoughTasks(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "2",
+			Subject: "Deploy app",
+			Status:  coretask.StatusInProgress,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusCompleted},
+			"2": {ID: "2", Subject: "Deploy app", Status: coretask.StatusInProgress},
+		},
+	}
+	tool := NewTool(store)
+
+	completed := "completed"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "2",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should NOT contain verification nudge for < 3 tasks, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be false")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_HasVerificationTask(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "3",
+			Subject: "Deploy app",
+			Status:  coretask.StatusInProgress,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusCompleted},
+			"2": {ID: "2", Subject: "Verify deployment", Status: coretask.StatusCompleted},
+			"3": {ID: "3", Subject: "Deploy app", Status: coretask.StatusInProgress},
+		},
+	}
+	tool := NewTool(store)
+
+	completed := "completed"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "3",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should NOT contain verification nudge when verification task exists, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be false")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_FeatureDisabled(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "0")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "3",
+			Subject: "Deploy app",
+			Status:  coretask.StatusInProgress,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusCompleted},
+			"2": {ID: "2", Subject: "Refactor code", Status: coretask.StatusCompleted},
+			"3": {ID: "3", Subject: "Deploy app", Status: coretask.StatusInProgress},
+		},
+	}
+	tool := NewTool(store)
+
+	completed := "completed"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "3",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should NOT contain verification nudge when feature disabled, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be false")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_NotAllDone(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "3",
+			Subject: "Deploy app",
+			Status:  coretask.StatusInProgress,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusCompleted},
+			"2": {ID: "2", Subject: "Refactor code", Status: coretask.StatusPending},
+			"3": {ID: "3", Subject: "Deploy app", Status: coretask.StatusInProgress},
+		},
+	}
+	tool := NewTool(store)
+
+	completed := "completed"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "3",
+			"status": completed,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should NOT contain verification nudge when not all done, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be false")
+	}
+}
+
+func TestUpdateTool_VerificationNudge_NonCompletedStatus(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+	store := &mockUpdateStore{
+		getTask: &coretask.Task{
+			ID:      "1",
+			Subject: "Write tests",
+			Status:  coretask.StatusPending,
+		},
+		tasksByID: map[string]*coretask.Task{
+			"1": {ID: "1", Subject: "Write tests", Status: coretask.StatusPending},
+			"2": {ID: "2", Subject: "Refactor code", Status: coretask.StatusCompleted},
+			"3": {ID: "3", Subject: "Deploy app", Status: coretask.StatusCompleted},
+		},
+	}
+	tool := NewTool(store)
+
+	inProgress := "in_progress"
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Input: map[string]any{
+			"taskId": "1",
+			"status": inProgress,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if strings.Contains(result.Output, "verification agent") {
+		t.Errorf("Output should NOT contain verification nudge for non-completed status, got: %q", result.Output)
+	}
+	data := result.Meta["data"].(Output)
+	if data.VerificationNudgeNeeded {
+		t.Error("VerificationNudgeNeeded should be false")
 	}
 }

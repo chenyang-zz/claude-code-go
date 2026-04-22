@@ -15,6 +15,10 @@ const (
 	// TaskUpdate, TaskClaim, TaskReset). When disabled, the task toolset is
 	// hidden from the provider tool catalog.
 	FlagTodoV2 = "TODO_V2"
+	// FlagVerificationAgent gates the Verification Nudge feature in TaskUpdateTool.
+	// When enabled, completing the last task in a 3+ item list triggers a nudge
+	// to spawn a verification agent if no verification step was present.
+	FlagVerificationAgent = "VERIFICATION_AGENT"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
