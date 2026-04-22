@@ -1,0 +1,63 @@
+internal/platform/remote/lifecycle.go
+  eabc5e70be1dc0a7 65-66,76,101-116
+internal/runtime/engine/engine_test.go
+  eabc5e70be1dc0a7 2738-2794
+internal/platform/remote/lifecycle_test.go
+  eabc5e70be1dc0a7 39
+internal/core/task/store.go
+  eabc5e70be1dc0a7 41-49,546-704
+internal/app/bootstrap/app.go
+  eabc5e70be1dc0a7 230-237
+internal/core/featureflag/flag.go
+  eabc5e70be1dc0a7 3-6,14-17,29-53
+internal/services/commands/session_test.go
+  eabc5e70be1dc0a7 58-117
+internal/services/tools/task_update/tool.go
+  eabc5e70be1dc0a7 8,161-166
+internal/platform/remote/subscription.go
+  eabc5e70be1dc0a7 173-192
+internal/runtime/repl/remote_bridge_test.go
+  eabc5e70be1dc0a7 1-315
+internal/core/task/task.go
+  eabc5e70be1dc0a7 77-125
+internal/runtime/repl/repl_test.go
+  eabc5e70be1dc0a7 19,245,248,259-261
+internal/services/tools/task_create/tool.go
+  eabc5e70be1dc0a7 8,121-126
+internal/core/task/store_test.go
+  eabc5e70be1dc0a7 450-685
+internal/services/tools/task_list/tool.go
+  eabc5e70be1dc0a7 8,75-80
+internal/runtime/engine/engine.go
+  eabc5e70be1dc0a7 1680-1683
+internal/runtime/repl/remote_bridge.go
+  eabc5e70be1dc0a7 1-208
+internal/services/tools/task_get/tool.go
+  eabc5e70be1dc0a7 8,88-93
+internal/runtime/repl/runner.go
+  eabc5e70be1dc0a7 18,38-43,221-222
+internal/services/commands/session.go
+  eabc5e70be1dc0a7 14-22,26-27,50,63-79
+internal/core/featureflag/flag_test.go
+  eabc5e70be1dc0a7 46-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "7097831eb40a45216376a7429a46125d680c95b0",
+  "prompts": {
+    "eabc5e70be1dc0a7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71b5047c-64e9-4ee4-ad20-f95dff4c6514",
+        "model": "kimi-for-coding"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1295,
+      "total_deletions": 19,
+      "accepted_lines": 1290,
+      "overriden_lines": 0
+    }
+  }
+}
