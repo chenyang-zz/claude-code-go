@@ -22,6 +22,8 @@ type EarlyCLIOptions struct {
 	RemoteEnabled bool
 	// RemoteDescription stores the optional `--remote` description consumed during bootstrap parsing.
 	RemoteDescription string
+	// OutputFormat stores the optional `--output-format` value consumed during bootstrap parsing.
+	OutputFormat string
 }
 
 // ParseEarlyCLIOptions removes bootstrap-time flags from one argv slice and returns the remaining runtime args.
@@ -78,11 +80,41 @@ func ParseEarlyCLIOptions(args []string) (EarlyCLIOptions, []string, error) {
 				options.SettingSources = sources
 				options.HasSettingSources = true
 			}
+		case current == "--output-format":
+			if index+1 >= len(args) {
+				return EarlyCLIOptions{}, nil, fmt.Errorf("missing value for --output-format")
+			}
+			index++
+			if options.OutputFormat == "" {
+				outputFormat, err := parseOutputFormatFlagValue(args[index])
+				if err != nil {
+					return EarlyCLIOptions{}, nil, err
+				}
+				options.OutputFormat = outputFormat
+			}
+		case strings.HasPrefix(current, "--output-format="):
+			if options.OutputFormat == "" {
+				outputFormat, err := parseOutputFormatFlagValue(strings.TrimPrefix(current, "--output-format="))
+				if err != nil {
+					return EarlyCLIOptions{}, nil, err
+				}
+				options.OutputFormat = outputFormat
+			}
 		default:
 			filtered = append(filtered, args[index])
 		}
 	}
 	return options, filtered, nil
+}
+
+func parseOutputFormatFlagValue(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	switch trimmed {
+	case "", "console", "stream-json":
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("invalid value for --output-format: %q (expected one of: console, stream-json)", value)
+	}
 }
 
 // shouldConsumeRemoteDescription reports whether one CLI token should be consumed as the optional `--remote` description.
@@ -134,6 +166,9 @@ func (l earlyOptionsLoader) Load(ctx context.Context) (coreconfig.Config, error)
 	cfg, err := l.base.Load(ctx)
 	if err != nil {
 		return coreconfig.Config{}, err
+	}
+	if l.options.OutputFormat != "" {
+		cfg.OutputFormat = l.options.OutputFormat
 	}
 	if !l.options.RemoteEnabled {
 		return cfg, nil

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -20,10 +21,61 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 type stubLoader struct {
 	cfg coreconfig.Config
+}
+
+func TestConfigureConsoleLoggingStreamJSONUsesStderr(t *testing.T) {
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout-*.log")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdout) error = %v", err)
+	}
+	stderrFile, err := os.CreateTemp(t.TempDir(), "stderr-*.log")
+	if err != nil {
+		t.Fatalf("CreateTemp(stderr) error = %v", err)
+	}
+
+	originalStdout := os.Stdout
+	originalStderr := os.Stderr
+	originalLevel := logger.GetLevel()
+	defer func() {
+		os.Stdout = originalStdout
+		os.Stderr = originalStderr
+		configureConsoleLogging("console")
+		logger.SetLevel(originalLevel)
+	}()
+
+	os.Stdout = stdoutFile
+	os.Stderr = stderrFile
+	configureConsoleLogging("stream-json")
+	logger.SetLevel(logger.DEBUG)
+	logger.Debug("stream-json debug log")
+
+	if err := stdoutFile.Sync(); err != nil {
+		t.Fatalf("stdout Sync() error = %v", err)
+	}
+	if err := stderrFile.Sync(); err != nil {
+		t.Fatalf("stderr Sync() error = %v", err)
+	}
+
+	stdoutBytes, err := os.ReadFile(stdoutFile.Name())
+	if err != nil {
+		t.Fatalf("ReadFile(stdout) error = %v", err)
+	}
+	stderrBytes, err := os.ReadFile(stderrFile.Name())
+	if err != nil {
+		t.Fatalf("ReadFile(stderr) error = %v", err)
+	}
+
+	if strings.Contains(string(stdoutBytes), "stream-json debug log") {
+		t.Fatalf("stdout contains debug log in stream-json mode: %q", string(stdoutBytes))
+	}
+	if !strings.Contains(string(stderrBytes), "stream-json debug log") {
+		t.Fatalf("stderr missing debug log in stream-json mode: %q", string(stderrBytes))
+	}
 }
 
 func TestResolveTaskStoreUsesStableDefaultTaskListPath(t *testing.T) {

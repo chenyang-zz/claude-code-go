@@ -10,13 +10,6 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 )
 
-// jsonEvent is the stable wire format emitted by the JSON output writer.
-type jsonEvent struct {
-	Type      string    `json:"type"`
-	Timestamp time.Time `json:"timestamp"`
-	Payload   any       `json:"payload,omitempty"`
-}
-
 // Writer consumes runtime events and writes one JSON object per line to the configured output.
 type Writer struct {
 	// Output receives newline-delimited JSON event objects.
@@ -33,12 +26,7 @@ func NewWriter(output io.Writer) *Writer {
 
 // WriteEvent serializes one runtime event as a single JSON line.
 func (w *Writer) WriteEvent(evt event.Event) error {
-	je := jsonEvent{
-		Type:      string(evt.Type),
-		Timestamp: evt.Timestamp,
-		Payload:   evt.Payload,
-	}
-	data, err := json.Marshal(je)
+	data, err := json.Marshal(evt)
 	if err != nil {
 		return fmt.Errorf("jsonout: marshal event: %w", err)
 	}
@@ -56,4 +44,19 @@ func (w *Writer) Consume(stream event.Stream) error {
 		}
 	}
 	return nil
+}
+
+// RenderEvent implements the console.EventRenderer interface for JSON output mode.
+func (w *Writer) RenderEvent(evt event.Event) error {
+	return w.WriteEvent(evt)
+}
+
+// RenderLine implements the console.EventRenderer interface by wrapping plain text
+// in a message-delta event so that NDJSON consumers receive structured output.
+func (w *Writer) RenderLine(text string) error {
+	return w.WriteEvent(event.Event{
+		Type:      event.TypeMessageDelta,
+		Timestamp: time.Now(),
+		Payload:   event.MessageDeltaPayload{Text: text},
+	})
 }

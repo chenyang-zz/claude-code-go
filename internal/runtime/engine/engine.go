@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/compact"
-	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
@@ -679,8 +679,9 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 						Type:      event.TypeConversationDone,
 						Timestamp: time.Now(),
 						Payload: event.ConversationDonePayload{
-							History: history.Clone(),
-							Usage:   cumulativeUsage,
+							History:    history.Clone(),
+							Usage:      cumulativeUsage,
+							StopReason: string(result.stopReason),
 						},
 					}
 					return nil
@@ -707,8 +708,9 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),
 				Payload: event.ConversationDonePayload{
-					History: history.Clone(),
-					Usage:   cumulativeUsage,
+					History:    history.Clone(),
+					Usage:      cumulativeUsage,
+					StopReason: string(result.stopReason),
 				},
 			}
 			return nil

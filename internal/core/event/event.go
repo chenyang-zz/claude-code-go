@@ -19,7 +19,7 @@ const (
 )
 
 type Event struct {
-	Type      Type
-	Timestamp time.Time
-	Payload   any
+	Type      Type      `json:"type"`
+	Timestamp time.Time `json:"timestamp"`
+	Payload   any       `json:"payload,omitempty"`
 }

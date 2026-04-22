@@ -90,6 +90,57 @@ func (r *StreamRenderer) RenderEvent(evt event.Event) error {
 		if err := r.Printer.PrintLine(fmt.Sprintf("  Tool progress [%s]: %v", payload.ToolUseID, payload.Data)); err != nil {
 			return err
 		}
+	case event.TypeConversationDone:
+		if err := r.Printer.PrintLine("  (conversation complete)"); err != nil {
+			return err
+		}
+	case event.TypeUsage:
+		payload, ok := evt.Payload.(event.UsagePayload)
+		if !ok {
+			return fmt.Errorf("usage payload type mismatch")
+		}
+		turn := payload.TurnUsage
+		if err := r.Printer.PrintLine(fmt.Sprintf(
+			"  Usage: in=%d out=%d cache_create=%d cache_read=%d (stop: %s)",
+			turn.InputTokens, turn.OutputTokens,
+			turn.CacheCreationInputTokens, turn.CacheReadInputTokens,
+			payload.StopReason,
+		)); err != nil {
+			return err
+		}
+	case event.TypeRetryAttempted:
+		payload, ok := evt.Payload.(event.RetryAttemptedPayload)
+		if !ok {
+			return fmt.Errorf("retry attempted payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf(
+			"  Retry attempt %d/%d (backoff %dms): %s",
+			payload.Attempt, payload.MaxAttempts, payload.BackoffMs, payload.Error,
+		)); err != nil {
+			return err
+		}
+	case event.TypeModelFallback:
+		payload, ok := evt.Payload.(event.ModelFallbackPayload)
+		if !ok {
+			return fmt.Errorf("model fallback payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf(
+			"  Model fallback: %s -> %s",
+			payload.OriginalModel, payload.FallbackModel,
+		)); err != nil {
+			return err
+		}
+	case event.TypeCompactDone:
+		payload, ok := evt.Payload.(event.CompactDonePayload)
+		if !ok {
+			return fmt.Errorf("compact done payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf(
+			"  Compact done: %d -> %d tokens",
+			payload.PreTokenCount, payload.PostTokenCount,
+		)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

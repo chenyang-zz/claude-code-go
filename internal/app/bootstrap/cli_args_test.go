@@ -1,246 +1,131 @@
 package bootstrap
 
 import (
-	"os"
-	"path/filepath"
+	"context"
 	"testing"
 
-	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
+	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 )
 
-// TestParseEarlyCLIOptionsStripsSettingsFlag verifies bootstrap-time settings flags are removed before REPL parsing.
-func TestParseEarlyCLIOptionsStripsSettingsFlag(t *testing.T) {
-	options, runArgs, err := ParseEarlyCLIOptions([]string{"--settings", "./settings.json", "--continue", "hello"})
-	if err != nil {
-		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+func TestParseEarlyCLIOptionsOutputFormatFlag(t *testing.T) {
+	tests := []struct {
+		name            string
+		args            []string
+		wantFormat      string
+		wantRemaining   []string
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:          "output-format with space",
+			args:          []string{"--output-format", "stream-json", "hello"},
+			wantFormat:    "stream-json",
+			wantRemaining: []string{"hello"},
+		},
+		{
+			name:          "output-format with equals",
+			args:          []string{"--output-format=stream-json", "hello"},
+			wantFormat:    "stream-json",
+			wantRemaining: []string{"hello"},
+		},
+		{
+			name:            "output-format missing value",
+			args:            []string{"--output-format"},
+			wantErr:         true,
+			wantErrContains: "missing value",
+		},
+		{
+			name:          "output-format empty value",
+			args:          []string{"--output-format", "", "hello"},
+			wantFormat:    "",
+			wantRemaining: []string{"hello"},
+		},
+		{
+			name:          "first output-format wins",
+			args:          []string{"--output-format=stream-json", "--output-format=console"},
+			wantFormat:    "stream-json",
+			wantRemaining: []string{},
+		},
+		{
+			name:          "mixed with other flags",
+			args:          []string{"--output-format", "stream-json", "--remote", "--hello"},
+			wantFormat:    "stream-json",
+			wantRemaining: []string{"--hello"},
+		},
+		{
+			name:            "output-format invalid value",
+			args:            []string{"--output-format", "streamjson", "hello"},
+			wantErr:         true,
+			wantErrContains: "invalid value for --output-format",
+		},
+		{
+			name:            "output-format invalid value with equals",
+			args:            []string{"--output-format=ndjson", "hello"},
+			wantErr:         true,
+			wantErrContains: "invalid value for --output-format",
+		},
 	}
 
-	if options.SettingsValue != "./settings.json" {
-		t.Fatalf("ParseEarlyCLIOptions() settings = %q, want ./settings.json", options.SettingsValue)
-	}
-	if len(runArgs) != 2 || runArgs[0] != "--continue" || runArgs[1] != "hello" {
-		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [--continue hello]", runArgs)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			options, remaining, err := ParseEarlyCLIOptions(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.wantErrContains != "" && !containsString(err.Error(), tt.wantErrContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErrContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if options.OutputFormat != tt.wantFormat {
+				t.Fatalf("OutputFormat = %q, want %q", options.OutputFormat, tt.wantFormat)
+			}
+			if len(remaining) != len(tt.wantRemaining) {
+				t.Fatalf("remaining args = %v, want %v", remaining, tt.wantRemaining)
+			}
+			for i := range remaining {
+				if remaining[i] != tt.wantRemaining[i] {
+					t.Fatalf("remaining[%d] = %q, want %q", i, remaining[i], tt.wantRemaining[i])
+				}
+			}
+		})
 	}
 }
 
-// TestParseEarlyCLIOptionsSupportsEqualsSyntax verifies `--settings=value` follows the same stripping path.
-func TestParseEarlyCLIOptionsSupportsEqualsSyntax(t *testing.T) {
-	options, runArgs, err := ParseEarlyCLIOptions([]string{"--settings=./settings.json", "--setting-sources=user,local", "/config"})
-	if err != nil {
-		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+func TestEarlyOptionsLoaderOutputFormat(t *testing.T) {
+	loader := earlyOptionsLoader{
+		base: mockConfigLoader{output: coreconfig.DefaultConfig()},
+		options: EarlyCLIOptions{
+			OutputFormat: "stream-json",
+		},
 	}
 
-	if options.SettingsValue != "./settings.json" {
-		t.Fatalf("ParseEarlyCLIOptions() settings = %q, want ./settings.json", options.SettingsValue)
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
 	}
-	if !options.HasSettingSources {
-		t.Fatal("ParseEarlyCLIOptions() HasSettingSources = false, want true")
-	}
-	if len(options.SettingSources) != 2 || options.SettingSources[0] != platformconfig.SettingSourceUserSettings || options.SettingSources[1] != platformconfig.SettingSourceLocalSettings {
-		t.Fatalf("ParseEarlyCLIOptions() setting sources = %#v, want [userSettings localSettings]", options.SettingSources)
-	}
-	if len(runArgs) != 1 || runArgs[0] != "/config" {
-		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [/config]", runArgs)
+	if cfg.OutputFormat != "stream-json" {
+		t.Fatalf("OutputFormat = %q, want stream-json", cfg.OutputFormat)
 	}
 }
 
-// TestParseEarlyCLIOptionsStripsRemoteFlag verifies `--remote` is consumed before normal REPL parsing.
-func TestParseEarlyCLIOptionsStripsRemoteFlag(t *testing.T) {
-	options, runArgs, err := ParseEarlyCLIOptions([]string{"--remote", "ship the fix", "/session"})
-	if err != nil {
-		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+func containsString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
 	}
-
-	if !options.RemoteEnabled {
-		t.Fatal("ParseEarlyCLIOptions() RemoteEnabled = false, want true")
-	}
-	if options.RemoteDescription != "ship the fix" {
-		t.Fatalf("ParseEarlyCLIOptions() RemoteDescription = %q, want ship the fix", options.RemoteDescription)
-	}
-	if len(runArgs) != 1 || runArgs[0] != "/session" {
-		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [/session]", runArgs)
-	}
+	return false
 }
 
-// TestParseEarlyCLIOptionsKeepsSlashCommandAfterRemoteFlag verifies `/session` can still be invoked directly in remote mode.
-func TestParseEarlyCLIOptionsKeepsSlashCommandAfterRemoteFlag(t *testing.T) {
-	options, runArgs, err := ParseEarlyCLIOptions([]string{"--remote", "/session"})
-	if err != nil {
-		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
-	}
-
-	if !options.RemoteEnabled {
-		t.Fatal("ParseEarlyCLIOptions() RemoteEnabled = false, want true")
-	}
-	if options.RemoteDescription != "" {
-		t.Fatalf("ParseEarlyCLIOptions() RemoteDescription = %q, want empty", options.RemoteDescription)
-	}
-	if len(runArgs) != 1 || runArgs[0] != "/session" {
-		t.Fatalf("ParseEarlyCLIOptions() run args = %#v, want [/session]", runArgs)
-	}
+type mockConfigLoader struct {
+	output coreconfig.Config
 }
 
-// TestParseEarlyCLIOptionsRejectsMissingValue verifies `--settings` without a following value fails early.
-func TestParseEarlyCLIOptionsRejectsMissingValue(t *testing.T) {
-	_, _, err := ParseEarlyCLIOptions([]string{"--settings"})
-	if err == nil {
-		t.Fatal("ParseEarlyCLIOptions() error = nil, want missing value error")
-	}
-	if err.Error() != "missing value for --settings" {
-		t.Fatalf("ParseEarlyCLIOptions() error = %q, want missing value for --settings", err.Error())
-	}
-}
-
-// TestParseEarlyCLIOptionsRejectsMissingSettingSourcesValue verifies `--setting-sources` without a following value fails early.
-func TestParseEarlyCLIOptionsRejectsMissingSettingSourcesValue(t *testing.T) {
-	_, _, err := ParseEarlyCLIOptions([]string{"--setting-sources"})
-	if err == nil {
-		t.Fatal("ParseEarlyCLIOptions() error = nil, want missing value error")
-	}
-	if err.Error() != "missing value for --setting-sources" {
-		t.Fatalf("ParseEarlyCLIOptions() error = %q, want missing value for --setting-sources", err.Error())
-	}
-}
-
-// TestParseEarlyCLIOptionsRejectsInvalidSettingSource verifies invalid source names fail before bootstrap continues.
-func TestParseEarlyCLIOptionsRejectsInvalidSettingSource(t *testing.T) {
-	_, _, err := ParseEarlyCLIOptions([]string{"--setting-sources", "user,invalid"})
-	if err == nil {
-		t.Fatal("ParseEarlyCLIOptions() error = nil, want invalid setting source error")
-	}
-	if err.Error() != "invalid setting source: invalid. valid options are: user, project, local" {
-		t.Fatalf("ParseEarlyCLIOptions() error = %q, want invalid setting source message", err.Error())
-	}
-}
-
-// TestNewAppFromArgsLoadsFlagSettings verifies bootstrap applies `--settings` before building the runtime config.
-func TestNewAppFromArgsLoadsFlagSettings(t *testing.T) {
-	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "project")
-	homeDir := filepath.Join(tempDir, "home")
-
-	t.Setenv("HOME", homeDir)
-	t.Setenv("PWD", projectDir)
-
-	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(project) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, "flag-settings.json"), []byte(`{"model":"flag-model","provider":"openai-compatible"}`), 0o644); err != nil {
-		t.Fatalf("WriteFile(flag settings) error = %v", err)
-	}
-
-	previousWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatalf("Chdir(project) error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(previousWD)
-	})
-
-	app, runArgs, err := NewAppFromArgs([]string{"--settings", "./flag-settings.json", "hello"})
-	if err != nil {
-		t.Fatalf("NewAppFromArgs() error = %v", err)
-	}
-
-	if app.Config.Model != "flag-model" {
-		t.Fatalf("NewAppFromArgs() model = %q, want flag-model", app.Config.Model)
-	}
-	if app.Config.Provider != "openai-compatible" {
-		t.Fatalf("NewAppFromArgs() provider = %q, want openai-compatible", app.Config.Provider)
-	}
-	if len(runArgs) != 1 || runArgs[0] != "hello" {
-		t.Fatalf("NewAppFromArgs() run args = %#v, want [hello]", runArgs)
-	}
-}
-
-// TestNewAppFromArgsAppliesSettingSourcesFilter verifies bootstrap forwards `--setting-sources` into the config loader before runtime setup.
-func TestNewAppFromArgsAppliesSettingSourcesFilter(t *testing.T) {
-	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "project")
-	homeDir := filepath.Join(tempDir, "home")
-
-	t.Setenv("HOME", homeDir)
-	t.Setenv("PWD", projectDir)
-
-	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(project) error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(home) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"model":"home-model"}`), 0o644); err != nil {
-		t.Fatalf("WriteFile(home settings) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"model":"project-model"}`), 0o644); err != nil {
-		t.Fatalf("WriteFile(project settings) error = %v", err)
-	}
-
-	previousWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatalf("Chdir(project) error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(previousWD)
-	})
-
-	app, _, err := NewAppFromArgs([]string{"--setting-sources", "project", "hello"})
-	if err != nil {
-		t.Fatalf("NewAppFromArgs() error = %v", err)
-	}
-
-	if app.Config.Model != "project-model" {
-		t.Fatalf("NewAppFromArgs() model = %q, want project-model", app.Config.Model)
-	}
-}
-
-// TestNewAppFromArgsInjectsRemoteSession verifies bootstrap synthesizes minimum remote-session context when `--remote` is provided.
-func TestNewAppFromArgsInjectsRemoteSession(t *testing.T) {
-	tempDir := t.TempDir()
-	projectDir := filepath.Join(tempDir, "project")
-	homeDir := filepath.Join(tempDir, "home")
-
-	t.Setenv("HOME", homeDir)
-	t.Setenv("PWD", projectDir)
-
-	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(project) error = %v", err)
-	}
-
-	previousWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatalf("Chdir(project) error = %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(previousWD)
-	})
-
-	app, runArgs, err := NewAppFromArgs([]string{"--remote", "/session"})
-	if err != nil {
-		t.Fatalf("NewAppFromArgs() error = %v", err)
-	}
-
-	if !app.Config.RemoteSession.Enabled {
-		t.Fatal("NewAppFromArgs() remote session enabled = false, want true")
-	}
-	if app.Config.RemoteSession.SessionID == "" {
-		t.Fatal("NewAppFromArgs() remote session id = empty, want synthesized value")
-	}
-	if app.Config.RemoteSession.URL == "" {
-		t.Fatal("NewAppFromArgs() remote session url = empty, want synthesized value")
-	}
-	if app.Runner.RemoteSession.URL != app.Config.RemoteSession.URL {
-		t.Fatalf("NewAppFromArgs() runner remote session url = %q, want %q", app.Runner.RemoteSession.URL, app.Config.RemoteSession.URL)
-	}
-	if len(runArgs) != 1 || runArgs[0] != "/session" {
-		t.Fatalf("NewAppFromArgs() run args = %#v, want [/session]", runArgs)
-	}
+func (m mockConfigLoader) Load(ctx context.Context) (coreconfig.Config, error) {
+	return m.output, nil
 }

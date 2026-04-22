@@ -77,6 +77,8 @@ type Config struct {
 	Hooks hook.HooksConfig
 	// DisableAllHooks disables all hook execution when set via policy settings.
 	DisableAllHooks bool
+	// OutputFormat selects the output rendering mode (e.g. "console" or "stream-json").
+	OutputFormat string
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.

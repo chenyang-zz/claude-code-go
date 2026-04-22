@@ -26,6 +26,7 @@ import (
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
+	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -62,6 +63,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	if err != nil {
 		return nil, err
 	}
+	configureConsoleLogging(cfg.OutputFormat)
 	applyRuntimeEnvironment(cfg.Env)
 
 	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
@@ -71,7 +73,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		return nil, err
 	}
 
-	renderer := console.NewStreamRenderer(console.NewPrinter(nil))
+	var renderer console.EventRenderer
+	if cfg.OutputFormat == "stream-json" {
+		renderer = jsonout.NewWriter(os.Stdout)
+	} else {
+		renderer = console.NewStreamRenderer(console.NewPrinter(nil))
+	}
 	runner := repl.NewRunner(eng, renderer)
 	runner.ProjectPath = cfg.ProjectPath
 	runner.RemoteSession = cfg.RemoteSession
@@ -108,12 +115,21 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		"model":               cfg.Model,
 		"has_session_db_path": cfg.SessionDBPath != "",
 		"remote_mode":         cfg.RemoteSession.Enabled,
+		"output_format":       cfg.OutputFormat,
 	})
 
 	return &App{
 		Config: cfg,
 		Runner: runner,
 	}, nil
+}
+
+func configureConsoleLogging(outputFormat string) {
+	if outputFormat == "stream-json" {
+		logger.SetConsoleOutput(os.Stderr)
+		return
+	}
+	logger.SetConsoleOutput(os.Stdout)
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
@@ -374,7 +390,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.HookRunner = hookRunner
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
-			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
+			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
 		return runtime, policy, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
@@ -390,12 +406,21 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.HookRunner = hookRunner
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
-			console.NewApprovalRenderer(console.NewPrinter(nil), nil),
+			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// approvalPrinterForConfig returns a printer directed at stderr when stream-json
+// mode is active so that approval prompts do not pollute the NDJSON stdout stream.
+func approvalPrinterForConfig(cfg coreconfig.Config) *console.Printer {
+	if cfg.OutputFormat == "stream-json" {
+		return console.NewPrinter(os.Stderr)
+	}
+	return console.NewPrinter(nil)
 }
 
 // applyRuntimeEnvironment writes the filtered settings-sourced runtime environment variables into the current process.

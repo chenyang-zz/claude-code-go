@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -42,17 +43,26 @@ var (
 func init() {
 	once.Do(func() {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-
-		consoleWriter := zerolog.ConsoleWriter{
-			Out:        os.Stdout,
-			TimeFormat: "15:04:05", // @todo make it configurable
-			// Custom formatter to handle multiline strings and JSON objects
-			FormatFieldValue: formatFieldValue,
-		}
-
-		logger = zerolog.New(consoleWriter).With().Timestamp().Caller().Logger()
+		logger = buildConsoleLogger(os.Stdout, zerolog.NoLevel)
 		fileLogger = zerolog.Logger{}
 	})
+}
+
+func buildConsoleLogger(output io.Writer, level zerolog.Level) zerolog.Logger {
+	if output == nil {
+		output = os.Stdout
+	}
+	consoleWriter := zerolog.ConsoleWriter{
+		Out:        output,
+		TimeFormat: "15:04:05", // @todo make it configurable
+		// Custom formatter to handle multiline strings and JSON objects
+		FormatFieldValue: formatFieldValue,
+	}
+	consoleLogger := zerolog.New(consoleWriter).With().Timestamp().Caller().Logger()
+	if level != zerolog.NoLevel {
+		consoleLogger = consoleLogger.Level(level)
+	}
+	return consoleLogger
 }
 
 func formatFieldValue(i any) string {
@@ -97,6 +107,12 @@ func SetConsoleLevel(level LogLevel) {
 	mu.Lock()
 	defer mu.Unlock()
 	logger = logger.Level(level)
+}
+
+func SetConsoleOutput(output io.Writer) {
+	mu.Lock()
+	defer mu.Unlock()
+	logger = buildConsoleLogger(output, logger.GetLevel())
 }
 
 func GetLevel() LogLevel {

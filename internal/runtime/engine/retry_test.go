@@ -72,6 +72,13 @@ func TestRuntimeRunStopReasonEndTurn(t *testing.T) {
 	if doneEvent.Type != event.TypeConversationDone {
 		t.Fatalf("done event type = %q, want conversation.done", doneEvent.Type)
 	}
+	donePayload, ok := doneEvent.Payload.(event.ConversationDonePayload)
+	if !ok {
+		t.Fatalf("done payload type = %T, want ConversationDonePayload", doneEvent.Payload)
+	}
+	if donePayload.StopReason != "end_turn" {
+		t.Fatalf("done stop reason = %q, want end_turn", donePayload.StopReason)
+	}
 }
 
 // TestRuntimeRunUsageAccumulation verifies that usage is accumulated across multiple model calls in the tool loop.

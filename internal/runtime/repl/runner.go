@@ -36,7 +36,7 @@ type Runner struct {
 	// Engine handles normal prompt execution.
 	Engine engine.Engine
 	// Renderer handles console output for both engine events and slash placeholders.
-	Renderer *console.StreamRenderer
+	Renderer console.EventRenderer
 	// Commands resolves registered slash handlers for REPL dispatch.
 	Commands command.Registry
 	// ProjectPath identifies the current workspace used for project-scoped session recovery.
@@ -63,7 +63,7 @@ type Runner struct {
 }
 
 // NewRunner builds a runner from explicit dependencies.
-func NewRunner(eng engine.Engine, renderer *console.StreamRenderer) *Runner {
+func NewRunner(eng engine.Engine, renderer console.EventRenderer) *Runner {
 	return &Runner{
 		Engine:   eng,
 		Renderer: renderer,
