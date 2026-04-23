@@ -6,6 +6,12 @@ type ContentPart struct {
 	Type string `json:"type"`
 	// Text stores the plain text payload for text blocks and the rendered content for tool_result blocks.
 	Text string `json:"text,omitempty"`
+	// Thinking stores the thinking content for thinking blocks.
+	Thinking string `json:"thinking,omitempty"`
+	// Signature stores the thinking signature for thinking blocks.
+	Signature string `json:"signature,omitempty"`
+	// Data stores opaque data for redacted_thinking blocks.
+	Data string `json:"data,omitempty"`
 	// IsMeta reports whether a text block carries runtime metadata rather than a natural-language user turn.
 	IsMeta bool `json:"is_meta,omitempty"`
 	// ToolUseID stores the correlation identifier shared by tool_use and tool_result blocks.
@@ -53,5 +59,22 @@ func ToolResultPart(toolUseID, content string, isError bool) ContentPart {
 		Text:      content,
 		ToolUseID: toolUseID,
 		IsError:   isError,
+	}
+}
+
+// ThinkingPart builds one assistant thinking content block.
+func ThinkingPart(thinking, signature string) ContentPart {
+	return ContentPart{
+		Type:      "thinking",
+		Thinking:  thinking,
+		Signature: signature,
+	}
+}
+
+// RedactedThinkingPart builds one assistant redacted_thinking content block.
+func RedactedThinkingPart(data string) ContentPart {
+	return ContentPart{
+		Type: "redacted_thinking",
+		Data: data,
 	}
 }

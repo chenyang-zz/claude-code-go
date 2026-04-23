@@ -229,6 +229,32 @@ func TestStreamRendererCompactDone(t *testing.T) {
 	}
 }
 
+func TestStreamRendererThinking(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewStreamRenderer(NewPrinter(&buf))
+
+	err := r.RenderEvent(event.Event{
+		Type:      event.TypeThinking,
+		Timestamp: time.Now(),
+		Payload: event.ThinkingPayload{
+			Thinking:  "analysis content",
+			Signature: "sig123",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderEvent() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "<thinking>") {
+		t.Fatalf("output = %q, want thinking tag", buf.String())
+	}
+	if !strings.Contains(buf.String(), "analysis content") {
+		t.Fatalf("output = %q, want analysis content", buf.String())
+	}
+	if !strings.Contains(buf.String(), "</thinking>") {
+		t.Fatalf("output = %q, want closing thinking tag", buf.String())
+	}
+}
+
 func TestStreamRendererWrongPayloadType(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewStreamRenderer(NewPrinter(&buf))

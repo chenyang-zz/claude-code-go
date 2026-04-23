@@ -65,6 +65,9 @@ type anthropicMessage struct {
 type anthropicContentBlock struct {
 	Type      string         `json:"type"`
 	Text      string         `json:"text,omitempty"`
+	Thinking  string         `json:"thinking,omitempty"`
+	Signature string         `json:"signature,omitempty"`
+	Data      string         `json:"data,omitempty"`
 	ID        string         `json:"id,omitempty"`
 	Name      string         `json:"name,omitempty"`
 	Input     map[string]any `json:"input,omitempty"`
@@ -100,14 +103,20 @@ type streamContentBlock struct {
 	toolID    string
 	toolName  string
 	inputJSON strings.Builder
+	thinking  strings.Builder
+	signature string
+	data      string
 }
 
 type contentBlockStartEnvelope struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		Type      string `json:"type"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Thinking  string `json:"thinking,omitempty"`
+		Signature string `json:"signature,omitempty"`
+		Data      string `json:"data,omitempty"`
 	} `json:"content_block"`
 }
 
@@ -116,6 +125,8 @@ type contentBlockDeltaEnvelope struct {
 	Delta struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
+		Thinking    string `json:"thinking,omitempty"`
+		Signature   string `json:"signature,omitempty"`
 		PartialJSON string `json:"partial_json"`
 	} `json:"delta"`
 }
@@ -371,11 +382,21 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 			}
 			return
 		}
-		if payload.ContentBlock.Type == "tool_use" {
+		switch payload.ContentBlock.Type {
+		case "tool_use":
 			contentBlocks[payload.Index] = &streamContentBlock{
 				blockType: payload.ContentBlock.Type,
 				toolID:    payload.ContentBlock.ID,
 				toolName:  payload.ContentBlock.Name,
+			}
+		case "thinking":
+			contentBlocks[payload.Index] = &streamContentBlock{
+				blockType: payload.ContentBlock.Type,
+			}
+		case "redacted_thinking":
+			contentBlocks[payload.Index] = &streamContentBlock{
+				blockType: payload.ContentBlock.Type,
+				data:      payload.ContentBlock.Data,
 			}
 		}
 	case "content_block_delta":
@@ -392,6 +413,28 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 				Type: model.EventTypeTextDelta,
 				Text: payload.Delta.Text,
 			}
+		}
+		if payload.Delta.Type == "thinking_delta" {
+			block, ok := contentBlocks[payload.Index]
+			if !ok || block.blockType != "thinking" {
+				out <- model.Event{
+					Type:  model.EventTypeError,
+					Error: "received thinking delta for unknown content block",
+				}
+				return
+			}
+			block.thinking.WriteString(payload.Delta.Thinking)
+		}
+		if payload.Delta.Type == "signature_delta" {
+			block, ok := contentBlocks[payload.Index]
+			if !ok || (block.blockType != "thinking" && block.blockType != "connector_text") {
+				out <- model.Event{
+					Type:  model.EventTypeError,
+					Error: "received signature delta for unknown content block",
+				}
+				return
+			}
+			block.signature = payload.Delta.Signature
 		}
 		if payload.Delta.Type == "input_json_delta" {
 			block, ok := contentBlocks[payload.Index]
@@ -415,27 +458,41 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 		}
 
 		block, ok := contentBlocks[payload.Index]
-		if !ok || block.blockType != "tool_use" {
+		if !ok {
 			return
 		}
 		defer delete(contentBlocks, payload.Index)
 
-		input, err := parseToolUseInput(block.inputJSON.String())
-		if err != nil {
-			out <- model.Event{
-				Type:  model.EventTypeError,
-				Error: fmt.Sprintf("parse anthropic tool use input: %v", err),
+		switch block.blockType {
+		case "tool_use":
+			input, err := parseToolUseInput(block.inputJSON.String())
+			if err != nil {
+				out <- model.Event{
+					Type:  model.EventTypeError,
+					Error: fmt.Sprintf("parse anthropic tool use input: %v", err),
+				}
+				return
 			}
-			return
-		}
-
-		out <- model.Event{
-			Type: model.EventTypeToolUse,
-			ToolUse: &model.ToolUse{
-				ID:    block.toolID,
-				Name:  block.toolName,
-				Input: input,
-			},
+			out <- model.Event{
+				Type: model.EventTypeToolUse,
+				ToolUse: &model.ToolUse{
+					ID:    block.toolID,
+					Name:  block.toolName,
+					Input: input,
+				},
+			}
+		case "thinking":
+			out <- model.Event{
+				Type:      model.EventTypeThinking,
+				Thinking:  block.thinking.String(),
+				Signature: block.signature,
+			}
+		case "redacted_thinking":
+			out <- model.Event{
+				Type:      model.EventTypeThinking,
+				Thinking:  block.data,
+				Signature: "",
+			}
 		}
 	case "error":
 		var payload errorEnvelope
@@ -497,6 +554,17 @@ func mapMessages(messages []message.Message) []anthropicMessage {
 					ToolUseID: part.ToolUseID,
 					Content:   part.Text,
 					IsError:   part.IsError,
+				})
+			case "thinking":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type:      "thinking",
+					Thinking:  part.Thinking,
+					Signature: part.Signature,
+				})
+			case "redacted_thinking":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type: "redacted_thinking",
+					Data: part.Data,
 				})
 			}
 		}

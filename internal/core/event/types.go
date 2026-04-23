@@ -10,6 +10,12 @@ type MessageDeltaPayload struct {
 	Text string `json:"text"`
 }
 
+// ThinkingPayload carries one complete assistant thinking block rendered to the caller.
+type ThinkingPayload struct {
+	Thinking  string `json:"thinking"`
+	Signature string `json:"signature,omitempty"`
+}
+
 // ToolCallPayload describes one tool_use event surfaced to the runtime caller.
 type ToolCallPayload struct {
 	ID    string         `json:"id"`

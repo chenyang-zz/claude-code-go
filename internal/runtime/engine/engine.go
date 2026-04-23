@@ -1190,6 +1190,16 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *St
 			}()
 			// Discard collected events — this attempt failed.
 			return streamResult{}, errors.New(errMsg)
+		case model.EventTypeThinking:
+			assistant.Content = append(assistant.Content, message.ThinkingPart(item.Thinking, item.Signature))
+			events = append(events, event.Event{
+				Type:      event.TypeThinking,
+				Timestamp: time.Now(),
+				Payload: event.ThinkingPayload{
+					Thinking:  item.Thinking,
+					Signature: item.Signature,
+				},
+			})
 		case model.EventTypeToolUse:
 			if item.ToolUse == nil {
 				return streamResult{}, fmt.Errorf("tool use event missing payload")

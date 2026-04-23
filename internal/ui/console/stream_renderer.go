@@ -42,6 +42,14 @@ func (r *StreamRenderer) RenderEvent(evt event.Event) error {
 		if err := r.Printer.Print(payload.Text); err != nil {
 			return err
 		}
+	case event.TypeThinking:
+		payload, ok := evt.Payload.(event.ThinkingPayload)
+		if !ok {
+			return fmt.Errorf("thinking payload type mismatch")
+		}
+		if err := r.Printer.PrintLine(fmt.Sprintf("  <thinking> %s </thinking>", payload.Thinking)); err != nil {
+			return err
+		}
 	case event.TypeError:
 		payload, ok := evt.Payload.(event.ErrorPayload)
 		if !ok {

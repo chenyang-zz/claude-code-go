@@ -431,6 +431,152 @@ func TestClientStreamTaskBudgetNotFirstParty(t *testing.T) {
 	}
 }
 
+// TestClientStreamReadsThinking verifies Anthropic thinking SSE payloads are mapped into shared thinking events.
+func TestClientStreamReadsThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me analyze\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig123\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_stop\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	evt := <-stream
+	if evt.Type != model.EventTypeThinking {
+		t.Fatalf("Stream() first event type = %q, want thinking", evt.Type)
+	}
+	if evt.Thinking != "Let me analyze" {
+		t.Fatalf("Stream() thinking = %q, want Let me analyze", evt.Thinking)
+	}
+	if evt.Signature != "sig123" {
+		t.Fatalf("Stream() signature = %q, want sig123", evt.Signature)
+	}
+}
+
+// TestClientStreamReadsRedactedThinking verifies Anthropic redacted_thinking SSE payloads are mapped into shared thinking events.
+func TestClientStreamReadsRedactedThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"redacted_data_abc\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_stop\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	evt := <-stream
+	if evt.Type != model.EventTypeThinking {
+		t.Fatalf("Stream() first event type = %q, want thinking", evt.Type)
+	}
+	if evt.Thinking != "redacted_data_abc" {
+		t.Fatalf("Stream() thinking = %q, want redacted_data_abc", evt.Thinking)
+	}
+}
+
+// TestClientStreamMapsThinkingMessages verifies assistant thinking and redacted_thinking history are preserved in the Anthropic request body.
+func TestClientStreamMapsThinkingMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 2 {
+			t.Fatalf("request messages = %#v, want 2 messages", body["messages"])
+		}
+
+		assistant, ok := messages[1].(map[string]any)
+		if !ok {
+			t.Fatalf("assistant message = %#v, want object", messages[1])
+		}
+		assistantContent, ok := assistant["content"].([]any)
+		if !ok || len(assistantContent) != 2 {
+			t.Fatalf("assistant content = %#v, want 2 blocks", assistant["content"])
+		}
+
+		thinking, ok := assistantContent[0].(map[string]any)
+		if !ok {
+			t.Fatalf("thinking block = %#v, want object", assistantContent[0])
+		}
+		if thinking["type"] != "thinking" || thinking["thinking"] != "analysis" || thinking["signature"] != "sig" {
+			t.Fatalf("thinking block = %#v", thinking)
+		}
+
+		redacted, ok := assistantContent[1].(map[string]any)
+		if !ok {
+			t.Fatalf("redacted block = %#v, want object", assistantContent[1])
+		}
+		if redacted["type"] != "redacted_thinking" || redacted["data"] != "opaque" {
+			t.Fatalf("redacted block = %#v", redacted)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("hello"),
+				},
+			},
+			{
+				Role: message.RoleAssistant,
+				Content: []message.ContentPart{
+					message.ThinkingPart("analysis", "sig"),
+					message.RedactedThinkingPart("opaque"),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
 // TestClientStreamTaskBudgetNoRemaining verifies that remaining is omitted
 // from the wire format when not set.
 func TestClientStreamTaskBudgetNoRemaining(t *testing.T) {

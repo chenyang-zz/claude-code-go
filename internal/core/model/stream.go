@@ -6,6 +6,8 @@ type EventType string
 const (
 	// EventTypeTextDelta carries one assistant text chunk.
 	EventTypeTextDelta EventType = "text_delta"
+	// EventTypeThinking carries one complete assistant thinking block.
+	EventTypeThinking EventType = "thinking"
 	// EventTypeToolUse carries one assistant tool-use block after its JSON input is complete.
 	EventTypeToolUse EventType = "tool_use"
 	// EventTypeError carries a provider-facing failure converted into stream form.
@@ -32,6 +34,8 @@ const (
 type Event struct {
 	Type       EventType
 	Text       string
+	Thinking   string
+	Signature  string
 	Error      string
 	ToolUse    *ToolUse
 	StopReason StopReason

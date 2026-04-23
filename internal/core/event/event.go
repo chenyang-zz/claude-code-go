@@ -6,6 +6,7 @@ type Type string
 
 const (
 	TypeMessageDelta     Type = "message.delta"
+	TypeThinking         Type = "thinking"
 	TypeToolCallStarted  Type = "tool.call.started"
 	TypeToolCallFinished Type = "tool.call.finished"
 	TypeApprovalRequired Type = "approval.required"

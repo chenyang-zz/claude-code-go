@@ -220,6 +220,61 @@ func TestRuntimeRunConvertsToolUse(t *testing.T) {
 	}
 }
 
+// TestRuntimeRunConvertsThinking verifies provider thinking events become runtime thinking events
+// and are included in the assistant message content.
+func TestRuntimeRunConvertsThinking(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{
+					Type:      model.EventTypeThinking,
+					Thinking:  "analysis content",
+					Signature: "sig123",
+				},
+				model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+			),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello world",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	evt := <-out
+	if evt.Type != event.TypeThinking {
+		t.Fatalf("Run() event type = %q, want thinking", evt.Type)
+	}
+
+	payload, ok := evt.Payload.(event.ThinkingPayload)
+	if !ok {
+		t.Fatalf("Run() payload type = %T, want event.ThinkingPayload", evt.Payload)
+	}
+	if payload.Thinking != "analysis content" {
+		t.Fatalf("Run() thinking = %q, want analysis content", payload.Thinking)
+	}
+	if payload.Signature != "sig123" {
+		t.Fatalf("Run() signature = %q, want sig123", payload.Signature)
+	}
+
+	// Drain remaining events
+	for range out {
+	}
+
+	// Verify assistant message contains thinking content
+	if len(client.requests) != 1 {
+		t.Fatalf("Stream() call count = %d, want 1", len(client.requests))
+	}
+	msg := client.requests[0].Messages[0]
+	if msg.Role != message.RoleUser || len(msg.Content) != 1 {
+		t.Fatalf("Stream() request first message = %#v, want one user text message", msg)
+	}
+}
+
 func TestRuntimeRunStopHooksUseRequestCWD(t *testing.T) {
 	client := &fakeModelClient{
 		streams: []model.Stream{
