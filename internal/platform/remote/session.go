@@ -27,13 +27,15 @@ type SessionCallbacks struct {
 }
 
 // SessionManager coordinates remote event classification, permission request
-// tracking, and control message responses for one remote session.
+// tracking, control message responses, and subagent state for one remote session.
 type SessionManager struct {
 	config    coreconfig.RemoteSessionConfig
 	sender    MessageSender
 	callbacks SessionCallbacks
 	mu        sync.Mutex
 	pending   map[string]*sdk.ControlPermissionRequest
+	// Subagents tracks known subagent states observed from the remote session.
+	Subagents *SubagentRegistry
 }
 
 // NewSessionManager constructs one session manager with the given config,
@@ -44,6 +46,7 @@ func NewSessionManager(config coreconfig.RemoteSessionConfig, sender MessageSend
 		sender:    sender,
 		callbacks: callbacks,
 		pending:   make(map[string]*sdk.ControlPermissionRequest),
+		Subagents: NewSubagentRegistry(),
 	}
 }
 
@@ -69,6 +72,7 @@ func (s *SessionManager) HandleEvent(evt Event) {
 	case CategoryControlResponse:
 		logger.DebugCF("remote_session", "received control response", nil)
 	case CategorySDKMessage:
+		s.trackSubagentFromEvent(evt.Data)
 		if s.callbacks.OnSDKMessage != nil {
 			s.callbacks.OnSDKMessage(evt.Data)
 		}
@@ -139,7 +143,7 @@ func (s *SessionManager) SendInterrupt() error {
 	return nil
 }
 
-// Disconnect clears all pending permission state.
+// Disconnect clears all pending permission state and subagent tracking.
 func (s *SessionManager) Disconnect() {
 	if s == nil {
 		return
@@ -147,6 +151,35 @@ func (s *SessionManager) Disconnect() {
 	s.mu.Lock()
 	s.pending = make(map[string]*sdk.ControlPermissionRequest)
 	s.mu.Unlock()
+	if s.Subagents != nil {
+		s.Subagents.Clear()
+	}
+}
+
+// SubagentCount returns the number of known subagents. Implements RemoteSubagentStateProvider.
+func (s *SessionManager) SubagentCount() int {
+	if s == nil || s.Subagents == nil {
+		return 0
+	}
+	return s.Subagents.Count()
+}
+
+// SubagentList returns a snapshot of all known subagent states. Implements RemoteSubagentStateProvider.
+func (s *SessionManager) SubagentList() []SubagentStateView {
+	if s == nil || s.Subagents == nil {
+		return nil
+	}
+	states := s.Subagents.List()
+	result := make([]SubagentStateView, len(states))
+	for i, st := range states {
+		result[i] = SubagentStateView{
+			AgentID:    st.AgentID,
+			AgentType:  st.AgentType,
+			Status:     st.Status,
+			EventCount: st.EventCount,
+		}
+	}
+	return result
 }
 
 // PendingCount returns the number of pending permission requests.
@@ -231,6 +264,24 @@ func (s *SessionManager) handleControlCancelRequest(data []byte) {
 	if s.callbacks.OnPermissionCancelled != nil {
 		s.callbacks.OnPermissionCancelled(req.RequestID, toolUseID)
 	}
+}
+
+// trackSubagentFromEvent inspects the raw JSON payload for an agent_id field
+// and updates the subagent registry when one is found.
+func (s *SessionManager) trackSubagentFromEvent(data []byte) {
+	if s == nil || s.Subagents == nil {
+		return
+	}
+	var envelope struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return
+	}
+	if envelope.AgentID == "" {
+		return
+	}
+	s.Subagents.UpdateFromEvent(InternalEvent{AgentID: envelope.AgentID})
 }
 
 func (s *SessionManager) sendControlResponse(resp *sdk.ControlResponse) error {

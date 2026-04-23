@@ -9,6 +9,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -44,6 +45,8 @@ type SessionCommand struct {
 	StateProvider RemoteStateProvider
 	// SendStateProvider supplies optional HTTP POST sender state for observability output.
 	SendStateProvider RemoteSendStateProvider
+	// SubagentStateProvider supplies optional subagent state for observability output.
+	SubagentStateProvider remote.RemoteSubagentStateProvider
 }
 
 // Metadata returns the canonical slash descriptor for /session.
@@ -66,7 +69,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 			"remote_session_url":    c.RemoteSession.URL,
 		})
 		return command.Result{
-			Output: renderRemoteSession(c.RemoteSession, c.StateProvider, c.SendStateProvider),
+			Output: renderRemoteSession(c.RemoteSession, c.StateProvider, c.SendStateProvider, c.SubagentStateProvider),
 		}, nil
 	}
 
@@ -80,7 +83,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 }
 
 // renderRemoteSession formats the remote session details including QR code, URL, and optional live state.
-func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider, sendState RemoteSendStateProvider) string {
+func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider, sendState RemoteSendStateProvider, subagentState remote.RemoteSubagentStateProvider) string {
 	var b strings.Builder
 	b.WriteString("Remote session\n")
 	b.WriteString(renderTextQRCode(remote.URL))
@@ -88,13 +91,13 @@ func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStat
 	b.WriteString(remote.URL)
 	if state != nil {
 		b.WriteString("\n\nConnection state:\n")
-		b.WriteString(fmt.Sprintf("  Status: %s\n", state.ConnectionState()))
-		b.WriteString(fmt.Sprintf("  Subscriptions active: %d\n", state.ActiveSubscriptionCount()))
-		b.WriteString(fmt.Sprintf("  Reconnections: %d\n", state.ReconnectCount()))
+		fmt.Fprintf(&b, "  Status: %s\n", state.ConnectionState())
+		fmt.Fprintf(&b, "  Subscriptions active: %d\n", state.ActiveSubscriptionCount())
+		fmt.Fprintf(&b, "  Reconnections: %d\n", state.ReconnectCount())
 		if lastErr := state.LastDisconnectError(); lastErr != nil {
-			b.WriteString(fmt.Sprintf("  Last disconnect: %s", lastErr.Error()))
+			fmt.Fprintf(&b, "  Last disconnect: %s", lastErr.Error())
 			if !state.LastDisconnectTime().IsZero() {
-				b.WriteString(fmt.Sprintf(" (%s ago)", time.Since(state.LastDisconnectTime()).Round(time.Second).String()))
+				fmt.Fprintf(&b, " (%s ago)", time.Since(state.LastDisconnectTime()).Round(time.Second).String())
 			}
 			b.WriteString("\n")
 		}
@@ -102,15 +105,35 @@ func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStat
 		if state.IsClosed() {
 			closedStr = "yes (closed)"
 		}
-		b.WriteString(fmt.Sprintf("  Lifecycle closed: %s", closedStr))
+		fmt.Fprintf(&b, "  Lifecycle closed: %s", closedStr)
 	}
 	if sendState != nil {
 		b.WriteString("\n\nWrite path:\n")
-		b.WriteString(fmt.Sprintf("  HTTP POST sends: %d\n", sendState.SendCount()))
+		fmt.Fprintf(&b, "  HTTP POST sends: %d\n", sendState.SendCount())
 		if last := sendState.LastSendTime(); !last.IsZero() {
-			b.WriteString(fmt.Sprintf("  Last send: %s ago", time.Since(last).Round(time.Second).String()))
+			fmt.Fprintf(&b, "  Last send: %s ago", time.Since(last).Round(time.Second).String())
 		} else {
 			b.WriteString("  Last send: never")
+		}
+	}
+	if subagentState != nil {
+		b.WriteString("\n\nSubagents:\n")
+		agents := subagentState.SubagentList()
+		if len(agents) == 0 {
+			b.WriteString("  No subagents observed.")
+		} else {
+			fmt.Fprintf(&b, "  Known subagents: %d\n", subagentState.SubagentCount())
+			for _, a := range agents {
+				fmt.Fprintf(&b, "  - %s", a.AgentID)
+				if a.AgentType != "" {
+					fmt.Fprintf(&b, " (%s)", a.AgentType)
+				}
+				fmt.Fprintf(&b, ": %s", a.Status)
+				if a.EventCount > 0 {
+					fmt.Fprintf(&b, ", events: %d", a.EventCount)
+				}
+				b.WriteString("\n")
+			}
 		}
 	}
 	return b.String()

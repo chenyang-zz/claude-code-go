@@ -237,6 +237,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}
 	var stateProvider servicecommands.RemoteStateProvider
 	var sendStateProvider servicecommands.RemoteSendStateProvider
+	var subagentStateProvider platformremote.RemoteSubagentStateProvider
 	if runner != nil {
 		stateProvider = runner.RemoteLifecycle
 		if sender, ok := runner.RemoteSender.(servicecommands.RemoteSendStateProvider); ok {
@@ -244,9 +245,10 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		}
 	}
 	if err := registry.Register(servicecommands.SessionCommand{
-		RemoteSession:     cfg.RemoteSession,
-		StateProvider:     stateProvider,
-		SendStateProvider: sendStateProvider,
+		RemoteSession:         cfg.RemoteSession,
+		StateProvider:         stateProvider,
+		SendStateProvider:     sendStateProvider,
+		SubagentStateProvider: subagentStateProvider,
 	}); err != nil {
 		return nil, err
 	}

@@ -289,3 +289,66 @@ type failingMockSender struct {
 func (f *failingMockSender) Send(data []byte) error {
 	return f.err
 }
+
+func TestSessionManagerTracksSubagentFromEvent(t *testing.T) {
+	sender := &mockSender{}
+	sm := NewSessionManager(config.RemoteSessionConfig{}, sender, SessionCallbacks{})
+
+	// SDK message with agent_id
+	payload := `{"type":"assistant","message":{"role":"assistant","content":"hello"},"agent_id":"agent-1"}`
+	sm.HandleEvent(Event{Data: []byte(payload)})
+
+	if sm.SubagentCount() != 1 {
+		t.Errorf("subagentCount = %v, want 1", sm.SubagentCount())
+	}
+
+	list := sm.SubagentList()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 subagent, got %d", len(list))
+	}
+	if list[0].AgentID != "agent-1" {
+		t.Errorf("agentID = %v, want agent-1", list[0].AgentID)
+	}
+	if list[0].EventCount != 1 {
+		t.Errorf("eventCount = %v, want 1", list[0].EventCount)
+	}
+}
+
+func TestSessionManagerIgnoresForegroundEvent(t *testing.T) {
+	sender := &mockSender{}
+	sm := NewSessionManager(config.RemoteSessionConfig{}, sender, SessionCallbacks{})
+
+	// SDK message without agent_id
+	payload := `{"type":"assistant","message":{"role":"assistant","content":"hello"}}`
+	sm.HandleEvent(Event{Data: []byte(payload)})
+
+	if sm.SubagentCount() != 0 {
+		t.Errorf("subagentCount = %v, want 0", sm.SubagentCount())
+	}
+}
+
+func TestSessionManagerDisconnectClearsSubagents(t *testing.T) {
+	sender := &mockSender{}
+	sm := NewSessionManager(config.RemoteSessionConfig{}, sender, SessionCallbacks{})
+
+	payload := `{"type":"assistant","agent_id":"agent-1"}`
+	sm.HandleEvent(Event{Data: []byte(payload)})
+	if sm.SubagentCount() != 1 {
+		t.Fatalf("expected 1 subagent before disconnect")
+	}
+
+	sm.Disconnect()
+	if sm.SubagentCount() != 0 {
+		t.Errorf("subagentCount after disconnect = %v, want 0", sm.SubagentCount())
+	}
+}
+
+func TestSessionManagerSubagentListNilSafety(t *testing.T) {
+	var sm *SessionManager
+	if sm.SubagentCount() != 0 {
+		t.Errorf("expected 0 for nil")
+	}
+	if sm.SubagentList() != nil {
+		t.Errorf("expected nil for nil")
+	}
+}

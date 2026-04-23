@@ -10,6 +10,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 )
 
 // TestSessionCommandMetadata verifies /session keeps the source-compatible descriptor.
@@ -209,5 +210,85 @@ func TestSessionCommandExecuteRendersSendStateNever(t *testing.T) {
 
 	if !strings.Contains(result.Output, "Last send: never") {
 		t.Fatalf("Execute() output = %q, want last send never", result.Output)
+	}
+}
+
+// stubRemoteSubagentStateProvider implements remote.RemoteSubagentStateProvider for test assertions.
+type stubRemoteSubagentStateProvider struct {
+	count int
+	list  []remote.SubagentStateView
+}
+
+func (s *stubRemoteSubagentStateProvider) SubagentCount() int                  { return s.count }
+func (s *stubRemoteSubagentStateProvider) SubagentList() []remote.SubagentStateView { return s.list }
+
+// TestSessionCommandExecuteRendersSubagentState verifies `/session` surfaces subagent state.
+func TestSessionCommandExecuteRendersSubagentState(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		SubagentStateProvider: &stubRemoteSubagentStateProvider{
+			count: 2,
+			list: []remote.SubagentStateView{
+				{AgentID: "agent-1", AgentType: "general-purpose", Status: "active", EventCount: 5},
+				{AgentID: "agent-2", Status: "stopped", EventCount: 1},
+			},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Subagents:") {
+		t.Fatalf("Execute() output = %q, want Subagents section", result.Output)
+	}
+	if !strings.Contains(result.Output, "Known subagents: 2") {
+		t.Fatalf("Execute() output = %q, want subagent count 2", result.Output)
+	}
+	if !strings.Contains(result.Output, "agent-1 (general-purpose): active, events: 5") {
+		t.Fatalf("Execute() output = %q, want agent-1 details", result.Output)
+	}
+	if !strings.Contains(result.Output, "agent-2: stopped, events: 1") {
+		t.Fatalf("Execute() output = %q, want agent-2 details", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteRendersSubagentEmpty verifies `/session` shows empty subagent state.
+func TestSessionCommandExecuteRendersSubagentEmpty(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		SubagentStateProvider: &stubRemoteSubagentStateProvider{count: 0, list: []remote.SubagentStateView{}},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "No subagents observed.") {
+		t.Fatalf("Execute() output = %q, want no subagents", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteOmitsSubagentSectionWithoutProvider verifies `/session` omits subagent section when no provider is wired.
+func TestSessionCommandExecuteOmitsSubagentSectionWithoutProvider(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if strings.Contains(result.Output, "Subagents:") {
+		t.Fatalf("Execute() output unexpectedly contains subagents section without provider")
 	}
 }
