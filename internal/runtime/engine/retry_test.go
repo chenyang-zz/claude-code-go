@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 )
 
 type wrappedNetError struct {
@@ -838,5 +840,226 @@ func TestIsPromptTooLongError(t *testing.T) {
 	// nil error should return false.
 	if isPromptTooLongError(nil) {
 		t.Error("isPromptTooLongError(nil) = true, want false")
+	}
+}
+
+// retryableErrorStub is a test stub that implements model.RetryableError.
+type retryableErrorStub struct {
+	msg       string
+	retryable bool
+	after     time.Duration
+}
+
+func (e *retryableErrorStub) Error() string   { return e.msg }
+func (e *retryableErrorStub) IsRetryable() bool { return e.retryable }
+func (e *retryableErrorStub) RetryAfter() time.Duration { return e.after }
+
+// TestIsRetriableErrorWithRetryableError verifies isRetriableError respects model.RetryableError.
+func TestIsRetriableErrorWithRetryableError(t *testing.T) {
+	// Retryable error stub should be retried.
+	retryable := &retryableErrorStub{msg: "transient failure", retryable: true}
+	if !isRetriableError(retryable) {
+		t.Error("isRetriableError(retryable stub) = false, want true")
+	}
+
+	// Non-retryable error stub should NOT be retried.
+	fatal := &retryableErrorStub{msg: "fatal failure", retryable: false}
+	if isRetriableError(fatal) {
+		t.Error("isRetriableError(fatal stub) = true, want false")
+	}
+
+	// Wrapped retryable error should still be detected via errors.As.
+	wrapped := fmt.Errorf("wrapped: %w", &retryableErrorStub{msg: "wrapped transient", retryable: true})
+	if !isRetriableError(wrapped) {
+		t.Error("isRetriableError(wrapped retryable) = false, want true")
+	}
+}
+
+// TestIsRetriableErrorWithAnthropicAPIError verifies isRetriableError works with *anthropic.APIError.
+func TestIsRetriableErrorWithAnthropicAPIError(t *testing.T) {
+	// Rate limit error (429) should be retriable.
+	rateLimitErr := &anthropic.APIError{
+		Status:  429,
+		Type:    anthropic.ErrorTypeRateLimit,
+		Message: "rate limit exceeded",
+	}
+	if !isRetriableError(rateLimitErr) {
+		t.Error("isRetriableError(rate limit APIError) = false, want true")
+	}
+
+	// Overloaded error (529) should be retriable.
+	overloadedErr := &anthropic.APIError{
+		Status:  529,
+		Type:    anthropic.ErrorTypeOverloaded,
+		Message: "overloaded",
+	}
+	if !isRetriableError(overloadedErr) {
+		t.Error("isRetriableError(overloaded APIError) = false, want true")
+	}
+
+	// Bad request (400) should NOT be retriable.
+	badRequestErr := &anthropic.APIError{
+		Status:  400,
+		Type:    anthropic.ErrorTypeInvalidRequest,
+		Message: "invalid request",
+	}
+	if isRetriableError(badRequestErr) {
+		t.Error("isRetriableError(bad request APIError) = true, want false")
+	}
+
+	// Wrapped anthropic error should be detected.
+	wrapped := fmt.Errorf("stream failed: %w", &anthropic.APIError{
+		Status:  503,
+		Type:    anthropic.ErrorTypeAPIError,
+		Message: "server error",
+	})
+	if !isRetriableError(wrapped) {
+		t.Error("isRetriableError(wrapped anthropic APIError) = false, want true")
+	}
+}
+
+// TestRuntimeRunRetryUsesRetryAfter verifies rate limit errors use RetryAfter as backoff.
+func TestRuntimeRunRetryUsesRetryAfter(t *testing.T) {
+	var attempts int32
+	var backoffs []time.Duration
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n <= 2 {
+			// Return a rate limit error with a 50ms retry-after.
+			return nil, &anthropic.APIError{
+				Status:  429,
+				Type:    anthropic.ErrorTypeRateLimit,
+				Message: "rate limit exceeded",
+				Headers: http.Header{"Retry-After": []string{"1"}},
+			}
+		}
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "ok"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    3,
+		InitialBackoff: 10 * time.Second, // Would be very long if not for RetryAfter.
+		MaxBackoff:     30 * time.Second,
+	}
+
+	start := time.Now()
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for range out {
+	}
+
+	elapsed := time.Since(start)
+	// With RetryAfter=1s for 2 attempts, total should be ~2s, definitely under 5s.
+	// If RetryAfter was ignored, the initial 10s backoff would make this test timeout.
+	if elapsed > 5*time.Second {
+		t.Fatalf("elapsed = %v, expected < 5s (RetryAfter should override long backoff)", elapsed)
+	}
+
+	_ = backoffs
+}
+
+// TestRuntimeRunFallbackAfterAttempts verifies FallbackAfterAttempts triggers early fallback.
+func TestRuntimeRunFallbackAfterAttempts(t *testing.T) {
+	var modelsUsed []string
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		modelsUsed = append(modelsUsed, req.Model)
+		if req.Model == "primary-model" {
+			return nil, errors.New("529 overloaded")
+		}
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "fallback ok"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(client, "primary-model", nil)
+	runtime.FallbackModel = "fallback-model"
+	runtime.FallbackAfterAttempts = 2
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    5, // More than FallbackAfterAttempts.
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var fallbackFound bool
+	for evt := range out {
+		if evt.Type == event.TypeModelFallback {
+			fallbackFound = true
+		}
+	}
+	if !fallbackFound {
+		t.Fatal("missing model.fallback event")
+	}
+
+	// Should have tried primary twice (initial + 1 retry), then fallback.
+	if len(modelsUsed) != 3 {
+		t.Fatalf("models used = %v, want 3 attempts", modelsUsed)
+	}
+	if modelsUsed[0] != "primary-model" || modelsUsed[1] != "primary-model" || modelsUsed[2] != "fallback-model" {
+		t.Fatalf("models used = %v, want [primary-model, primary-model, fallback-model]", modelsUsed)
+	}
+}
+
+// TestRuntimeRunFallbackAfterAttemptsZeroMeansExhausted verifies default (0) only falls back after all retries.
+func TestRuntimeRunFallbackAfterAttemptsZeroMeansExhausted(t *testing.T) {
+	var modelsUsed []string
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		modelsUsed = append(modelsUsed, req.Model)
+		if req.Model == "primary-model" {
+			return nil, errors.New("529 overloaded")
+		}
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "fallback ok"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(client, "primary-model", nil)
+	runtime.FallbackModel = "fallback-model"
+	runtime.FallbackAfterAttempts = 0 // Default: only fallback after retries exhausted.
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    2,
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	for range out {
+	}
+
+	// Should have tried primary 3 times (initial + 2 retries), then fallback.
+	if len(modelsUsed) != 4 {
+		t.Fatalf("models used = %v, want 4 attempts", modelsUsed)
+	}
+	if modelsUsed[0] != "primary-model" || modelsUsed[1] != "primary-model" || modelsUsed[2] != "primary-model" || modelsUsed[3] != "fallback-model" {
+		t.Fatalf("models used = %v, want [primary-model x3, fallback-model]", modelsUsed)
 	}
 }

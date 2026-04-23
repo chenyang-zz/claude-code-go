@@ -63,6 +63,13 @@ func isRetriableError(err error) bool {
 	if err == nil {
 		return false
 	}
+
+	// Check if the error implements the RetryableError interface.
+	var retryable model.RetryableError
+	if errors.As(err, &retryable) {
+		return retryable.IsRetryable()
+	}
+
 	msg := err.Error()
 
 	// Network / connection errors.
@@ -142,6 +149,15 @@ func (e *Runtime) tryFallback(ctx context.Context, req model.Request, primaryErr
 		model:  e.FallbackModel,
 		stream: stream,
 	}
+}
+
+// shouldFallbackAfterAttempts reports whether fallback should be triggered after
+// the given attempt count, respecting the FallbackAfterAttempts setting.
+func (e *Runtime) shouldFallbackAfterAttempts(attempt int) bool {
+	if e.FallbackAfterAttempts <= 0 {
+		return false
+	}
+	return attempt >= e.FallbackAfterAttempts
 }
 
 // emitEvent sends an event to the channel. The caller (runLoop goroutine) owns the channel

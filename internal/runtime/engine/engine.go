@@ -54,6 +54,9 @@ type Runtime struct {
 	DefaultModel string
 	// FallbackModel is an optional secondary model used when the primary model fails after exhausting retries.
 	FallbackModel string
+	// FallbackAfterAttempts is the number of retry attempts after which fallback is triggered.
+	// Zero (default) means fallback only happens after all retries are exhausted.
+	FallbackAfterAttempts int
 	// RetryPolicy controls exponential backoff retry for transient provider errors.
 	RetryPolicy RetryPolicy
 	// ToolCatalog stores the provider-facing tool declarations attached to each request by default.
@@ -1044,8 +1047,14 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 			if !isRetriableError(connErr) {
 				break
 			}
+			// Check if FallbackAfterAttempts triggers before retry.
+			if e.shouldFallbackAfterAttempts(attempt + 1) {
+				if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
+					return e.runFallback(ctx, req, fb, streamingExec, out)
+				}
+			}
 			if attempt < retries {
-				backoff := policy.backoffDuration(attempt + 1)
+				backoff := e.computeBackoff(connErr, attempt+1, policy)
 				out <- event.Event{
 					Type:      event.TypeRetryAttempted,
 					Timestamp: time.Now(),
@@ -1093,8 +1102,15 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 		}
 		lastErr = streamErr
 
+		// Check if FallbackAfterAttempts triggers before retry.
+		if e.shouldFallbackAfterAttempts(attempt + 1) {
+			if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
+				return e.runFallback(ctx, req, fb, streamingExec, out)
+			}
+		}
+
 		if attempt < retries {
-			backoff := policy.backoffDuration(attempt + 1)
+			backoff := e.computeBackoff(streamErr, attempt+1, policy)
 			out <- event.Event{
 				Type:      event.TypeRetryAttempted,
 				Timestamp: time.Now(),
@@ -1115,38 +1131,56 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 
 	// All retries exhausted — try fallback.
 	if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
-		// Create a fresh streaming executor for the fallback attempt.
-		if streamingExec != nil {
-			streamingExec.Discard()
-			streamingExec = e.newStreamingExecutor(ctx, out)
-		}
-		fbResult, fbErr := e.consumeModelStream(fb.stream, streamingExec, ctx)
-		if fbErr != nil {
-			return streamResult{}, fbErr
-		}
-		out <- event.Event{
-			Type:      event.TypeModelFallback,
-			Timestamp: time.Now(),
-			Payload: event.ModelFallbackPayload{
-				OriginalModel: req.Model,
-				FallbackModel: fb.model,
-			},
-		}
-		for _, evt := range fbResult.events {
-			out <- evt
-		}
-		if streamingExec != nil {
-			for _, toolUse := range fbResult.toolUses {
-				streamingExec.AddTool(ctx, toolUse)
-			}
-			for _, evt := range streamingExec.AwaitAll(ctx) {
-				out <- evt
-			}
-		}
-		fbResult.activeModel = fb.model
-		return fbResult, nil
+		return e.runFallback(ctx, req, fb, streamingExec, out)
 	}
 	return streamResult{}, fmt.Errorf("stream failed after %d retries: %w", retries, lastErr)
+}
+
+// computeBackoff determines the backoff duration for a retry attempt.
+// If the error implements model.RetryableError and provides a positive RetryAfter,
+// that value is used; otherwise the policy's exponential backoff is used.
+func (e *Runtime) computeBackoff(err error, attempt int, policy RetryPolicy) time.Duration {
+	var retryable model.RetryableError
+	if errors.As(err, &retryable) {
+		if d := retryable.RetryAfter(); d > 0 {
+			return d
+		}
+	}
+	return policy.backoffDuration(attempt)
+}
+
+// runFallback executes a fallback model attempt and returns the result.
+func (e *Runtime) runFallback(ctx context.Context, req model.Request, fb *fallbackResult, streamingExec *StreamingToolExecutor, out chan<- event.Event) (streamResult, error) {
+	// Create a fresh streaming executor for the fallback attempt.
+	if streamingExec != nil {
+		streamingExec.Discard()
+		streamingExec = e.newStreamingExecutor(ctx, out)
+	}
+	fbResult, fbErr := e.consumeModelStream(fb.stream, streamingExec, ctx)
+	if fbErr != nil {
+		return streamResult{}, fbErr
+	}
+	out <- event.Event{
+		Type:      event.TypeModelFallback,
+		Timestamp: time.Now(),
+		Payload: event.ModelFallbackPayload{
+			OriginalModel: req.Model,
+			FallbackModel: fb.model,
+		},
+	}
+	for _, evt := range fbResult.events {
+		out <- evt
+	}
+	if streamingExec != nil {
+		for _, toolUse := range fbResult.toolUses {
+			streamingExec.AddTool(ctx, toolUse)
+		}
+		for _, evt := range streamingExec.AwaitAll(ctx) {
+			out <- evt
+		}
+	}
+	fbResult.activeModel = fb.model
+	return fbResult, nil
 }
 
 // newStreamingExecutor creates a StreamingToolExecutor wired to this runtime's tool execution pipeline.

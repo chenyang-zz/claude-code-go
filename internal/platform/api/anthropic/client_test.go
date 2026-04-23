@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
@@ -749,6 +751,309 @@ func TestClientStreamOmitsCacheControlWhenDisabled(t *testing.T) {
 		t.Fatalf("Stream() error = %v", err)
 	}
 	for range stream {
+	}
+}
+
+// TestParseRetryAfterSeconds verifies parseRetryAfter handles integer seconds.
+func TestParseRetryAfterSeconds(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		wantDur  time.Duration
+		wantOk   bool
+	}{
+		{"valid seconds", "120", 120 * time.Second, true},
+		{"zero seconds", "0", 0, true},
+		{"missing header", "", 0, false},
+		{"invalid string", "invalid", 0, false},
+		{"negative seconds", "-1", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := http.Header{}
+			if tt.value != "" {
+				h.Set("retry-after", tt.value)
+			}
+			dur, ok := parseRetryAfter(h)
+			if ok != tt.wantOk {
+				t.Fatalf("parseRetryAfter() ok = %v, want %v", ok, tt.wantOk)
+			}
+			if dur != tt.wantDur {
+				t.Fatalf("parseRetryAfter() dur = %v, want %v", dur, tt.wantDur)
+			}
+		})
+	}
+}
+
+// TestParseRetryAfterRFC1123 verifies parseRetryAfter handles RFC1123 dates.
+func TestParseRetryAfterRFC1123(t *testing.T) {
+	future := time.Now().UTC().Add(2 * time.Minute).Format(time.RFC1123)
+	past := time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC1123)
+
+	h := http.Header{}
+	h.Set("retry-after", future)
+	dur, ok := parseRetryAfter(h)
+	if !ok {
+		t.Fatal("parseRetryAfter() ok = false, want true for RFC1123 date")
+	}
+	// Allow a small tolerance for clock skew during the test.
+	if dur < 110*time.Second || dur > 130*time.Second {
+		t.Fatalf("parseRetryAfter() dur = %v, want ~2m", dur)
+	}
+
+	h2 := http.Header{}
+	h2.Set("retry-after", past)
+	dur2, ok2 := parseRetryAfter(h2)
+	if !ok2 {
+		t.Fatal("parseRetryAfter() ok = false, want true for past RFC1123 date")
+	}
+	if dur2 != 0 {
+		t.Fatalf("parseRetryAfter() dur = %v, want 0 for past date", dur2)
+	}
+}
+
+// TestParseRateLimitHeaders verifies rate limit header extraction.
+func TestParseRateLimitHeaders(t *testing.T) {
+	h := http.Header{}
+	h.Set("x-ratelimit-remaining", "42")
+	h.Set("x-ratelimit-reset", "1760000000")
+	h.Set("x-ratelimit-limit", "100")
+
+	rl := parseRateLimitHeaders(h)
+	if rl.Remaining != 42 {
+		t.Fatalf("remaining = %d, want 42", rl.Remaining)
+	}
+	if rl.Reset != 1760000000 {
+		t.Fatalf("reset = %d, want 1760000000", rl.Reset)
+	}
+	if rl.RequestLimit != 100 {
+		t.Fatalf("requestLimit = %d, want 100", rl.RequestLimit)
+	}
+}
+
+// TestParseRateLimitHeadersMissing verifies missing headers return zero values.
+func TestParseRateLimitHeadersMissing(t *testing.T) {
+	rl := parseRateLimitHeaders(http.Header{})
+	if rl.Remaining != 0 || rl.Reset != 0 || rl.RequestLimit != 0 {
+		t.Fatalf("expected zero values, got %+v", rl)
+	}
+}
+
+// TestComputeBackoffRetryAfter verifies computeBackoff prefers retry-after.
+func TestComputeBackoffRetryAfter(t *testing.T) {
+	h := http.Header{}
+	h.Set("retry-after", "60")
+	h.Set("x-ratelimit-reset", "1760000000")
+
+	dur, ok := computeBackoff(h)
+	if !ok {
+		t.Fatal("computeBackoff() ok = false, want true")
+	}
+	if dur != 60*time.Second {
+		t.Fatalf("computeBackoff() dur = %v, want 60s", dur)
+	}
+}
+
+// TestComputeBackoffRateLimitReset verifies computeBackoff falls back to
+// x-ratelimit-reset when retry-after is absent.
+func TestComputeBackoffRateLimitReset(t *testing.T) {
+	reset := time.Now().UTC().Add(90 * time.Second)
+	h := http.Header{}
+	h.Set("x-ratelimit-reset", strconv.FormatInt(reset.Unix(), 10))
+
+	dur, ok := computeBackoff(h)
+	if !ok {
+		t.Fatal("computeBackoff() ok = false, want true")
+	}
+	// Allow small tolerance for clock skew.
+	if dur < 80*time.Second || dur > 100*time.Second {
+		t.Fatalf("computeBackoff() dur = %v, want ~90s", dur)
+	}
+}
+
+// TestComputeBackoffMissing verifies computeBackoff returns false when no
+// relevant headers are present.
+func TestComputeBackoffMissing(t *testing.T) {
+	dur, ok := computeBackoff(http.Header{})
+	if ok {
+		t.Fatal("computeBackoff() ok = true, want false")
+	}
+	if dur != 0 {
+		t.Fatalf("computeBackoff() dur = %v, want 0", dur)
+	}
+}
+
+// TestComputeRetryDelayRateLimitRetryAfter verifies that rate-limit errors
+// with a retry-after header use that value.
+func TestComputeRetryDelayRateLimitRetryAfter(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("retry-after", "60")
+	err := &APIError{Status: 429, Type: ErrorTypeRateLimit, Headers: headers}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur != 60*time.Second {
+		t.Fatalf("computeRetryDelay() dur = %v, want 60s", dur)
+	}
+}
+
+// TestComputeRetryDelayOverloadedRetryAfter verifies that overloaded errors
+// with a retry-after header use that value.
+func TestComputeRetryDelayOverloadedRetryAfter(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("retry-after", "30")
+	err := &APIError{Status: 529, Type: ErrorTypeOverloaded, Headers: headers}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur != 30*time.Second {
+		t.Fatalf("computeRetryDelay() dur = %v, want 30s", dur)
+	}
+}
+
+// TestComputeRetryDelayRateLimitResetFallback verifies that rate-limit errors
+// fall back to rate-limit-reset when retry-after is absent.
+func TestComputeRetryDelayRateLimitResetFallback(t *testing.T) {
+	reset := time.Now().UTC().Add(2 * time.Minute)
+	headers := http.Header{}
+	headers.Set("anthropic-ratelimit-unified-reset", strconv.FormatInt(reset.Unix(), 10))
+	err := &APIError{Status: 429, Type: ErrorTypeRateLimit, Headers: headers}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	// Allow tolerance for clock skew.
+	if dur < 110*time.Second || dur > 130*time.Second {
+		t.Fatalf("computeRetryDelay() dur = %v, want ~2m", dur)
+	}
+}
+
+// TestComputeRetryDelayRateLimitExponentialFallback verifies that rate-limit
+// errors without any headers fall back to exponential backoff.
+func TestComputeRetryDelayRateLimitExponentialFallback(t *testing.T) {
+	err := &APIError{Status: 429, Type: ErrorTypeRateLimit}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	// attempt=0: baseDelay=500ms * 2^0 = 500ms, plus up to 25% jitter = max 625ms.
+	if dur < 500*time.Millisecond || dur > 625*time.Millisecond {
+		t.Fatalf("computeRetryDelay() dur = %v, want ~500-625ms", dur)
+	}
+}
+
+// TestComputeRetryDelayExponentialBackoffAttempts verifies exponential backoff
+// scales with attempt number.
+func TestComputeRetryDelayExponentialBackoffAttempts(t *testing.T) {
+	err := &APIError{Status: 502, Message: "bad gateway"}
+
+	// attempt=0: ~500ms
+	dur0, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur0 < 500*time.Millisecond || dur0 > 625*time.Millisecond {
+		t.Fatalf("attempt 0 dur = %v, want ~500-625ms", dur0)
+	}
+
+	// attempt=1: ~1000ms
+	dur1, retryErr := computeRetryDelay(err, 1)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur1 < 1000*time.Millisecond || dur1 > 1250*time.Millisecond {
+		t.Fatalf("attempt 1 dur = %v, want ~1-1.25s", dur1)
+	}
+
+	// attempt=2: ~2000ms
+	dur2, retryErr := computeRetryDelay(err, 2)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur2 < 2000*time.Millisecond || dur2 > 2500*time.Millisecond {
+		t.Fatalf("attempt 2 dur = %v, want ~2-2.5s", dur2)
+	}
+}
+
+// TestComputeRetryDelayExponentialBackoffMaxCap verifies backoff is capped at
+// maxDelay (30s).
+func TestComputeRetryDelayExponentialBackoffMaxCap(t *testing.T) {
+	err := &APIError{Status: 503, Message: "service unavailable"}
+
+	// attempt=10 would be 500ms * 2^10 = ~512s, but capped at 30s.
+	dur, retryErr := computeRetryDelay(err, 10)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur < 30*time.Second || dur > 37500*time.Millisecond {
+		t.Fatalf("computeRetryDelay() dur = %v, want ~30-37.5s", dur)
+	}
+}
+
+// TestComputeRetryDelayNotRetryable verifies non-retryable errors return an error.
+func TestComputeRetryDelayNotRetryable(t *testing.T) {
+	err := &APIError{Status: 400, Type: ErrorTypeInvalidRequest, Message: "bad request"}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr == nil {
+		t.Fatal("computeRetryDelay() error = nil, want non-nil")
+	}
+	if dur != 0 {
+		t.Fatalf("computeRetryDelay() dur = %v, want 0", dur)
+	}
+}
+
+// TestComputeRetryDelayNilError verifies nil error returns an error.
+func TestComputeRetryDelayNilError(t *testing.T) {
+	dur, retryErr := computeRetryDelay(nil, 0)
+	if retryErr == nil {
+		t.Fatal("computeRetryDelay() error = nil, want non-nil")
+	}
+	if dur != 0 {
+		t.Fatalf("computeRetryDelay() dur = %v, want 0", dur)
+	}
+}
+
+// TestComputeRetryDelayOverloadedNoHeaders verifies overloaded errors without
+// headers fall back to exponential backoff.
+func TestComputeRetryDelayOverloadedNoHeaders(t *testing.T) {
+	err := &APIError{Status: 529, Type: ErrorTypeOverloaded}
+
+	dur, retryErr := computeRetryDelay(err, 0)
+	if retryErr != nil {
+		t.Fatalf("computeRetryDelay() error = %v, want nil", retryErr)
+	}
+	if dur < 500*time.Millisecond || dur > 625*time.Millisecond {
+		t.Fatalf("computeRetryDelay() dur = %v, want ~500-625ms", dur)
+	}
+}
+
+// TestExponentialBackoffConfig verifies custom retryConfig is respected.
+func TestExponentialBackoffConfig(t *testing.T) {
+	cfg := retryConfig{baseDelay: 100 * time.Millisecond, maxDelay: 1 * time.Second, jitterFrac: 0.1}
+
+	dur := exponentialBackoff(cfg, 0)
+	if dur < 100*time.Millisecond || dur > 110*time.Millisecond {
+		t.Fatalf("attempt 0 dur = %v, want ~100-110ms", dur)
+	}
+
+	dur = exponentialBackoff(cfg, 3)
+	// 100ms * 2^3 = 800ms, + 10% jitter = max 880ms.
+	if dur < 800*time.Millisecond || dur > 880*time.Millisecond {
+		t.Fatalf("attempt 3 dur = %v, want ~800-880ms", dur)
+	}
+
+	dur = exponentialBackoff(cfg, 10)
+	// Should be capped at maxDelay=1s + 10% jitter.
+	if dur < 1000*time.Millisecond || dur > 1100*time.Millisecond {
+		t.Fatalf("attempt 10 dur = %v, want ~1-1.1s", dur)
 	}
 }
 

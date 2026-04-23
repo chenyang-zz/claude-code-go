@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
@@ -515,6 +519,165 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 			Error: payload.Error.Message,
 		}
 	}
+}
+
+// parseRetryAfter extracts the retry delay from HTTP response headers.
+// It supports both seconds (e.g. "120") and RFC1123 date strings
+// (e.g. "Wed, 21 Oct 2025 07:28:00 GMT").  The returned bool is false
+// when the header is missing or cannot be parsed.
+func parseRetryAfter(header http.Header) (time.Duration, bool) {
+	value := strings.TrimSpace(header.Get("retry-after"))
+	if value == "" {
+		return 0, false
+	}
+
+	// Try seconds first (most common from Anthropic).
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second, true
+	}
+
+	// Fall back to RFC1123 date parsing.
+	if ts, err := time.Parse(time.RFC1123, value); err == nil {
+		wait := time.Until(ts)
+		if wait < 0 {
+			wait = 0
+		}
+		return wait, true
+	}
+
+	return 0, false
+}
+
+// rateLimitHeaders holds the subset of Anthropic rate-limit headers that
+// influence retry / back-off decisions.
+type rateLimitHeaders struct {
+	// Remaining is the number of requests remaining in the current window.
+	Remaining int
+	// Reset is the unix timestamp (seconds) when the current limit window resets.
+	Reset int64
+	// RequestLimit is the per-window request limit.
+	RequestLimit int
+}
+
+// parseRateLimitHeaders extracts Anthropic-specific rate-limit fields from
+// the response headers.  Missing or malformed fields are silently ignored.
+func parseRateLimitHeaders(header http.Header) rateLimitHeaders {
+	return rateLimitHeaders{
+		Remaining:    parseHeaderInt(header, "x-ratelimit-remaining"),
+		Reset:        parseHeaderInt64(header, "x-ratelimit-reset"),
+		RequestLimit: parseHeaderInt(header, "x-ratelimit-limit"),
+	}
+}
+
+// parseHeaderInt converts an optional integer header into an int, tolerating
+// invalid values.
+func parseHeaderInt(headers http.Header, key string) int {
+	value := strings.TrimSpace(headers.Get(key))
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+// computeBackoff returns the duration to wait before the next retry attempt.
+// It prefers the retry-after header when present; otherwise it falls back to
+// the rate-limit reset time.  If neither is available it returns false.
+func computeBackoff(header http.Header) (time.Duration, bool) {
+	// 1. Explicit retry-after takes highest priority.
+	if d, ok := parseRetryAfter(header); ok {
+		return d, true
+	}
+
+	// 2. Fall back to x-ratelimit-reset (unix seconds).
+	rl := parseRateLimitHeaders(header)
+	if rl.Reset > 0 {
+		wait := time.Until(time.Unix(rl.Reset, 0))
+		if wait < 0 {
+			wait = 0
+		}
+		return wait, true
+	}
+
+	return 0, false
+}
+
+// retryConfig holds the parameters for exponential backoff.
+// These match the batch-67 defaults.
+type retryConfig struct {
+	baseDelay  time.Duration
+	maxDelay   time.Duration
+	jitterFrac float64
+}
+
+// defaultRetryConfig returns the batch-67 default retry parameters.
+func defaultRetryConfig() retryConfig {
+	return retryConfig{
+		baseDelay:  500 * time.Millisecond,
+		maxDelay:   30 * time.Second,
+		jitterFrac: 0.25,
+	}
+}
+
+// exponentialBackoff computes the delay for the given attempt using
+// baseDelay * 2^attempt capped at maxDelay, plus up to jitterFrac jitter.
+func exponentialBackoff(cfg retryConfig, attempt int) time.Duration {
+	if cfg.baseDelay <= 0 {
+		cfg.baseDelay = 500 * time.Millisecond
+	}
+	if cfg.maxDelay <= 0 {
+		cfg.maxDelay = 30 * time.Second
+	}
+	if cfg.jitterFrac <= 0 {
+		cfg.jitterFrac = 0.25
+	}
+
+	exp := time.Duration(float64(cfg.baseDelay) * math.Pow(2, float64(attempt)))
+	if exp > cfg.maxDelay {
+		exp = cfg.maxDelay
+	}
+
+	jitter := time.Duration(rand.Int63n(int64(float64(exp) * cfg.jitterFrac)))
+	return exp + jitter
+}
+
+// computeRetryDelay returns the wait duration before the next retry attempt.
+//
+// Rules:
+//   - If err is nil or not retryable, returns an error (no wait).
+//   - If the error is rate-limit or overloaded, prefers the server's
+//     retry-after / rate-limit-reset headers; falls back to exponential
+//     backoff if headers are absent.
+//   - For other retryable errors, uses exponential backoff.
+//
+// attempt is zero-based (0 = first retry).
+func computeRetryDelay(err *APIError, attempt int) (time.Duration, error) {
+	if err == nil || !err.IsRetryable() {
+		return 0, fmt.Errorf("error is not retryable")
+	}
+
+	// Rate-limit and overloaded errors: prefer server-directed wait time.
+	if err.IsRateLimit() || err.IsOverloaded() {
+		// 1. retry-after header (from APIError.Headers).
+		if d := err.RetryAfter(); d > 0 {
+			return d, nil
+		}
+		// 2. rate-limit reset timestamp.
+		if reset := err.RateLimitReset(); reset > 0 {
+			wait := time.Until(time.Unix(reset, 0))
+			if wait > 0 {
+				return wait, nil
+			}
+		}
+		// 3. Fall back to exponential backoff.
+		return exponentialBackoff(defaultRetryConfig(), attempt), nil
+	}
+
+	// All other retryable errors: exponential backoff.
+	return exponentialBackoff(defaultRetryConfig(), attempt), nil
 }
 
 // parseToolUseInput decodes the final accumulated tool-use JSON payload.
