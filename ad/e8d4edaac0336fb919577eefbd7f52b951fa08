@@ -1,0 +1,31 @@
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 426-427
+internal/runtime/engine/engine_test.go
+  cf7902d20dbecc87 20,2915-3072
+internal/runtime/engine/engine.go
+  cf7902d20dbecc87 24,95-102,456-459,486-497,615-618,633-644
+internal/platform/api/anthropic/cachebreak.go
+  cf7902d20dbecc87 1-710
+internal/platform/api/anthropic/cachebreak_test.go
+  cf7902d20dbecc87 1-661
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "ade8d4edaac0336fb919577eefbd7f52b951fa08",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1611,
+      "total_deletions": 38,
+      "accepted_lines": 1573,
+      "overriden_lines": 0
+    }
+  }
+}
