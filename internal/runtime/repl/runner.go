@@ -56,6 +56,12 @@ type RemoteLifecycle interface {
 	Send(data []byte) error
 }
 
+// RemoteSender sends user messages to a remote session via HTTP POST.
+type RemoteSender interface {
+	// SendUserMessage posts one user message to the remote session endpoint.
+	SendUserMessage(ctx context.Context, msg sdk.User) error
+}
+
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
 type Runner struct {
 	// Engine handles normal prompt execution.
@@ -70,6 +76,8 @@ type Runner struct {
 	RemoteSession coreconfig.RemoteSessionConfig
 	// RemoteLifecycle manages optional remote stream subscribe/unsubscribe around one prompt turn.
 	RemoteLifecycle RemoteLifecycle
+	// RemoteSender posts user messages to the remote session via HTTP POST.
+	RemoteSender RemoteSender
 	// ApprovalService resolves runtime approval prompts for remote permission requests.
 	ApprovalService approval.Service
 	// SessionID identifies the current logical CLI session.
@@ -205,6 +213,23 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 			message.TextPart(prompt),
 		},
 	})
+
+	// Forward the user input to the remote session when a sender is configured.
+	if r.RemoteSender != nil {
+		msg := sdk.User{
+			Base:    sdk.Base{Type: "user"},
+			Message: prompt,
+		}
+		if sendErr := r.RemoteSender.SendUserMessage(ctx, msg); sendErr != nil {
+			logger.WarnCF("repl", "failed to send user message to remote session", map[string]any{
+				"session_id": r.sessionID(),
+				"error":      sendErr.Error(),
+			})
+			if se, ok := remote.IsSendError(sendErr); ok {
+				_ = r.Renderer.RenderLine(fmt.Sprintf("Warning: could not reach remote session (%s)", se.Kind))
+			}
+		}
+	}
 
 	stream, err := r.Engine.Run(ctx, conversation.RunRequest{
 		SessionID:          r.sessionID(),

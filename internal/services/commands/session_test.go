@@ -158,3 +158,56 @@ func TestSessionCommandExecuteRendersConnectionDetails(t *testing.T) {
 		t.Fatalf("Execute() output = %q, want last disconnect error", result.Output)
 	}
 }
+
+// stubRemoteSendStateProvider implements RemoteSendStateProvider for test assertions.
+type stubRemoteSendStateProvider struct {
+	sendCount    int64
+	lastSendTime time.Time
+}
+
+func (s *stubRemoteSendStateProvider) SendCount() int64      { return s.sendCount }
+func (s *stubRemoteSendStateProvider) LastSendTime() time.Time { return s.lastSendTime }
+
+// TestSessionCommandExecuteRendersSendState verifies `/session` surfaces HTTP POST sender state.
+func TestSessionCommandExecuteRendersSendState(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		SendStateProvider: &stubRemoteSendStateProvider{sendCount: 5, lastSendTime: time.Now().Add(-30 * time.Second)},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Write path:") {
+		t.Fatalf("Execute() output = %q, want write path section", result.Output)
+	}
+	if !strings.Contains(result.Output, "HTTP POST sends: 5") {
+		t.Fatalf("Execute() output = %q, want send count", result.Output)
+	}
+	if !strings.Contains(result.Output, "Last send:") {
+		t.Fatalf("Execute() output = %q, want last send", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteRendersSendStateNever verifies `/session` shows "never" when no send occurred.
+func TestSessionCommandExecuteRendersSendStateNever(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		SendStateProvider: &stubRemoteSendStateProvider{sendCount: 0},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Last send: never") {
+		t.Fatalf("Execute() output = %q, want last send never", result.Output)
+	}
+}

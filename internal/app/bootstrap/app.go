@@ -86,6 +86,14 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	runner.RemoteSession = cfg.RemoteSession
 	if cfg.RemoteSession.Enabled && strings.TrimSpace(cfg.RemoteSession.StreamURL) != "" {
 		runner.RemoteLifecycle = platformremote.NewLifecycleManager(nil, nil)
+		if endpoint := platformremote.DeriveEndpoint(cfg.RemoteSession); endpoint != "" {
+			headers := platformremote.AuthHeaders()
+			var opts []platformremote.CCROption
+			for k, v := range headers {
+				opts = append(opts, platformremote.WithHeader(k, v))
+			}
+			runner.RemoteSender = platformremote.NewCCRClient(endpoint, cfg.RemoteSession.SessionID, opts...)
+		}
 	}
 	runner.Input = os.Stdin
 	runner.WorktreeLister = platformgit.NewClient()
@@ -228,12 +236,17 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		return nil, err
 	}
 	var stateProvider servicecommands.RemoteStateProvider
+	var sendStateProvider servicecommands.RemoteSendStateProvider
 	if runner != nil {
 		stateProvider = runner.RemoteLifecycle
+		if sender, ok := runner.RemoteSender.(servicecommands.RemoteSendStateProvider); ok {
+			sendStateProvider = sender
+		}
 	}
 	if err := registry.Register(servicecommands.SessionCommand{
-		RemoteSession: cfg.RemoteSession,
-		StateProvider: stateProvider,
+		RemoteSession:     cfg.RemoteSession,
+		StateProvider:     stateProvider,
+		SendStateProvider: sendStateProvider,
 	}); err != nil {
 		return nil, err
 	}

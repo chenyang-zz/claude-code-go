@@ -28,12 +28,22 @@ type RemoteStateProvider interface {
 	LastDisconnectTime() time.Time
 }
 
+// RemoteSendStateProvider exposes the HTTP POST sender state for /session reporting.
+type RemoteSendStateProvider interface {
+	// SendCount returns the total number of successful sends.
+	SendCount() int64
+	// LastSendTime returns the timestamp of the most recent successful send.
+	LastSendTime() time.Time
+}
+
 // SessionCommand renders the text-only /session behavior including remote session URL, QR code, and subscription state.
 type SessionCommand struct {
 	// RemoteSession stores the current remote-mode context surfaced by bootstrap.
 	RemoteSession coreconfig.RemoteSessionConfig
 	// StateProvider supplies optional live remote subscription and lifecycle state for observability output.
 	StateProvider RemoteStateProvider
+	// SendStateProvider supplies optional HTTP POST sender state for observability output.
+	SendStateProvider RemoteSendStateProvider
 }
 
 // Metadata returns the canonical slash descriptor for /session.
@@ -56,7 +66,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 			"remote_session_url":    c.RemoteSession.URL,
 		})
 		return command.Result{
-			Output: renderRemoteSession(c.RemoteSession, c.StateProvider),
+			Output: renderRemoteSession(c.RemoteSession, c.StateProvider, c.SendStateProvider),
 		}, nil
 	}
 
@@ -70,7 +80,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 }
 
 // renderRemoteSession formats the remote session details including QR code, URL, and optional live state.
-func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider) string {
+func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider, sendState RemoteSendStateProvider) string {
 	var b strings.Builder
 	b.WriteString("Remote session\n")
 	b.WriteString(renderTextQRCode(remote.URL))
@@ -93,6 +103,15 @@ func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStat
 			closedStr = "yes (closed)"
 		}
 		b.WriteString(fmt.Sprintf("  Lifecycle closed: %s", closedStr))
+	}
+	if sendState != nil {
+		b.WriteString("\n\nWrite path:\n")
+		b.WriteString(fmt.Sprintf("  HTTP POST sends: %d\n", sendState.SendCount()))
+		if last := sendState.LastSendTime(); !last.IsZero() {
+			b.WriteString(fmt.Sprintf("  Last send: %s ago", time.Since(last).Round(time.Second).String()))
+		} else {
+			b.WriteString("  Last send: never")
+		}
 	}
 	return b.String()
 }
