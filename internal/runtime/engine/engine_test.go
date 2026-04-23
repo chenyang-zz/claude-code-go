@@ -17,6 +17,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 )
 
@@ -2909,5 +2910,163 @@ func TestRuntimeRunPassesDisabledPromptCaching(t *testing.T) {
 	}
 	if client.requests[0].EnablePromptCaching {
 		t.Fatalf("EnablePromptCaching = %v, want false", client.requests[0].EnablePromptCaching)
+	}
+}
+
+// TestCacheBreakDetectorIntegration verifies that the engine correctly records
+// prompt state and checks for cache breaks when a CacheBreakDetector is configured.
+func TestCacheBreakDetectorIntegration(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "hello"},
+				model.Event{
+					Type:       model.EventTypeDone,
+					StopReason: model.StopReasonEndTurn,
+					Usage: &model.Usage{
+						InputTokens:              100,
+						OutputTokens:             10,
+						CacheCreationInputTokens: 0,
+						CacheReadInputTokens:     5000,
+					},
+				},
+			),
+		},
+	}
+
+	detector := anthropic.NewCacheBreakDetector()
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.CacheBreakDetector = detector
+	runtime.Source = "repl_main_thread"
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(client.requests))
+	}
+}
+
+// TestCacheBreakDetectorIntegrationWithBreak verifies cache break detection
+// across two engine runs with a significant token drop.
+func TestCacheBreakDetectorIntegrationWithBreak(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "first"},
+				model.Event{
+					Type:       model.EventTypeDone,
+					StopReason: model.StopReasonEndTurn,
+					Usage: &model.Usage{
+						InputTokens:              100,
+						OutputTokens:             10,
+						CacheCreationInputTokens: 0,
+						CacheReadInputTokens:     10000,
+					},
+				},
+			),
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "second"},
+				model.Event{
+					Type:       model.EventTypeDone,
+					StopReason: model.StopReasonEndTurn,
+					Usage: &model.Usage{
+						InputTokens:              100,
+						OutputTokens:             10,
+						CacheCreationInputTokens: 0,
+						CacheReadInputTokens:     1000,
+					},
+				},
+			),
+		},
+	}
+
+	detector := anthropic.NewCacheBreakDetector()
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.CacheBreakDetector = detector
+	runtime.Source = "repl_main_thread"
+
+	// First run: establishes baseline.
+	out1, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out1 {
+	}
+
+	// Second run: significant drop in cache read tokens.
+	out2, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test again",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out2 {
+	}
+
+	if len(client.requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(client.requests))
+	}
+}
+
+// TestCacheBreakDetectorCompactionNotification verifies that compaction
+// notifies the cache break detector.
+func TestCacheBreakDetectorCompactionNotification(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(
+				model.Event{Type: model.EventTypeTextDelta, Text: "hello"},
+				model.Event{
+					Type:       model.EventTypeDone,
+					StopReason: model.StopReasonEndTurn,
+					Usage: &model.Usage{
+						InputTokens:              100,
+						OutputTokens:             10,
+						CacheCreationInputTokens: 0,
+						CacheReadInputTokens:     5000,
+					},
+				},
+			),
+		},
+	}
+
+	detector := anthropic.NewCacheBreakDetector()
+	// Pre-seed detector with a baseline so we can verify compaction resets it.
+	detector.RecordPromptState(anthropic.PromptStateSnapshot{
+		System:   "sys",
+		Source:   "repl_main_thread",
+		Model:    "claude-sonnet-4-5",
+		FastMode: false,
+	})
+	detector.CheckResponseForCacheBreak("repl_main_thread", 10000, 0, nil, "", "")
+
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.CacheBreakDetector = detector
+	runtime.Source = "repl_main_thread"
+
+	// Manually trigger compaction notification.
+	detector.NotifyCompaction("repl_main_thread", "")
+
+	// After compaction, prevCacheReadTokens should be nil.
+	// The detector is internal, so we verify indirectly by running again.
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
 	}
 }

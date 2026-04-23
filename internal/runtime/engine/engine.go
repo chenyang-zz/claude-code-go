@@ -21,6 +21,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -91,6 +92,14 @@ type Runtime struct {
 	// markers on API requests. Default is true; it can be disabled via the
 	// DISABLE_PROMPT_CACHING environment variable.
 	EnablePromptCaching bool
+	// CacheBreakDetector tracks prompt state and detects unexpected Anthropic
+	// prompt cache breaks. When nil, cache break detection is disabled.
+	CacheBreakDetector *anthropic.CacheBreakDetector
+	// Source identifies the query source for cache break tracking
+	// (e.g. "repl_main_thread", "sdk"). Empty means no tracking.
+	Source string
+	// AgentID isolates tracking state for subagents.
+	AgentID string
 }
 
 // New builds the minimum single-turn engine.
@@ -444,6 +453,10 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				}
 			}
 		}
+		// Notify cache break detector that compaction occurred.
+		if e.CacheBreakDetector != nil {
+			e.CacheBreakDetector.NotifyCompaction(e.Source, e.AgentID)
+		}
 
 		requestMessages := append([]message.Message(nil), history.Messages...)
 		requestMessages = append(requestMessages, transientMessages...)
@@ -468,6 +481,18 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				Total:     turnTokenBudget,
 				Remaining: remaining,
 			}
+		}
+
+		// Phase 1: Record prompt state before the API call for cache break detection.
+		if e.CacheBreakDetector != nil {
+			e.CacheBreakDetector.RecordPromptState(anthropic.PromptStateSnapshot{
+				System:              streamReq.System,
+				Tools:               streamReq.Tools,
+				Source:              e.Source,
+				Model:               streamReq.Model,
+				AgentID:             e.AgentID,
+				EnablePromptCaching: streamReq.EnablePromptCaching,
+			})
 		}
 
 		result, err := e.streamAndConsume(ctx, streamReq, out)
@@ -587,6 +612,10 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 							},
 						}
 					}
+					// Notify cache break detector that emergency compaction occurred.
+					if e.CacheBreakDetector != nil {
+						e.CacheBreakDetector.NotifyCompaction(e.Source, e.AgentID)
+					}
 					continue
 				}
 				logger.DebugCF("engine", "prompt-too-long recovery: compact failed, surfacing error", map[string]any{
@@ -601,6 +630,18 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		// window, so allow a future prompt-too-long recovery if the
 		// conversation grows again.
 		hasAttemptedRecovery = false
+
+		// Phase 2: Check for cache break using the API response's cache tokens.
+		if e.CacheBreakDetector != nil && result.usage.CacheReadInputTokens > 0 {
+			e.CacheBreakDetector.CheckResponseForCacheBreak(
+				e.Source,
+				result.usage.CacheReadInputTokens,
+				result.usage.CacheCreationInputTokens,
+				requestMessages,
+				e.AgentID,
+				"",
+			)
+		}
 		if result.activeModel != "" {
 			activeModel = result.activeModel
 		}
