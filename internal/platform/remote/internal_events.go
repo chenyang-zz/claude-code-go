@@ -99,8 +99,9 @@ func (c *CCRClient) readPaginatedInternalEvents(ctx context.Context, path string
 		for k, v := range c.headers {
 			req.Header.Set(k, v)
 		}
+		c.applyCurrentAuthHeader(req)
 
-		resp, err := c.client.Do(req)
+		resp, err := c.doRequestWithAuthRetry(ctx, req)
 		if err != nil {
 			return nil, classifySendError(err)
 		}

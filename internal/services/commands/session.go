@@ -47,6 +47,8 @@ type SessionCommand struct {
 	SendStateProvider RemoteSendStateProvider
 	// SubagentStateProvider supplies optional subagent state for observability output.
 	SubagentStateProvider remote.RemoteSubagentStateProvider
+	// AuthStateProvider supplies optional authentication state for observability output.
+	AuthStateProvider remote.AuthStateProvider
 }
 
 // Metadata returns the canonical slash descriptor for /session.
@@ -69,7 +71,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 			"remote_session_url":    c.RemoteSession.URL,
 		})
 		return command.Result{
-			Output: renderRemoteSession(c.RemoteSession, c.StateProvider, c.SendStateProvider, c.SubagentStateProvider),
+			Output: renderRemoteSession(c.RemoteSession, c.StateProvider, c.SendStateProvider, c.SubagentStateProvider, c.AuthStateProvider),
 		}, nil
 	}
 
@@ -83,7 +85,7 @@ func (c SessionCommand) Execute(ctx context.Context, args command.Args) (command
 }
 
 // renderRemoteSession formats the remote session details including QR code, URL, and optional live state.
-func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider, sendState RemoteSendStateProvider, subagentState remote.RemoteSubagentStateProvider) string {
+func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStateProvider, sendState RemoteSendStateProvider, subagentState remote.RemoteSubagentStateProvider, authState remote.AuthStateProvider) string {
 	var b strings.Builder
 	b.WriteString("Remote session\n")
 	b.WriteString(renderTextQRCode(remote.URL))
@@ -134,6 +136,21 @@ func renderRemoteSession(remote coreconfig.RemoteSessionConfig, state RemoteStat
 				}
 				b.WriteString("\n")
 			}
+		}
+	}
+	if authState != nil {
+		b.WriteString("\n\nAuthentication:\n")
+		as := authState.AuthState()
+		if as.Token == "" {
+			b.WriteString("  No token configured")
+		} else {
+			fmt.Fprintf(&b, "  Source: %s\n", as.Source)
+			if !as.RefreshedAt.IsZero() {
+				fmt.Fprintf(&b, "  Last refresh: %s ago\n", time.Since(as.RefreshedAt).Round(time.Second).String())
+			} else {
+				b.WriteString("  Last refresh: never\n")
+			}
+			fmt.Fprintf(&b, "  Refresh count: %d", as.RefreshCount)
 		}
 	}
 	return b.String()

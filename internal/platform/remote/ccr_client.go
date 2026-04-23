@@ -28,6 +28,10 @@ type CCRClient struct {
 	sessionID string
 	headers   map[string]string
 
+	// tokenProvider supplies dynamic authentication tokens. When a request
+	// returns 401, the client refreshes the token and retries once.
+	tokenProvider TokenProvider
+
 	// sendCount tracks the total number of successful sends.
 	sendCount atomic.Int64
 	// lastSendTime stores the timestamp of the most recent successful send.
@@ -48,6 +52,13 @@ func WithHTTPClient(client *http.Client) CCROption {
 func WithHeader(key, value string) CCROption {
 	return func(c *CCRClient) {
 		c.headers[key] = value
+	}
+}
+
+// WithTokenProvider sets a dynamic token provider for automatic 401 recovery.
+func WithTokenProvider(provider TokenProvider) CCROption {
+	return func(c *CCRClient) {
+		c.tokenProvider = provider
 	}
 }
 
@@ -91,15 +102,16 @@ func (c *CCRClient) SendWithContext(ctx context.Context, data []byte) error {
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}
+	c.applyCurrentAuthHeader(req)
 
 	logger.DebugCF("remote_ccr", "sending message", map[string]any{
 		"endpoint": c.endpoint,
 		"size":     len(data),
 	})
 
-	resp, err := c.client.Do(req)
+	resp, err := c.doRequestWithAuthRetry(ctx, req)
 	if err != nil {
-		return classifySendError(err)
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -144,6 +156,75 @@ func (c *CCRClient) SendControlResponse(ctx context.Context, resp sdk.ControlRes
 		return fmt.Errorf("marshal control response: %w", err)
 	}
 	return c.SendWithContext(ctx, data)
+}
+
+// ---------------------------------------------------------------------------
+// 401 auth recovery
+// ---------------------------------------------------------------------------
+
+// applyCurrentAuthHeader sets the Authorization header from the token provider
+// if one is configured. This is called before every request so that token
+// updates are picked up without restarting the client.
+func (c *CCRClient) applyCurrentAuthHeader(req *http.Request) {
+	if c.tokenProvider == nil {
+		return
+	}
+	applyAuthHeader(req, c.tokenProvider.Token())
+}
+
+// doRequestWithAuthRetry executes an HTTP request and handles 401 responses by
+// refreshing the authentication token and retrying once. If the refreshed
+// token is the same as the old one, or if no token provider is configured,
+// the original 401 response is returned without modification.
+func (c *CCRClient) doRequestWithAuthRetry(ctx context.Context, req *http.Request) (*http.Response, error) {
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, classifySendError(err)
+	}
+
+	if resp.StatusCode != http.StatusUnauthorized || c.tokenProvider == nil {
+		return resp, nil
+	}
+
+	// 401 detected — try to refresh the token.
+	oldToken := c.tokenProvider.Token()
+	newToken, refreshErr := c.tokenProvider.Refresh()
+	if refreshErr != nil || newToken == "" || newToken == oldToken {
+		// Refresh failed or token unchanged; return the original 401.
+		return resp, nil
+	}
+
+	// Token changed; close the old response and retry with the new token.
+	resp.Body.Close()
+
+	// Clone the request so headers can be updated without affecting the original.
+	retryReq := req.Clone(ctx)
+
+	// Obtain a fresh body for the retry. http.NewRequestWithContext sets
+	// GetBody for rewindable readers (e.g. *bytes.Reader), but wraps the
+	// raw Body in io.NopCloser which does not implement io.Seeker.
+	if req.GetBody != nil {
+		newBody, err := req.GetBody()
+		if err != nil {
+			return nil, fmt.Errorf("get body for retry: %w", err)
+		}
+		retryReq.Body = newBody
+	} else if req.Body != nil {
+		if seeker, ok := req.Body.(io.Seeker); ok {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return nil, fmt.Errorf("rewind request body for retry: %w", err)
+			}
+		}
+	}
+	applyAuthHeader(retryReq, newToken)
+
+	logger.DebugCF("remote_ccr", "retrying request after token refresh", map[string]any{
+		"endpoint": c.endpoint,
+		"old_token_prefix": oldToken[:min(len(oldToken), 8)],
+		"new_token_prefix": newToken[:min(len(newToken), 8)],
+	})
+
+	return c.client.Do(retryReq)
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +330,18 @@ func classifyHTTPError(status int, body string) error {
 	default:
 		return &SendError{Kind: SendErrorOther, Message: body, Status: status}
 	}
+}
+
+// AuthState returns the current authentication state if a token provider that
+// supports state observation is configured. Otherwise returns a zero AuthState.
+func (c *CCRClient) AuthState() AuthState {
+	if c == nil {
+		return AuthState{}
+	}
+	if asp, ok := c.tokenProvider.(AuthStateProvider); ok {
+		return asp.AuthState()
+	}
+	return AuthState{}
 }
 
 // SendCount returns the total number of successful sends performed by this client.

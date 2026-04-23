@@ -386,3 +386,209 @@ func TestDeriveEndpointEmpty(t *testing.T) {
 		t.Fatalf("DeriveEndpoint() = %q, want empty string", got)
 	}
 }
+
+// TestCCRClientSend_401RetrySuccess verifies that a 401 response triggers token
+// refresh and the request is retried with the new token.
+func TestCCRClientSend_401RetrySuccess(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		auth := r.Header.Get("Authorization")
+		if requestCount == 1 {
+			// First request with old token should get 401
+			if auth != "Bearer old-token" {
+				t.Fatalf("request 1 auth = %q, want Bearer old-token", auth)
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		// Second request with new token should succeed
+		if auth != "Bearer new-token" {
+			t.Fatalf("request 2 auth = %q, want Bearer new-token", auth)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	provider := &mockTokenProvider{token: "old-token"}
+	provider.refreshFunc = func() (string, error) {
+		provider.token = "new-token"
+		return "new-token", nil
+	}
+
+	client := NewCCRClient(server.URL, "", WithTokenProvider(provider))
+	err := client.Send([]byte(`{}`))
+	if err != nil {
+		t.Fatalf("Send() error = %v, want nil after retry", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("server received %d requests, want 2", requestCount)
+	}
+}
+
+// TestCCRClientSend_401NoTokenProvider verifies 401 is returned directly when
+// no token provider is configured.
+func TestCCRClientSend_401NoTokenProvider(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client := NewCCRClient(server.URL, "")
+	err := client.Send([]byte(`{}`))
+	if err == nil {
+		t.Fatal("Send() error = nil, want 401 error")
+	}
+	se, ok := IsSendError(err)
+	if !ok || se.Kind != SendErrorAuth {
+		t.Fatalf("expected SendErrorAuth, got %v", err)
+	}
+}
+
+// TestCCRClientSend_401SameToken verifies that when refresh returns the same
+// token, the original 401 is returned without infinite retry loops.
+func TestCCRClientSend_401SameToken(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	provider := &mockTokenProvider{
+		token: "same-token",
+		refreshFunc: func() (string, error) {
+			return "same-token", nil
+		},
+	}
+
+	client := NewCCRClient(server.URL, "", WithTokenProvider(provider))
+	err := client.Send([]byte(`{}`))
+	if err == nil {
+		t.Fatal("Send() error = nil, want 401 error")
+	}
+	if requestCount != 1 {
+		t.Fatalf("server received %d requests, want 1 (no retry)", requestCount)
+	}
+}
+
+// TestCCRClientSend_401RefreshFails verifies that when refresh fails, the
+// original 401 is returned.
+func TestCCRClientSend_401RefreshFails(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	provider := &mockTokenProvider{
+		token: "some-token",
+		refreshFunc: func() (string, error) {
+			return "", errors.New("refresh failed")
+		},
+	}
+
+	client := NewCCRClient(server.URL, "", WithTokenProvider(provider))
+	err := client.Send([]byte(`{}`))
+	if err == nil {
+		t.Fatal("Send() error = nil, want 401 error")
+	}
+	if requestCount != 1 {
+		t.Fatalf("server received %d requests, want 1", requestCount)
+	}
+}
+
+// TestCCRClientReadInternalEvents_401Retry verifies 401 recovery on GET requests.
+func TestCCRClientReadInternalEvents_401Retry(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		auth := r.Header.Get("Authorization")
+		if requestCount == 1 {
+			if auth != "Bearer old-token" {
+				t.Fatalf("request 1 auth = %q, want Bearer old-token", auth)
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if auth != "Bearer new-token" {
+			t.Fatalf("request 2 auth = %q, want Bearer new-token", auth)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[],"next_cursor":""}`))
+	}))
+	defer server.Close()
+
+	provider := &mockTokenProvider{token: "old-token"}
+	provider.refreshFunc = func() (string, error) {
+		provider.token = "new-token"
+		return "new-token", nil
+	}
+
+	client := NewCCRClient(server.URL, "", WithTokenProvider(provider))
+	events, err := client.ReadInternalEvents(context.Background())
+	if err != nil {
+		t.Fatalf("ReadInternalEvents() error = %v, want nil after retry", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events, got %d", len(events))
+	}
+	if requestCount != 2 {
+		t.Fatalf("server received %d requests, want 2", requestCount)
+	}
+}
+
+// TestCCRClientAuthState verifies AuthState delegates to the token provider.
+func TestCCRClientAuthState(t *testing.T) {
+	t.Parallel()
+
+	provider := NewEnvTokenProvider()
+	client := NewCCRClient("http://example.com", "", WithTokenProvider(provider))
+
+	state := client.AuthState()
+	// Should not panic and should return a valid AuthState
+	if state.RefreshCount != 0 {
+		t.Fatalf("expected refresh count 0, got %d", state.RefreshCount)
+	}
+}
+
+// TestCCRClientAuthState_NilProvider verifies AuthState returns zero value when
+// no token provider is configured.
+func TestCCRClientAuthState_NilProvider(t *testing.T) {
+	t.Parallel()
+
+	client := NewCCRClient("http://example.com", "")
+	state := client.AuthState()
+	if state.Token != "" {
+		t.Fatalf("expected empty token, got %q", state.Token)
+	}
+}
+
+// mockTokenProvider is a test double for TokenProvider.
+type mockTokenProvider struct {
+	token       string
+	refreshFunc func() (string, error)
+}
+
+func (m *mockTokenProvider) Token() string {
+	return m.token
+}
+
+func (m *mockTokenProvider) Refresh() (string, error) {
+	if m.refreshFunc != nil {
+		return m.refreshFunc()
+	}
+	return m.token, nil
+}

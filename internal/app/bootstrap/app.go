@@ -92,6 +92,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			for k, v := range headers {
 				opts = append(opts, platformremote.WithHeader(k, v))
 			}
+			tokenProvider := platformremote.NewEnvTokenProvider()
+			opts = append(opts, platformremote.WithTokenProvider(tokenProvider))
 			runner.RemoteSender = platformremote.NewCCRClient(endpoint, cfg.RemoteSession.SessionID, opts...)
 		}
 	}
@@ -238,10 +240,14 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	var stateProvider servicecommands.RemoteStateProvider
 	var sendStateProvider servicecommands.RemoteSendStateProvider
 	var subagentStateProvider platformremote.RemoteSubagentStateProvider
+	var authStateProvider platformremote.AuthStateProvider
 	if runner != nil {
 		stateProvider = runner.RemoteLifecycle
 		if sender, ok := runner.RemoteSender.(servicecommands.RemoteSendStateProvider); ok {
 			sendStateProvider = sender
+		}
+		if asp, ok := runner.RemoteSender.(platformremote.AuthStateProvider); ok {
+			authStateProvider = asp
 		}
 	}
 	if err := registry.Register(servicecommands.SessionCommand{
@@ -249,6 +255,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		StateProvider:         stateProvider,
 		SendStateProvider:     sendStateProvider,
 		SubagentStateProvider: subagentStateProvider,
+		AuthStateProvider:     authStateProvider,
 	}); err != nil {
 		return nil, err
 	}

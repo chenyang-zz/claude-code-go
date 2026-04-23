@@ -292,3 +292,84 @@ func TestSessionCommandExecuteOmitsSubagentSectionWithoutProvider(t *testing.T) 
 		t.Fatalf("Execute() output unexpectedly contains subagents section without provider")
 	}
 }
+
+// stubAuthStateProvider implements remote.AuthStateProvider for test assertions.
+type stubAuthStateProvider struct {
+	state remote.AuthState
+}
+
+func (s *stubAuthStateProvider) AuthState() remote.AuthState { return s.state }
+
+// TestSessionCommandExecuteRendersAuthState verifies `/session` surfaces authentication state.
+func TestSessionCommandExecuteRendersAuthState(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		AuthStateProvider: &stubAuthStateProvider{
+			state: remote.AuthState{
+				Token:        "test-token",
+				Source:       "env",
+				RefreshedAt:  time.Now().Add(-30 * time.Second),
+				RefreshCount: 3,
+			},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "Authentication:") {
+		t.Fatalf("Execute() output = %q, want Authentication section", result.Output)
+	}
+	if !strings.Contains(result.Output, "Source: env") {
+		t.Fatalf("Execute() output = %q, want source", result.Output)
+	}
+	if !strings.Contains(result.Output, "Refresh count: 3") {
+		t.Fatalf("Execute() output = %q, want refresh count", result.Output)
+	}
+	if !strings.Contains(result.Output, "Last refresh:") {
+		t.Fatalf("Execute() output = %q, want last refresh", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteRendersAuthStateNoToken verifies `/session` shows no token when auth state is empty.
+func TestSessionCommandExecuteRendersAuthStateNoToken(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+		AuthStateProvider: &stubAuthStateProvider{
+			state: remote.AuthState{Token: ""},
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if !strings.Contains(result.Output, "No token configured") {
+		t.Fatalf("Execute() output = %q, want no token message", result.Output)
+	}
+}
+
+// TestSessionCommandExecuteOmitsAuthSectionWithoutProvider verifies `/session` omits auth section when no provider is wired.
+func TestSessionCommandExecuteOmitsAuthSectionWithoutProvider(t *testing.T) {
+	result, err := SessionCommand{
+		RemoteSession: coreconfig.RemoteSessionConfig{
+			Enabled:   true,
+			SessionID: "session_test123",
+			URL:       "https://claude.ai/code/session_test123?m=0",
+		},
+	}.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	if strings.Contains(result.Output, "Authentication:") {
+		t.Fatalf("Execute() output unexpectedly contains auth section without provider")
+	}
+}
