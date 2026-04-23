@@ -262,6 +262,7 @@ func (s *stubRemoteLifecycle) ConnectionState() string      { return "connected"
 func (s *stubRemoteLifecycle) ReconnectCount() int          { return 0 }
 func (s *stubRemoteLifecycle) LastDisconnectError() error   { return nil }
 func (s *stubRemoteLifecycle) LastDisconnectTime() time.Time { return time.Time{} }
+func (s *stubRemoteLifecycle) Send(data []byte) error        { return nil }
 
 func (c staticCommand) Metadata() command.Metadata {
 	return c.meta

@@ -6,12 +6,13 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// WebSocketClient implements one receive-only WebSocket event stream.
+// WebSocketClient implements one bidirectional WebSocket event stream.
 type WebSocketClient struct {
 	// conn stores the active WebSocket connection.
 	conn *websocket.Conn
@@ -21,6 +22,8 @@ type WebSocketClient struct {
 	streamCh chan streamResult
 	// closeOnce guarantees close side effects run once.
 	closeOnce sync.Once
+	// closed is set to true after Close() is called.
+	closed atomic.Bool
 }
 
 // DialWebSocket opens one ws/wss connection and starts a background message reader.
@@ -103,11 +106,26 @@ func (c *WebSocketClient) Close() error {
 	}
 
 	c.closeOnce.Do(func() {
+		c.closed.Store(true)
 		c.cancel()
 		if c.conn != nil {
 			_ = c.conn.Close()
 		}
 	})
+	return nil
+}
+
+// Send writes one text message to the WebSocket connection.
+func (c *WebSocketClient) Send(data []byte) error {
+	if c == nil {
+		return fmt.Errorf("websocket client is nil")
+	}
+	if c.closed.Load() {
+		return ErrStreamClosed
+	}
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return fmt.Errorf("write websocket message: %w", err)
+	}
 	return nil
 }
 

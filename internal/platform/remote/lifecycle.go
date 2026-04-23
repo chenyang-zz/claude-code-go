@@ -184,6 +184,20 @@ func (m *LifecycleManager) ActiveSubscriptionCount() int {
 	return m.subscriptions.ActiveCount()
 }
 
+// Send forwards one message through the current active stream.
+func (m *LifecycleManager) Send(data []byte) error {
+	if m == nil {
+		return fmt.Errorf("remote lifecycle manager is nil")
+	}
+	m.currentMu.RLock()
+	s := m.currentStream
+	m.currentMu.RUnlock()
+	if s == nil {
+		return fmt.Errorf("no active remote stream")
+	}
+	return s.Send(data)
+}
+
 // IsClosed reports whether the underlying subscription manager has been closed.
 func (m *LifecycleManager) IsClosed() bool {
 	if m == nil {

@@ -17,10 +17,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
+	"github.com/sheepzhao/claude-code-go/pkg/sdk"
 )
 
 // WorktreeLister resolves Git worktree paths for the current workspace without coupling runtime to one platform implementation.
@@ -50,6 +52,8 @@ type RemoteLifecycle interface {
 	LastDisconnectError() error
 	// LastDisconnectTime returns the timestamp of the most recent disconnect, or zero time.
 	LastDisconnectTime() time.Time
+	// Send writes raw bytes to the active remote transport.
+	Send(data []byte) error
 }
 
 // Runner coordinates one CLI turn between parsed input, engine execution and console rendering.
@@ -66,6 +70,8 @@ type Runner struct {
 	RemoteSession coreconfig.RemoteSessionConfig
 	// RemoteLifecycle manages optional remote stream subscribe/unsubscribe around one prompt turn.
 	RemoteLifecycle RemoteLifecycle
+	// ApprovalService resolves runtime approval prompts for remote permission requests.
+	ApprovalService approval.Service
 	// SessionID identifies the current logical CLI session.
 	SessionID string
 	// SessionManager restores previously persisted conversation history when available.
@@ -228,7 +234,26 @@ func (r *Runner) subscribeRemoteStream(ctx context.Context) func() error {
 	}
 
 	bridge := &RemoteEventBridge{Renderer: r.Renderer}
-	unsubscribe, err := r.RemoteLifecycle.Subscribe(ctx, r.RemoteSession, bridge.OnEvent())
+	onEvent := bridge.OnEvent()
+	permissionHandler := NewRemotePermissionHandler(r.ApprovalService)
+
+	var sm *remote.SessionManager
+	sm = remote.NewSessionManager(r.RemoteSession, r.RemoteLifecycle, remote.SessionCallbacks{
+		OnSDKMessage: func(data []byte) {
+			onEvent(remote.Event{Data: data})
+		},
+		OnPermissionRequest: func(req *sdk.ControlPermissionRequest, requestID string) {
+			go permissionHandler.HandlePermissionRequest(ctx, sm, req, requestID)
+		},
+		OnPermissionCancelled: func(requestID string, toolUseID string) {
+			logger.DebugCF("repl", "remote permission request cancelled", map[string]any{
+				"request_id":  requestID,
+				"tool_use_id": toolUseID,
+			})
+		},
+	})
+
+	unsubscribe, err := r.RemoteLifecycle.Subscribe(ctx, r.RemoteSession, sm.HandleEvent)
 	if err != nil {
 		logger.WarnCF("repl", "failed to subscribe remote stream", map[string]any{
 			"session_id": r.sessionID(),
@@ -236,7 +261,14 @@ func (r *Runner) subscribeRemoteStream(ctx context.Context) func() error {
 		})
 		return nil
 	}
-	return unsubscribe
+
+	return func() error {
+		if err := unsubscribe(); err != nil {
+			return err
+		}
+		sm.Disconnect()
+		return nil
+	}
 }
 
 // restoreHistory loads the current session history, optionally requiring explicit latest-session recovery or forking.

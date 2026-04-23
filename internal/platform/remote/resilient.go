@@ -286,6 +286,27 @@ func (r *ResilientEventStream) LastDisconnectTime() time.Time {
 	return r.lastDisconnectTime
 }
 
+// Send forwards one message to the underlying transport if it supports sending.
+func (r *ResilientEventStream) Send(data []byte) error {
+	if r == nil {
+		return fmt.Errorf("resilient stream is nil")
+	}
+	if r.closed.Load() {
+		return ErrStreamClosed
+	}
+	r.streamMu.RLock()
+	stream := r.stream
+	r.streamMu.RUnlock()
+	if stream == nil {
+		return ErrStreamClosed
+	}
+	sender, ok := stream.(interface{ Send([]byte) error })
+	if !ok {
+		return fmt.Errorf("underlying stream does not support sending")
+	}
+	return sender.Send(data)
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
