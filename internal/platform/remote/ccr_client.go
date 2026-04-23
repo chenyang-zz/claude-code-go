@@ -11,13 +11,123 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 	"github.com/sheepzhao/claude-code-go/pkg/sdk"
 )
+
+// ErrQueueFull is returned when the pending message queue has reached its
+// size limit and cannot accept new messages.
+var ErrQueueFull = errors.New("pending message queue is full")
+
+// MaxMessageRetries is the maximum number of send attempts for one pending
+// message before it is permanently dropped.
+const MaxMessageRetries = 3
+
+// MessageStatus represents the lifecycle state of a pending message.
+type MessageStatus int
+
+const (
+	// MessageStatusPending means the message is queued but not yet sent.
+	MessageStatusPending MessageStatus = iota
+	// MessageStatusSending means the message is currently being sent.
+	MessageStatusSending
+	// MessageStatusSent means the message was successfully sent.
+	MessageStatusSent
+	// MessageStatusFailed means the message exceeded retry limits.
+	MessageStatusFailed
+)
+
+// PendingMessage represents one message waiting to be sent or acknowledged.
+type PendingMessage struct {
+	// ID is a unique identifier for idempotency.
+	ID string
+	// Data is the raw message payload.
+	Data []byte
+	// Status tracks the message lifecycle.
+	Status MessageStatus
+	// RetryCount is the number of send attempts made so far.
+	RetryCount int
+	// CreatedAt is when the message was first queued.
+	CreatedAt time.Time
+}
+
+// PendingMessageQueue is a thread-safe bounded queue for pending messages.
+type PendingMessageQueue struct {
+	mu       sync.Mutex
+	messages []PendingMessage
+	maxSize  int
+}
+
+// NewPendingMessageQueue creates a queue with the given size limit.
+// A limit <= 0 means unlimited (not recommended for production).
+func NewPendingMessageQueue(maxSize int) *PendingMessageQueue {
+	if maxSize <= 0 {
+		maxSize = 1000
+	}
+	return &PendingMessageQueue{maxSize: maxSize}
+}
+
+// Enqueue adds one message to the tail. Returns ErrQueueFull if the queue
+// has reached its size limit.
+func (q *PendingMessageQueue) Enqueue(msg PendingMessage) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.maxSize > 0 && len(q.messages) >= q.maxSize {
+		return ErrQueueFull
+	}
+	q.messages = append(q.messages, msg)
+	return nil
+}
+
+// Dequeue removes and returns the head message. Returns nil, false if empty.
+func (q *PendingMessageQueue) Dequeue() (*PendingMessage, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.messages) == 0 {
+		return nil, false
+	}
+	msg := q.messages[0]
+	q.messages = q.messages[1:]
+	return &msg, true
+}
+
+// Peek returns the head message without removing it.
+func (q *PendingMessageQueue) Peek() (*PendingMessage, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.messages) == 0 {
+		return nil, false
+	}
+	msg := q.messages[0]
+	return &msg, true
+}
+
+// Len returns the current queue depth.
+func (q *PendingMessageQueue) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.messages)
+}
+
+// IsFull reports whether the queue has reached its size limit.
+func (q *PendingMessageQueue) IsFull() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.maxSize > 0 && len(q.messages) >= q.maxSize
+}
+
+// Clear empties the queue.
+func (q *PendingMessageQueue) Clear() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.messages = q.messages[:0]
+}
 
 // CCRClient sends messages to a remote CCR session via HTTP POST.
 // It is the write-path counterpart to the read-only EventStream used by
@@ -31,6 +141,15 @@ type CCRClient struct {
 	// tokenProvider supplies dynamic authentication tokens. When a request
 	// returns 401, the client refreshes the token and retries once.
 	tokenProvider TokenProvider
+
+	// queue holds messages that failed to send with a retryable error.
+	// New messages may also be queued when the SSE connection is down.
+	queue *PendingMessageQueue
+
+	// connected indicates whether the SSE read-path is currently connected.
+	// When false, SendWithContext queues messages instead of attempting
+	// delivery so they can be resent after reconnection.
+	connected atomic.Bool
 
 	// sendCount tracks the total number of successful sends.
 	sendCount atomic.Int64
@@ -62,6 +181,13 @@ func WithTokenProvider(provider TokenProvider) CCROption {
 	}
 }
 
+// WithQueueSize sets the pending message queue size limit. Defaults to 1000.
+func WithQueueSize(size int) CCROption {
+	return func(c *CCRClient) {
+		c.queue = NewPendingMessageQueue(size)
+	}
+}
+
 // NewCCRClient creates a CCRClient for sending messages to the given endpoint.
 // endpoint should be a fully-qualified URL (e.g. https://host/sessions/{id}/messages).
 func NewCCRClient(endpoint, sessionID string, opts ...CCROption) *CCRClient {
@@ -70,10 +196,15 @@ func NewCCRClient(endpoint, sessionID string, opts ...CCROption) *CCRClient {
 		endpoint:  strings.TrimSpace(endpoint),
 		sessionID: strings.TrimSpace(sessionID),
 		headers:   make(map[string]string),
+		queue:     NewPendingMessageQueue(1000),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	// Default to connected so that sends are attempted immediately.
+	// Callers that manage SSE lifecycle (e.g. LifecycleManager) set
+	// this to false when the read-path disconnects.
+	c.connected.Store(true)
 	return c
 }
 
@@ -85,6 +216,10 @@ func (c *CCRClient) Send(data []byte) error {
 }
 
 // SendWithContext posts raw data with the given context.
+// If the SSE connection is down, the message is queued immediately without
+// attempting delivery. If the send fails with a retryable error (network
+// timeout, 5xx, rate limit), the message is also queued. Non-retryable
+// errors (4xx auth) are returned directly.
 func (c *CCRClient) SendWithContext(ctx context.Context, data []byte) error {
 	if c == nil {
 		return fmt.Errorf("ccr client is nil")
@@ -93,6 +228,54 @@ func (c *CCRClient) SendWithContext(ctx context.Context, data []byte) error {
 		return fmt.Errorf("ccr client endpoint not configured")
 	}
 
+	// If the connection is known to be down, queue immediately.
+	if !c.connected.Load() {
+		msg := PendingMessage{
+			ID:        uuid.NewString(),
+			Data:      data,
+			Status:    MessageStatusPending,
+			CreatedAt: time.Now(),
+		}
+		if queueErr := c.queue.Enqueue(msg); queueErr != nil {
+			return fmt.Errorf("connection down and %w", queueErr)
+		}
+		logger.DebugCF("remote_ccr", "message queued (connection down)", map[string]any{
+			"msg_id": msg.ID,
+		})
+		return nil
+	}
+
+	err := c.doSend(ctx, data)
+	if err == nil {
+		return nil
+	}
+
+	// Check if the error is retryable.
+	se, ok := IsSendError(err)
+	if ok && se.IsRetryable() {
+		msg := PendingMessage{
+			ID:        uuid.NewString(),
+			Data:      data,
+			Status:    MessageStatusPending,
+			CreatedAt: time.Now(),
+		}
+		if queueErr := c.queue.Enqueue(msg); queueErr != nil {
+			return fmt.Errorf("send failed and %w: %v", queueErr, err)
+		}
+		logger.DebugCF("remote_ccr", "message queued for retry", map[string]any{
+			"msg_id": msg.ID,
+			"error":  err.Error(),
+		})
+		return nil
+	}
+
+	// Non-retryable error — return directly.
+	return err
+}
+
+// doSend performs the actual HTTP POST. It is the core send logic without
+// retry queuing.
+func (c *CCRClient) doSend(ctx context.Context, data []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -362,6 +545,138 @@ func (c *CCRClient) LastSendTime() time.Time {
 		return *t
 	}
 	return time.Time{}
+}
+
+// SetConnected updates the connection state. Callers (e.g. LifecycleManager
+// onStateChange) set this to false when the SSE stream disconnects and true
+// after reconnection. When transitioning to connected, pending messages are
+// automatically resent.
+func (c *CCRClient) SetConnected(connected bool) {
+	if c == nil {
+		return
+	}
+	wasConnected := c.connected.Swap(connected)
+	if !wasConnected && connected {
+		logger.DebugCF("remote_ccr", "connection restored, triggering resend", map[string]any{
+			"pending": c.queue.Len(),
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = c.ResendPending(ctx)
+	}
+}
+
+// IsConnected reports whether the SSE read-path is currently connected.
+func (c *CCRClient) IsConnected() bool {
+	if c == nil {
+		return false
+	}
+	return c.connected.Load()
+}
+
+// ResendPending attempts to send all messages in the pending queue.
+// Successfully sent messages are removed. Retryable failures are re-queued;
+// non-retryable failures are dropped.
+func (c *CCRClient) ResendPending(ctx context.Context) error {
+	if c == nil {
+		return fmt.Errorf("ccr client is nil")
+	}
+
+	// Drain all pending messages first to avoid infinite loops when
+	// retryable failures are re-queued.
+	var batch []PendingMessage
+	for {
+		msg, ok := c.queue.Dequeue()
+		if !ok {
+			break
+		}
+		batch = append(batch, *msg)
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+
+	logger.DebugCF("remote_ccr", "resending pending messages", map[string]any{
+		"count": len(batch),
+	})
+
+	var firstErr error
+	for i := range batch {
+		msg := &batch[i]
+		msg.Status = MessageStatusSending
+		err := c.doSend(ctx, msg.Data)
+		if err == nil {
+			msg.Status = MessageStatusSent
+			continue
+		}
+
+		se, isSendErr := IsSendError(err)
+		if isSendErr && se.IsRetryable() {
+			msg.RetryCount++
+			if msg.RetryCount > MaxMessageRetries {
+				msg.Status = MessageStatusFailed
+				logger.WarnCF("remote_ccr", "pending message dropped (retry limit exceeded)", map[string]any{
+					"msg_id":      msg.ID,
+					"retry_count": msg.RetryCount,
+					"error":       err.Error(),
+				})
+				if firstErr == nil {
+					firstErr = fmt.Errorf("message %s exceeded retry limit: %w", msg.ID, err)
+				}
+				continue
+			}
+			msg.Status = MessageStatusPending
+			if queueErr := c.queue.Enqueue(*msg); queueErr != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("resend failed and %w: %v", queueErr, err)
+				}
+				continue
+			}
+			logger.DebugCF("remote_ccr", "resend failed, re-queued", map[string]any{
+				"msg_id":      msg.ID,
+				"retry_count": msg.RetryCount,
+				"error":       err.Error(),
+			})
+			continue
+		}
+
+		// Non-retryable error — drop the message.
+		msg.Status = MessageStatusFailed
+		logger.WarnCF("remote_ccr", "pending message dropped (non-retryable)", map[string]any{
+			"msg_id": msg.ID,
+			"error":  err.Error(),
+		})
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+// Enqueue stores one message in the pending queue for later delivery.
+// Returns ErrQueueFull if the queue has reached its size limit.
+func (c *CCRClient) Enqueue(msg PendingMessage) error {
+	if c == nil {
+		return fmt.Errorf("ccr client is nil")
+	}
+	return c.queue.Enqueue(msg)
+}
+
+// PendingCount returns the number of messages currently in the pending queue.
+func (c *CCRClient) PendingCount() int {
+	if c == nil {
+		return 0
+	}
+	return c.queue.Len()
+}
+
+// ClearPending empties the pending message queue.
+func (c *CCRClient) ClearPending() {
+	if c == nil {
+		return
+	}
+	c.queue.Clear()
 }
 
 // DeriveEndpoint derives the HTTP POST endpoint from remote session config.
