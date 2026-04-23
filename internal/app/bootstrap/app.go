@@ -422,6 +422,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
+		runtime.EnablePromptCaching = cfg.EnablePromptCaching
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
@@ -438,6 +439,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
+		runtime.EnablePromptCaching = cfg.EnablePromptCaching
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),

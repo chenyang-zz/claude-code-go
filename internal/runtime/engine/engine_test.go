@@ -2847,3 +2847,67 @@ func TestDescribeTools_SkipsDisabledTools(t *testing.T) {
 		t.Fatalf("expected EnabledTool, got %s", descs[0].Name)
 	}
 }
+
+// TestRuntimeRunPassesEnablePromptCaching verifies that the engine forwards
+// EnablePromptCaching from its own config into the model request.
+func TestRuntimeRunPassesEnablePromptCaching(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "hello",
+			}),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.EnablePromptCaching = true
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello world",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 1 {
+		t.Fatalf("Stream() call count = %d, want 1", len(client.requests))
+	}
+	if !client.requests[0].EnablePromptCaching {
+		t.Fatalf("EnablePromptCaching = %v, want true", client.requests[0].EnablePromptCaching)
+	}
+}
+
+// TestRuntimeRunPassesDisabledPromptCaching verifies that the engine forwards
+// a false EnablePromptCaching value into the model request.
+func TestRuntimeRunPassesDisabledPromptCaching(t *testing.T) {
+	client := &fakeModelClient{
+		streams: []model.Stream{
+			newModelStream(model.Event{
+				Type: model.EventTypeTextDelta,
+				Text: "hello",
+			}),
+		},
+	}
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.EnablePromptCaching = false
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "hello world",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for range out {
+	}
+
+	if len(client.requests) != 1 {
+		t.Fatalf("Stream() call count = %d, want 1", len(client.requests))
+	}
+	if client.requests[0].EnablePromptCaching {
+		t.Fatalf("EnablePromptCaching = %v, want false", client.requests[0].EnablePromptCaching)
+	}
+}

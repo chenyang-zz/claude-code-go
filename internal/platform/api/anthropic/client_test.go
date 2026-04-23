@@ -622,3 +622,212 @@ func TestClientStreamTaskBudgetNoRemaining(t *testing.T) {
 	for range stream {
 	}
 }
+
+// TestClientStreamAddsCacheControlWhenEnabled verifies that a cache_control
+// marker is placed on the last content block of the last message when
+// EnablePromptCaching is true.
+func TestClientStreamAddsCacheControlWhenEnabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 2 {
+			t.Fatalf("request messages = %#v, want 2 messages", body["messages"])
+		}
+
+		lastMsg, ok := messages[1].(map[string]any)
+		if !ok {
+			t.Fatalf("last message = %#v, want object", messages[1])
+		}
+		content, ok := lastMsg["content"].([]any)
+		if !ok || len(content) == 0 {
+			t.Fatalf("last message content = %#v, want non-empty array", lastMsg["content"])
+		}
+		lastBlock, ok := content[len(content)-1].(map[string]any)
+		if !ok {
+			t.Fatalf("last content block = %#v, want object", content[len(content)-1])
+		}
+		cacheControl, ok := lastBlock["cache_control"].(map[string]any)
+		if !ok {
+			t.Fatalf("cache_control = %#v, want object", lastBlock["cache_control"])
+		}
+		if cacheControl["type"] != "ephemeral" {
+			t.Fatalf("cache_control.type = %q, want ephemeral", cacheControl["type"])
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model:               "claude-sonnet-4-5",
+		EnablePromptCaching: true,
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					{Type: "text", Text: "first"},
+				},
+			},
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					{Type: "text", Text: "second"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
+// TestClientStreamOmitsCacheControlWhenDisabled verifies that no cache_control
+// marker appears when EnablePromptCaching is false.
+func TestClientStreamOmitsCacheControlWhenDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 1 {
+			t.Fatalf("request messages = %#v, want 1 message", body["messages"])
+		}
+
+		msg, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("message = %#v, want object", messages[0])
+		}
+		content, ok := msg["content"].([]any)
+		if !ok || len(content) == 0 {
+			t.Fatalf("message content = %#v, want non-empty array", msg["content"])
+		}
+		lastBlock, ok := content[len(content)-1].(map[string]any)
+		if !ok {
+			t.Fatalf("last content block = %#v, want object", content[len(content)-1])
+		}
+		if _, hasCacheControl := lastBlock["cache_control"]; hasCacheControl {
+			t.Fatalf("last block should not have cache_control, got %#v", lastBlock["cache_control"])
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model:               "claude-sonnet-4-5",
+		EnablePromptCaching: false,
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					{Type: "text", Text: "hello"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
+// TestClientStreamSkipsThinkingBlocksForCacheControl verifies that when the
+// last message is from the assistant and ends with thinking blocks, the
+// cache_control marker is placed on the preceding eligible block instead.
+func TestClientStreamSkipsThinkingBlocksForCacheControl(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 1 {
+			t.Fatalf("request messages = %#v, want 1 message", body["messages"])
+		}
+
+		msg, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("message = %#v, want object", messages[0])
+		}
+		content, ok := msg["content"].([]any)
+		if !ok || len(content) != 2 {
+			t.Fatalf("message content length = %d, want 2", len(content))
+		}
+
+		textBlock, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("first block = %#v, want object", content[0])
+		}
+		if textBlock["type"] != "text" {
+			t.Fatalf("first block type = %q, want text", textBlock["type"])
+		}
+		cacheControl, ok := textBlock["cache_control"].(map[string]any)
+		if !ok {
+			t.Fatalf("text block cache_control = %#v, want object", textBlock["cache_control"])
+		}
+		if cacheControl["type"] != "ephemeral" {
+			t.Fatalf("cache_control.type = %q, want ephemeral", cacheControl["type"])
+		}
+
+		thinkingBlock, ok := content[1].(map[string]any)
+		if !ok {
+			t.Fatalf("second block = %#v, want object", content[1])
+		}
+		if thinkingBlock["type"] != "thinking" {
+			t.Fatalf("second block type = %q, want thinking", thinkingBlock["type"])
+		}
+		if _, hasCacheControl := thinkingBlock["cache_control"]; hasCacheControl {
+			t.Fatal("thinking block should not have cache_control")
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model:               "claude-sonnet-4-5",
+		EnablePromptCaching: true,
+		Messages: []message.Message{
+			{
+				Role: message.RoleAssistant,
+				Content: []message.ContentPart{
+					{Type: "text", Text: "hello"},
+					{Type: "thinking", Thinking: "thinking..."},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}

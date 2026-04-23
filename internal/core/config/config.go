@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
@@ -79,6 +80,10 @@ type Config struct {
 	DisableAllHooks bool
 	// OutputFormat selects the output rendering mode (e.g. "console" or "stream-json").
 	OutputFormat string
+	// EnablePromptCaching controls whether the Anthropic client attaches
+	// cache_control markers to API requests for prompt caching. It defaults to
+	// true and can be disabled via the DISABLE_PROMPT_CACHING environment variable.
+	EnablePromptCaching bool
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.
@@ -133,7 +138,7 @@ type PermissionConfig struct {
 
 // DefaultConfig returns the minimum configuration required by the single-turn text runtime.
 func DefaultConfig() Config {
-	return Config{
+	cfg := Config{
 		Model:         "claude-sonnet-4-5",
 		EffortLevel:   "",
 		Theme:         NormalizeThemeSetting(""),
@@ -146,6 +151,12 @@ func DefaultConfig() Config {
 			DefaultMode: "default",
 		},
 	}
+	if os.Getenv("DISABLE_PROMPT_CACHING") != "" {
+		cfg.EnablePromptCaching = false
+	} else {
+		cfg.EnablePromptCaching = true
+	}
+	return cfg
 }
 
 // OAuthAccountConfig stores the minimum cached account metadata needed by `/status`.

@@ -63,23 +63,30 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	Thinking  string         `json:"thinking,omitempty"`
-	Signature string         `json:"signature,omitempty"`
-	Data      string         `json:"data,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   any            `json:"content,omitempty"`
-	IsError   bool           `json:"is_error,omitempty"`
+	Type         string         `json:"type"`
+	Text         string         `json:"text,omitempty"`
+	Thinking     string         `json:"thinking,omitempty"`
+	Signature    string         `json:"signature,omitempty"`
+	Data         string         `json:"data,omitempty"`
+	ID           string         `json:"id,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	Input        map[string]any `json:"input,omitempty"`
+	ToolUseID    string         `json:"tool_use_id,omitempty"`
+	Content      any            `json:"content,omitempty"`
+	IsError      bool           `json:"is_error,omitempty"`
+	CacheControl *cacheControl  `json:"cache_control,omitempty"`
+}
+
+// cacheControl carries the Anthropic cache_control marker used for prompt caching.
+type cacheControl struct {
+	Type string `json:"type"`
 }
 
 type anthropicTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"input_schema"`
+	CacheControl *cacheControl  `json:"cache_control,omitempty"`
 }
 
 // anthropicOutputConfig carries the output_config field sent in the API request body.
@@ -322,7 +329,7 @@ func (c *Client) buildMessagesRequest(req model.Request) messagesRequest {
 		MaxTokens: maxOutputTokens(req),
 		System:    req.System,
 		Stream:    true,
-		Messages:  mapMessages(req.Messages),
+		Messages:  mapMessages(req.Messages, req.EnablePromptCaching),
 		Tools:     mapTools(req.Tools),
 	}
 
@@ -527,7 +534,10 @@ func parseToolUseInput(raw string) (map[string]any, error) {
 }
 
 // mapMessages converts shared message types into the Anthropic request shape.
-func mapMessages(messages []message.Message) []anthropicMessage {
+// When enablePromptCaching is true, a single cache_control marker is placed
+// on the last eligible content block of the last message, matching the TS
+// addCacheBreakpoints rule.
+func mapMessages(messages []message.Message, enablePromptCaching bool) []anthropicMessage {
 	out := make([]anthropicMessage, 0, len(messages))
 	for _, msg := range messages {
 		item := anthropicMessage{
@@ -573,6 +583,30 @@ func mapMessages(messages []message.Message) []anthropicMessage {
 		}
 		out = append(out, item)
 	}
+
+	// Place a single cache_control marker on the last content block of the
+	// last message, skipping thinking/redacted_thinking blocks for assistant
+	// messages to match TS assistantMessageToMessageParam behavior.
+	if enablePromptCaching && len(out) > 0 {
+		lastMsg := &out[len(out)-1]
+		if len(lastMsg.Content) > 0 {
+			lastIdx := len(lastMsg.Content) - 1
+			if lastMsg.Role == string(message.RoleAssistant) {
+				for lastIdx >= 0 {
+					block := lastMsg.Content[lastIdx]
+					if block.Type == "thinking" || block.Type == "redacted_thinking" {
+						lastIdx--
+					} else {
+						break
+					}
+				}
+			}
+			if lastIdx >= 0 {
+				lastMsg.Content[lastIdx].CacheControl = &cacheControl{Type: "ephemeral"}
+			}
+		}
+	}
+
 	return out
 }
 

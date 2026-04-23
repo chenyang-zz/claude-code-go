@@ -84,6 +84,10 @@ type Runtime struct {
 	DisableAllHooks bool
 	// HookRunner executes command hooks during the engine lifecycle.
 	HookRunner HookRunner
+	// EnablePromptCaching tells the Anthropic provider to attach cache_control
+	// markers on API requests. Default is true; it can be disabled via the
+	// DISABLE_PROMPT_CACHING environment variable.
+	EnablePromptCaching bool
 }
 
 // New builds the minimum single-turn engine.
@@ -441,9 +445,10 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		requestMessages := append([]message.Message(nil), history.Messages...)
 		requestMessages = append(requestMessages, transientMessages...)
 		streamReq := model.Request{
-			Model:    activeModel,
-			Messages: requestMessages,
-			Tools:    e.ToolCatalog,
+			Model:               activeModel,
+			Messages:            requestMessages,
+			Tools:               e.ToolCatalog,
+			EnablePromptCaching: e.EnablePromptCaching,
 		}
 
 		// Attach API-side task_budget when the feature flag is enabled and

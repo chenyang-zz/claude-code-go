@@ -16,6 +16,10 @@ type Request struct {
 	// task-budgets-2026-03-13 beta header. Only included for first-party
 	// Anthropic requests.
 	TaskBudget *TaskBudgetParam
+	// EnablePromptCaching tells the Anthropic client to place a cache_control
+	// marker on the last content block of the last message in the request.
+	// When false (or when the provider is not Anthropic) the marker is omitted.
+	EnablePromptCaching bool
 }
 
 // TaskBudgetParam represents the output_config.task_budget wire format sent
