@@ -7,13 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// SSEClient implements one receive-only SSE event stream.
+// SSEClient implements one receive-only SSE event stream with sequence-number
+// tracking for deduplication and resumable reconnection.
 type SSEClient struct {
 	// response stores the active SSE HTTP response body.
 	response *http.Response
@@ -23,6 +26,13 @@ type SSEClient struct {
 	streamCh chan streamResult
 	// closeOnce guarantees the stream is closed once.
 	closeOnce sync.Once
+
+	// seqMu protects sequence-number state.
+	seqMu sync.RWMutex
+	// lastSequenceNum is the high-water mark of sequence numbers seen on this stream.
+	lastSequenceNum int64
+	// seenSequenceNums tracks sequence numbers already observed for deduplication.
+	seenSequenceNums map[int64]struct{}
 }
 
 type streamResult struct {
@@ -31,11 +41,15 @@ type streamResult struct {
 }
 
 // DialSSE opens one SSE connection and starts the background frame reader.
+// If initialSequenceNum is greater than zero, the request includes
+// from_sequence_num query parameter and Last-Event-ID header so the server
+// resumes from the last known position instead of replaying from the beginning.
 func DialSSE(
 	ctx context.Context,
 	endpoint string,
 	headers map[string]string,
 	client *http.Client,
+	initialSequenceNum int64,
 ) (*SSEClient, error) {
 	trimmedEndpoint := strings.TrimSpace(endpoint)
 	if trimmedEndpoint == "" {
@@ -50,7 +64,19 @@ func DialSSE(
 		httpClient = http.DefaultClient
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimmedEndpoint, nil)
+	// Build SSE URL with sequence number for resumption.
+	sseURL := trimmedEndpoint
+	if initialSequenceNum > 0 {
+		u, err := url.Parse(trimmedEndpoint)
+		if err == nil {
+			q := u.Query()
+			q.Set("from_sequence_num", strconv.FormatInt(initialSequenceNum, 10))
+			u.RawQuery = q.Encode()
+			sseURL = u.String()
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build sse request: %w", err)
 	}
@@ -58,9 +84,13 @@ func DialSSE(
 	for key, value := range headers {
 		req.Header.Set(key, value)
 	}
+	if initialSequenceNum > 0 {
+		req.Header.Set("Last-Event-ID", strconv.FormatInt(initialSequenceNum, 10))
+	}
 
 	logger.DebugCF("remote_sse", "opening sse stream", map[string]any{
-		"endpoint": trimmedEndpoint,
+		"endpoint":             trimmedEndpoint,
+		"initial_sequence_num": initialSequenceNum,
 	})
 
 	resp, err := httpClient.Do(req)
@@ -75,15 +105,18 @@ func DialSSE(
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	c := &SSEClient{
-		response: resp,
-		cancel:   cancel,
-		streamCh: make(chan streamResult, 16),
+		response:         resp,
+		cancel:           cancel,
+		streamCh:         make(chan streamResult, 16),
+		lastSequenceNum:  initialSequenceNum,
+		seenSequenceNums: make(map[int64]struct{}),
 	}
 	go c.readLoop(streamCtx)
 
 	logger.DebugCF("remote_sse", "sse stream connected", map[string]any{
-		"endpoint": trimmedEndpoint,
-		"status":   resp.StatusCode,
+		"endpoint":             trimmedEndpoint,
+		"status":               resp.StatusCode,
+		"initial_sequence_num": initialSequenceNum,
 	})
 
 	return c, nil
@@ -124,6 +157,53 @@ func (c *SSEClient) Close() error {
 	return nil
 }
 
+// GetLastSequenceNum returns the high-water mark of sequence numbers seen on
+// this stream. Callers that recreate the transport read this before close()
+// and pass it as initialSequenceNum to the next instance so the server
+// resumes from the right point instead of replaying everything.
+func (c *SSEClient) GetLastSequenceNum() int64 {
+	if c == nil {
+		return 0
+	}
+	c.seqMu.RLock()
+	defer c.seqMu.RUnlock()
+	return c.lastSequenceNum
+}
+
+// isDuplicateSeqNum reports whether the given sequence number has already been
+// observed on this stream. It is safe for concurrent use.
+func (c *SSEClient) isDuplicateSeqNum(seqNum int64) bool {
+	c.seqMu.RLock()
+	defer c.seqMu.RUnlock()
+	_, ok := c.seenSequenceNums[seqNum]
+	return ok
+}
+
+// recordSequenceNum registers a newly observed sequence number, updates the
+// high-water mark, and prunes old entries when the set grows too large.
+func (c *SSEClient) recordSequenceNum(seqNum int64) {
+	c.seqMu.Lock()
+	defer c.seqMu.Unlock()
+
+	c.seenSequenceNums[seqNum] = struct{}{}
+	if seqNum > c.lastSequenceNum {
+		c.lastSequenceNum = seqNum
+	}
+
+	// Prevent unbounded growth: prune sequence numbers well below the
+	// high-water mark. Only numbers near lastSequenceNum matter for dedup.
+	const maxSize = 1000
+	const pruneThreshold = 200
+	if len(c.seenSequenceNums) > maxSize {
+		threshold := c.lastSequenceNum - int64(pruneThreshold)
+		for s := range c.seenSequenceNums {
+			if s < threshold {
+				delete(c.seenSequenceNums, s)
+			}
+		}
+	}
+}
+
 func (c *SSEClient) readLoop(ctx context.Context) {
 	defer close(c.streamCh)
 	defer func() {
@@ -150,6 +230,20 @@ func (c *SSEClient) readLoop(ctx context.Context) {
 			normalizedType = "message"
 		}
 		payload := strings.Join(dataLines, "\n")
+
+		// Parse sequence number from the event ID, perform deduplication,
+		// and update the high-water mark with pruning.
+		if id := strings.TrimSpace(eventID); id != "" {
+			if seqNum, err := strconv.ParseInt(id, 10, 64); err == nil {
+				if c.isDuplicateSeqNum(seqNum) {
+					logger.WarnCF("remote_sse", "duplicate sequence number detected", map[string]any{
+						"seq_num": seqNum,
+					})
+				}
+				c.recordSequenceNum(seqNum)
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return

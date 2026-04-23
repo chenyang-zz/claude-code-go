@@ -14,14 +14,18 @@ import (
 // StreamFactory creates one remote event stream from runtime remote session settings.
 type StreamFactory interface {
 	// Open builds and connects one remote event stream.
-	Open(ctx context.Context, session coreconfig.RemoteSessionConfig) (EventStream, error)
+	// lastSeqNum carries the high-water sequence number from a previous
+	// transport so SSE connections can resume from the right point.
+	Open(ctx context.Context, session coreconfig.RemoteSessionConfig, lastSeqNum int64) (EventStream, error)
 }
 
 // DefaultStreamFactory opens SSE/WS streams from one RemoteSessionConfig stream endpoint.
 type DefaultStreamFactory struct{}
 
 // Open dials the configured stream endpoint using the matching transport.
-func (f DefaultStreamFactory) Open(ctx context.Context, session coreconfig.RemoteSessionConfig) (EventStream, error) {
+// For SSE endpoints, lastSeqNum is forwarded as the initial sequence number
+// so the server resumes from the last known position.
+func (f DefaultStreamFactory) Open(ctx context.Context, session coreconfig.RemoteSessionConfig, lastSeqNum int64) (EventStream, error) {
 	trimmedStreamURL := strings.TrimSpace(session.StreamURL)
 	if trimmedStreamURL == "" {
 		return nil, fmt.Errorf("missing remote stream url")
@@ -31,7 +35,7 @@ func (f DefaultStreamFactory) Open(ctx context.Context, session coreconfig.Remot
 	case strings.HasPrefix(trimmedStreamURL, "ws://"), strings.HasPrefix(trimmedStreamURL, "wss://"):
 		return DialWebSocket(ctx, trimmedStreamURL, nil, nil)
 	case strings.HasPrefix(trimmedStreamURL, "http://"), strings.HasPrefix(trimmedStreamURL, "https://"):
-		return DialSSE(ctx, trimmedStreamURL, nil, nil)
+		return DialSSE(ctx, trimmedStreamURL, nil, nil, lastSeqNum)
 	default:
 		return nil, fmt.Errorf("unsupported remote stream scheme: %s", trimmedStreamURL)
 	}
@@ -80,8 +84,10 @@ func (m *LifecycleManager) Subscribe(ctx context.Context, session coreconfig.Rem
 
 	// Wrap the factory with resilient reconnection. The dialer uses a
 	// background context so retries survive caller context cancellation.
-	dialer := func(dialCtx context.Context) (EventStream, error) {
-		return m.streamFactory.Open(dialCtx, session)
+	// The lastSeqNum argument is forwarded to the factory so SSE streams
+	// can resume from the last known sequence number on reconnection.
+	dialer := func(dialCtx context.Context, lastSeqNum int64) (EventStream, error) {
+		return m.streamFactory.Open(dialCtx, session, lastSeqNum)
 	}
 
 	stream := NewResilientEventStream(dialer, DefaultBackoffConfig(), nil)

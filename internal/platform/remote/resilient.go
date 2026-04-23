@@ -91,8 +91,10 @@ func DefaultBackoffConfig() BackoffConfig {
 // It implements the EventStream interface transparently.
 type ResilientEventStream struct {
 	// dialer creates a fresh underlying EventStream. It is called on initial
-	// connection and on every reconnection attempt.
-	dialer func(ctx context.Context) (EventStream, error)
+	// connection and on every reconnection attempt. The lastSeqNum argument
+	// carries the high-water sequence number from the previous transport so
+	// the new one can resume from the right point.
+	dialer func(ctx context.Context, lastSeqNum int64) (EventStream, error)
 	// config holds the exponential-backoff parameters.
 	config BackoffConfig
 
@@ -123,6 +125,13 @@ type ResilientEventStream struct {
 	// lastDisconnectTime records when the most recent disconnect occurred.
 	lastDisconnectTime time.Time
 
+	// seqMu protects lastSequenceNum.
+	seqMu sync.RWMutex
+	// lastSequenceNum is the high-water sequence number captured from the
+	// previous underlying transport. Passed to dialer on reconnection so the
+	// server resumes from the right point instead of replaying everything.
+	lastSequenceNum int64
+
 	// closeOnce ensures Close side-effects execute exactly once.
 	closeOnce sync.Once
 	// closed is set to true after Close() is called.
@@ -132,7 +141,7 @@ type ResilientEventStream struct {
 // NewResilientEventStream creates a resilient wrapper around a dialer.
 // The stream is lazily connected on the first Recv call.
 func NewResilientEventStream(
-	dialer func(ctx context.Context) (EventStream, error),
+	dialer func(ctx context.Context, lastSeqNum int64) (EventStream, error),
 	config BackoffConfig,
 	onStateChange StateChangeCallback,
 ) *ResilientEventStream {
@@ -286,6 +295,15 @@ func (r *ResilientEventStream) LastDisconnectTime() time.Time {
 	return r.lastDisconnectTime
 }
 
+// GetLastSequenceNum returns the high-water sequence number captured from the
+// previous underlying transport. The value is updated on every disconnect so
+// callers can persist it across process restarts.
+func (r *ResilientEventStream) GetLastSequenceNum() int64 {
+	r.seqMu.RLock()
+	defer r.seqMu.RUnlock()
+	return r.lastSequenceNum
+}
+
 // Send forwards one message to the underlying transport if it supports sending.
 func (r *ResilientEventStream) Send(data []byte) error {
 	if r == nil {
@@ -322,7 +340,7 @@ func (r *ResilientEventStream) getStream() EventStream {
 func (r *ResilientEventStream) connect(ctx context.Context) error {
 	r.transitionState(StateConnecting, nil)
 
-	stream, err := r.dialer(ctx)
+	stream, err := r.dialer(ctx, r.GetLastSequenceNum())
 	if err != nil {
 		return err
 	}
@@ -337,8 +355,9 @@ func (r *ResilientEventStream) connect(ctx context.Context) error {
 	return nil
 }
 
-// beginReconnect tears down the current transport and spawns a background
-// goroutine that retries the dial with exponential backoff.
+// beginReconnect tears down the current transport, captures its sequence
+// number high-water mark, and spawns a background goroutine that retries
+// the dial with exponential backoff.
 func (r *ResilientEventStream) beginReconnect(triggerErr error) {
 	r.reconnectMu.Lock()
 	defer r.reconnectMu.Unlock()
@@ -351,9 +370,17 @@ func (r *ResilientEventStream) beginReconnect(triggerErr error) {
 	r.reconnectDone = make(chan struct{})
 	r.reconnectErr = nil
 
-	// Close the broken transport.
+	// Capture sequence number before closing the broken transport.
 	r.streamMu.Lock()
 	if r.stream != nil {
+		if seqProvider, ok := r.stream.(interface{ GetLastSequenceNum() int64 }); ok {
+			seq := seqProvider.GetLastSequenceNum()
+			r.seqMu.Lock()
+			if seq > r.lastSequenceNum {
+				r.lastSequenceNum = seq
+			}
+			r.seqMu.Unlock()
+		}
 		_ = r.stream.Close()
 		r.stream = nil
 	}
@@ -408,7 +435,7 @@ func (r *ResilientEventStream) reconnectLoop() {
 
 		// Use a background context so reconnection survives caller
 		// context cancellation; only Close() can stop it.
-		stream, err := r.dialer(context.Background())
+		stream, err := r.dialer(context.Background(), r.GetLastSequenceNum())
 		if err == nil {
 			r.streamMu.Lock()
 			r.stream = stream

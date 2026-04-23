@@ -59,7 +59,7 @@ func TestResilientEventStream_RecvSuccess(t *testing.T) {
 	want := Event{Transport: TransportSSE, Type: "test", Data: []byte("hello")}
 	inner := newMockStream([]mockResult{{event: want}})
 
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		return inner, nil
 	}
 
@@ -96,7 +96,7 @@ func TestResilientEventStream_ReconnectsAfterTransientError(t *testing.T) {
 	stream2 := newMockStream([]mockResult{{event: event2}})
 
 	var callCount atomic.Int32
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		c := callCount.Add(1)
 		if c == 1 {
 			return stream1, nil
@@ -155,7 +155,7 @@ func TestResilientEventStream_ClosedRecvReturnsStreamClosed(t *testing.T) {
 	t.Parallel()
 
 	inner := newMockStream(nil)
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		return inner, nil
 	}
 
@@ -190,7 +190,7 @@ func TestResilientEventStream_StateCallbacksFire(t *testing.T) {
 		{event: Event{Type: "x"}},
 		{err: errors.New("boom")},
 	})
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		return inner, nil
 	}
 
@@ -230,7 +230,7 @@ func TestResilientEventStream_ExhaustedRetriesCloses(t *testing.T) {
 	t.Parallel()
 
 	var callCount atomic.Int32
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		callCount.Add(1)
 		return nil, errors.New("always fails")
 	}
@@ -273,7 +273,7 @@ func TestResilientEventStream_DialPermanentError(t *testing.T) {
 	t.Parallel()
 
 	// Simulate an SSE stream rejection with 401 status.
-	dialer := func(ctx context.Context) (EventStream, error) {
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
 		return nil, errors.New("sse stream rejected: status=401 body=unauthorized")
 	}
 
@@ -409,5 +409,163 @@ func TestBackoffIntervals(t *testing.T) {
 	elapsed = time.Since(start)
 	if elapsed < 8*time.Millisecond || elapsed > 20*time.Millisecond {
 		t.Fatalf("post-reset wait = %v, want ~10ms", elapsed)
+	}
+}
+
+// mockSeqStream is an EventStream that also implements GetLastSequenceNum.
+type mockSeqStream struct {
+	mockStream
+	seqNum int64
+}
+
+func (m *mockSeqStream) GetLastSequenceNum() int64 {
+	return m.seqNum
+}
+
+// TestResilientEventStream_CapturesSequenceNumOnDisconnect verifies that the
+// resilient stream captures the underlying transport's sequence number before
+// closing it during a reconnect.
+func TestResilientEventStream_CapturesSequenceNumOnDisconnect(t *testing.T) {
+	t.Parallel()
+
+	stream1 := &mockSeqStream{
+		mockStream: mockStream{results: []mockResult{
+			{event: Event{Type: "msg"}},
+			{err: errors.New("transient")},
+		}},
+		seqNum: 42,
+	}
+	stream2 := newMockStream([]mockResult{{event: Event{Type: "msg2"}}})
+
+	var callCount atomic.Int32
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
+		c := callCount.Add(1)
+		if c == 1 {
+			return stream1, nil
+		}
+		// Verify the sequence number from the first stream was passed.
+		if lastSeqNum != 42 {
+			t.Errorf("dialer lastSeqNum = %d, want 42", lastSeqNum)
+		}
+		return stream2, nil
+	}
+
+	config := BackoffConfig{
+		InitialInterval: 10 * time.Millisecond,
+		MaxInterval:     50 * time.Millisecond,
+		Multiplier:      2.0,
+		JitterFraction:  0,
+		MaxRetries:      5,
+	}
+
+	r := NewResilientEventStream(dialer, config, nil)
+	defer r.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// First Recv reads from stream1.
+	_, err := r.Recv(ctx)
+	if err != nil {
+		t.Fatalf("first Recv error = %v", err)
+	}
+
+	// Second Recv hits transient error, triggering reconnect.
+	_, err = r.Recv(ctx)
+	if !errors.Is(err, ErrStreamDisconnected) {
+		t.Fatalf("second Recv error = %v, want ErrStreamDisconnected", err)
+	}
+
+	// Wait for reconnection to finish.
+	time.Sleep(200 * time.Millisecond)
+
+	// Third Recv should read from stream2.
+	got, err := r.Recv(ctx)
+	if err != nil {
+		t.Fatalf("third Recv error = %v", err)
+	}
+	if got.Type != "msg2" {
+		t.Fatalf("event = %q, want %q", got.Type, "msg2")
+	}
+
+	// ResilientEventStream should expose the captured sequence number.
+	if got := r.GetLastSequenceNum(); got != 42 {
+		t.Fatalf("GetLastSequenceNum() = %d, want 42", got)
+	}
+}
+
+// TestResilientEventStream_UpdatesSequenceNumOnEachDisconnect verifies that
+// the resilient stream updates its lastSequenceNum on every disconnect,
+// keeping the highest value seen.
+func TestResilientEventStream_UpdatesSequenceNumOnEachDisconnect(t *testing.T) {
+	t.Parallel()
+
+	stream1 := &mockSeqStream{
+		mockStream: mockStream{results: []mockResult{
+			{event: Event{Type: "a"}},
+			{err: errors.New("transient")},
+		}},
+		seqNum: 10,
+	}
+	stream2 := &mockSeqStream{
+		mockStream: mockStream{results: []mockResult{
+			{event: Event{Type: "b"}},
+			{err: errors.New("transient")},
+		}},
+		seqNum: 25,
+	}
+	stream3 := newMockStream([]mockResult{{event: Event{Type: "c"}}})
+
+	var callCount atomic.Int32
+	dialer := func(ctx context.Context, lastSeqNum int64) (EventStream, error) {
+		c := callCount.Add(1)
+		switch c {
+		case 1:
+			return stream1, nil
+		case 2:
+			if lastSeqNum != 10 {
+				t.Errorf("second dial lastSeqNum = %d, want 10", lastSeqNum)
+			}
+			return stream2, nil
+		default:
+			if lastSeqNum != 25 {
+				t.Errorf("third dial lastSeqNum = %d, want 25", lastSeqNum)
+			}
+			return stream3, nil
+		}
+	}
+
+	config := BackoffConfig{
+		InitialInterval: 10 * time.Millisecond,
+		MaxInterval:     50 * time.Millisecond,
+		Multiplier:      2.0,
+		JitterFraction:  0,
+		MaxRetries:      5,
+	}
+
+	r := NewResilientEventStream(dialer, config, nil)
+	defer r.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Trigger first disconnect.
+	_, _ = r.Recv(ctx)
+	_, _ = r.Recv(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	// Trigger second disconnect.
+	_, _ = r.Recv(ctx)
+	_, _ = r.Recv(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	// Final read.
+	_, err := r.Recv(ctx)
+	if err != nil {
+		t.Fatalf("final Recv error = %v", err)
+	}
+
+	if got := r.GetLastSequenceNum(); got != 25 {
+		t.Fatalf("GetLastSequenceNum() = %d, want 25", got)
 	}
 }

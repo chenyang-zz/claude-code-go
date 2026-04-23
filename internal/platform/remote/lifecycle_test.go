@@ -14,9 +14,10 @@ type fakeStreamFactory struct {
 	called bool
 }
 
-func (f *fakeStreamFactory) Open(ctx context.Context, session coreconfig.RemoteSessionConfig) (EventStream, error) {
+func (f *fakeStreamFactory) Open(ctx context.Context, session coreconfig.RemoteSessionConfig, lastSeqNum int64) (EventStream, error) {
 	_ = ctx
 	_ = session
+	_ = lastSeqNum
 	f.called = true
 	if f.err != nil {
 		return nil, f.err
