@@ -1,0 +1,41 @@
+internal/core/message/content.go
+  cf7902d20dbecc87 9-14,64-80
+internal/core/event/types.go
+  cf7902d20dbecc87 13-18
+internal/core/model/stream.go
+  cf7902d20dbecc87 9-10,37-38
+internal/core/event/event.go
+  cf7902d20dbecc87 9
+internal/platform/api/anthropic/client.go
+  cf7902d20dbecc87 68-70,106-108,114-119,128-129,385-386,392-400,417-438,461,466-475,477-494,558-568
+internal/ui/console/stream_renderer.go
+  cf7902d20dbecc87 45-52
+internal/platform/api/anthropic/client_test.go
+  cf7902d20dbecc87 434-579
+internal/ui/console/stream_renderer_test.go
+  cf7902d20dbecc87 232-257
+internal/runtime/engine/engine_test.go
+  cf7902d20dbecc87 223-277
+internal/runtime/engine/engine.go
+  cf7902d20dbecc87 1193-1202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "27e9e82b389b21c20b8504f579748b0d6e23ab3f",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 366,
+      "total_deletions": 19,
+      "accepted_lines": 366,
+      "overriden_lines": 0
+    }
+  }
+}
