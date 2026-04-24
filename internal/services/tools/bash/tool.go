@@ -259,6 +259,26 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 
 // executeAllowedCommand dispatches one already-authorized Bash invocation to the foreground or background execution path.
 func (t *Tool) executeAllowedCommand(ctx context.Context, call coretool.Call, input Input, command string, timeoutMilliseconds int) (coretool.Result, error) {
+	// Sed safety validation: dangerous sed operations are blocked even when the
+	// command is otherwise authorized. This mirrors the TypeScript
+	// checkSedConstraints defense-in-depth layer.
+	trimmed := strings.TrimSpace(command)
+	if strings.HasPrefix(trimmed, "sed") {
+		rest := trimmed[len("sed"):]
+		if len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+			allowFileWrites := t.approvalMode == "acceptEdits"
+			if !sedCommandIsAllowed(command, allowFileWrites) {
+				return coretool.Result{}, &corepermission.BashPermissionError{
+					ToolName:   call.Name,
+					Command:    command,
+					WorkingDir: call.Context.WorkingDir,
+					Decision:   corepermission.DecisionAsk,
+					Message:    "sed command requires approval (contains potentially dangerous operations)",
+				}
+			}
+		}
+	}
+
 	if input.RunInBackground {
 		return t.startBackgroundCommand(call, input, command, timeoutMilliseconds)
 	}
