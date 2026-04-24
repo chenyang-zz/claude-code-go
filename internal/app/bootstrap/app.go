@@ -10,6 +10,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
@@ -431,12 +432,21 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		)
 		return runtime, policy, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
-		client := openai.NewClient(openai.Config{
-			Provider:   cfg.Provider,
-			APIKey:     cfg.APIKey,
-			BaseURL:    cfg.APIBaseURL,
-			HTTPClient: nil,
-		})
+		var client model.Client
+		if cfg.Provider == "openai" && openai.UseResponsesAPI(cfg.Model) {
+			client = openai.NewResponsesClient(openai.Config{
+				APIKey:     cfg.APIKey,
+				BaseURL:    cfg.APIBaseURL,
+				HTTPClient: nil,
+			})
+		} else {
+			client = openai.NewClient(openai.Config{
+				Provider:   cfg.Provider,
+				APIKey:     cfg.APIKey,
+				BaseURL:    cfg.APIBaseURL,
+				HTTPClient: nil,
+			})
+		}
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
