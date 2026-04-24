@@ -87,6 +87,12 @@ func isRetriableError(err error) bool {
 		return true
 	}
 
+	// OpenAI-specific retryable error messages (fallback when the error is not a structured APIError).
+	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "server_error") || strings.Contains(lower, "temporary error") || strings.Contains(lower, "over capacity") {
+		return true
+	}
+
 	return false
 }
 

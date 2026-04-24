@@ -17,6 +17,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 )
 
 type wrappedNetError struct {
@@ -917,6 +918,90 @@ func TestIsRetriableErrorWithAnthropicAPIError(t *testing.T) {
 		t.Error("isRetriableError(wrapped anthropic APIError) = false, want true")
 	}
 }
+
+// TestIsRetriableErrorWithOpenAIAPIError verifies isRetriableError works with *openai.APIError.
+func TestIsRetriableErrorWithOpenAIAPIError(t *testing.T) {
+	// Rate limit error (429) should be retriable.
+	rateLimitErr := &openai.APIError{
+		Status:  429,
+		Type:    openai.ErrorTypeRateLimit,
+		Message: "Rate limit exceeded",
+	}
+	if !isRetriableError(rateLimitErr) {
+		t.Error("isRetriableError(OpenAI rate limit) = false, want true")
+	}
+
+	// Server error (500) should be retriable.
+	serverErr := &openai.APIError{
+		Status:  500,
+		Type:    openai.ErrorTypeServerError,
+		Message: "Internal server error",
+	}
+	if !isRetriableError(serverErr) {
+		t.Error("isRetriableError(OpenAI server error) = false, want true")
+	}
+
+	// Authentication error (401) should be retriable.
+	authErr := &openai.APIError{
+		Status:  401,
+		Type:    openai.ErrorTypeAuthentication,
+		Message: "Invalid API key",
+	}
+	if !isRetriableError(authErr) {
+		t.Error("isRetriableError(OpenAI auth error) = false, want true")
+	}
+
+	// Bad request (400) should NOT be retriable.
+	badRequestErr := &openai.APIError{
+		Status:  400,
+		Type:    openai.ErrorTypeInvalidRequest,
+		Message: "Invalid request",
+	}
+	if isRetriableError(badRequestErr) {
+		t.Error("isRetriableError(OpenAI bad request) = true, want false")
+	}
+
+	// Context length exceeded (400) should NOT be retriable.
+	promptTooLongErr := &openai.APIError{
+		Status:  400,
+		Type:    openai.ErrorTypeInvalidRequest,
+		Message: "This model's maximum context length is 8192 tokens",
+	}
+	if isRetriableError(promptTooLongErr) {
+		t.Error("isRetriableError(OpenAI prompt too long) = true, want false")
+	}
+
+	// Wrapped OpenAI error should be detected via errors.As.
+	wrapped := fmt.Errorf("stream failed: %w", &openai.APIError{
+		Status:  503,
+		Type:    openai.ErrorTypeServerError,
+		Message: "Over capacity",
+	})
+	if !isRetriableError(wrapped) {
+		t.Error("isRetriableError(wrapped OpenAI APIError) = false, want true")
+	}
+}
+
+// TestIsRetriableErrorOpenAIKeywordFallback verifies keyword-based fallback for OpenAI error messages.
+func TestIsRetriableErrorOpenAIKeywordFallback(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"server_error: internal error", true},
+		{"temporary error: please retry", true},
+		{"over capacity: try again later", true},
+		{"insufficient_quota", false},
+		{"invalid_api_key", false},
+	}
+	for _, tt := range tests {
+		got := isRetriableError(errors.New(tt.msg))
+		if got != tt.want {
+			t.Errorf("isRetriableError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
 
 // TestRuntimeRunRetryUsesRetryAfter verifies rate limit errors use RetryAfter as backoff.
 func TestRuntimeRunRetryUsesRetryAfter(t *testing.T) {

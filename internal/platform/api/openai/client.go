@@ -218,7 +218,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		payload, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai-compatible api error: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(payload)))
+		return nil, ParseAPIError(resp, payload)
 	}
 
 	out := make(chan model.Event)

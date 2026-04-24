@@ -200,6 +200,86 @@ func TestClientStreamSendsOpenAICompatibleTokenLimits(t *testing.T) {
 	}
 }
 
+// TestClientStreamReturnsStructuredError verifies HTTP errors are returned as structured APIError instead of fmt.Errorf.
+func TestClientStreamReturnsStructuredError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"message": "Rate limit exceeded",
+				"type":    "rate_limit_error",
+				"code":    "rate_limit_exceeded",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		Provider:   "openai-compatible",
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	_, err := client.Stream(context.Background(), model.Request{
+		Model: "gpt-4",
+		Messages: []message.Message{
+			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
+		},
+	})
+	if err == nil {
+		t.Fatal("Stream() error = nil, want non-nil")
+	}
+
+	// Verify the error is a structured *APIError.
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("error type = %T, want *APIError", err)
+	}
+	if apiErr.Status != 429 {
+		t.Fatalf("status = %d, want 429", apiErr.Status)
+	}
+	if apiErr.Type != ErrorTypeRateLimit {
+		t.Fatalf("type = %q, want rate_limit_error", apiErr.Type)
+	}
+	if apiErr.Message != "Rate limit exceeded" {
+		t.Fatalf("message = %q, want Rate limit exceeded", apiErr.Message)
+	}
+}
+
+// TestClientStreamReturnsStructuredErrorForEmptyBody verifies fallback when error body is empty.
+func TestClientStreamReturnsStructuredErrorForEmptyBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		Provider:   "openai-compatible",
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	_, err := client.Stream(context.Background(), model.Request{
+		Model: "gpt-4",
+		Messages: []message.Message{
+			{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
+		},
+	})
+	if err == nil {
+		t.Fatal("Stream() error = nil, want non-nil")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("error type = %T, want *APIError", err)
+	}
+	if apiErr.Status != 500 {
+		t.Fatalf("status = %d, want 500", apiErr.Status)
+	}
+}
+
 func TestClientStreamSendsGLMMaxTokens(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != glmChatCompletionsPath {
