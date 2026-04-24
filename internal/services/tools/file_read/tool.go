@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -25,6 +26,12 @@ const (
 	defaultOffset = 1
 	// fileUnchangedStub mirrors the source tool's duplicate-read reminder.
 	fileUnchangedStub = "File unchanged since last read. The content from the earlier Read tool_result in this conversation is still current - refer to that instead of re-reading."
+	// pdfMaxPagesPerRead limits how many pages can be extracted in a single request.
+	pdfMaxPagesPerRead = 25
+	// pdfAtMentionInlineThreshold is the page count above which full PDF reads are rejected.
+	pdfAtMentionInlineThreshold = 100
+	// pdfExtractSizeThreshold is the size above which PDFs are page-extracted instead of inline read.
+	pdfExtractSizeThreshold = 5 * 1024 * 1024
 )
 
 // Tool implements the first-batch text-only FileReadTool.
@@ -45,6 +52,8 @@ type Input struct {
 	Offset int `json:"offset,omitempty"`
 	// Limit optionally caps how many lines are returned.
 	Limit int `json:"limit,omitempty"`
+	// Pages optionally specifies a page range for PDF files (e.g., "1-5", "3").
+	Pages string `json:"pages,omitempty"`
 }
 
 // Output is the structured text read result returned in tool metadata.
@@ -67,6 +76,62 @@ type UnchangedOutput struct {
 	Type string `json:"type"`
 	// FilePath stores the caller-facing path for the unchanged file.
 	FilePath string `json:"filePath"`
+}
+
+// ImageOutput is the structured metadata returned for image file reads.
+type ImageOutput struct {
+	// Type identifies the image result branch.
+	Type string `json:"type"`
+	// Base64 stores the base64-encoded image data.
+	Base64 string `json:"base64"`
+	// MediaType stores the MIME type of the image (e.g., image/jpeg).
+	MediaType string `json:"media_type"`
+	// OriginalSize stores the original file size in bytes.
+	OriginalSize int `json:"originalSize"`
+	// OriginalWidth stores the original image width in pixels (optional).
+	OriginalWidth int `json:"originalWidth,omitempty"`
+	// OriginalHeight stores the original image height in pixels (optional).
+	OriginalHeight int `json:"originalHeight,omitempty"`
+	// DisplayWidth stores the displayed width after resizing (optional).
+	DisplayWidth int `json:"displayWidth,omitempty"`
+	// DisplayHeight stores the displayed height after resizing (optional).
+	DisplayHeight int `json:"displayHeight,omitempty"`
+}
+
+// PDFOutput is the structured metadata returned for PDF file reads.
+type PDFOutput struct {
+	// Type identifies the pdf result branch.
+	Type string `json:"type"`
+	// FilePath stores the caller-facing path of the PDF file.
+	FilePath string `json:"filePath"`
+	// Base64 stores the base64-encoded PDF data.
+	Base64 string `json:"base64"`
+	// OriginalSize stores the original file size in bytes.
+	OriginalSize int `json:"originalSize"`
+}
+
+// NotebookOutput is the structured metadata returned for notebook file reads.
+type NotebookOutput struct {
+	// Type identifies the notebook result branch.
+	Type string `json:"type"`
+	// FilePath stores the caller-facing path of the notebook file.
+	FilePath string `json:"filePath"`
+	// Cells stores the notebook cells as a JSON-serializable array.
+	Cells []any `json:"cells"`
+}
+
+// PartsOutput is the structured metadata returned for PDF page extraction.
+type PartsOutput struct {
+	// Type identifies the parts result branch.
+	Type string `json:"type"`
+	// FilePath stores the caller-facing path of the PDF file.
+	FilePath string `json:"filePath"`
+	// OriginalSize stores the original file size in bytes.
+	OriginalSize int `json:"originalSize"`
+	// Count stores the number of pages extracted.
+	Count int `json:"count"`
+	// OutputDir stores the directory containing extracted page images.
+	OutputDir string `json:"outputDir"`
 }
 
 // lineReadResult keeps the internal streaming result before caller-facing formatting.
@@ -164,6 +229,8 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{}, err
 	}
 
+	ext := strings.TrimPrefix(filepath.Ext(filePath), ".")
+
 	logger.DebugCF("file_read_tool", "starting file read", map[string]any{
 		"file_path":   filePath,
 		"offset":      offset,
@@ -179,6 +246,17 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"working_dir": call.Context.WorkingDir,
 		})
 		return unchangedResult, nil
+	}
+
+	// Dispatch by file extension for multimedia support.
+	if isImageExtension(ext) {
+		return t.readImage(ctx, filePath, info.Size(), call.Context.WorkingDir)
+	}
+	if isNotebookExtension(ext) {
+		return t.readNotebookFile(ctx, filePath, info.Size(), call.Context.WorkingDir)
+	}
+	if isPDFExtension(ext) {
+		return t.readPDF(ctx, filePath, info.Size(), input.Pages, call.Context.WorkingDir)
 	}
 
 	if input.Limit == 0 && info.Size() > t.effectiveMaxFileSizeBytes() {
@@ -262,6 +340,10 @@ func inputSchema() coretool.InputSchema {
 			"limit": {
 				Type:        coretool.ValueKindInteger,
 				Description: "The number of lines to read.",
+			},
+			"pages": {
+				Type:        coretool.ValueKindString,
+				Description: "Page range for PDF files (e.g., \"1-5\", \"3\"). Only applicable to PDF files.",
 			},
 		},
 	}
@@ -383,6 +465,25 @@ func maxInt(value int, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+// isImageExtension reports whether ext is a supported image format.
+func isImageExtension(ext string) bool {
+	switch ext {
+	case "png", "jpg", "jpeg", "gif", "webp":
+		return true
+	}
+	return false
+}
+
+// isPDFExtension reports whether ext is a PDF file.
+func isPDFExtension(ext string) bool {
+	return ext == "pdf"
+}
+
+// isNotebookExtension reports whether ext is a Jupyter notebook file.
+func isNotebookExtension(ext string) bool {
+	return ext == "ipynb"
 }
 
 // buildReadStateSnapshot converts one successful read into the executor-facing read-state delta.

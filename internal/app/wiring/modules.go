@@ -58,6 +58,32 @@ func (d *hookDispatcher) RunHooks(ctx context.Context, event hook.HookEvent, inp
 	return d.runner.RunHooksForEvent(ctx, d.config, event, input, cwd)
 }
 
+// bashNotificationEmitter adapts the hook runner into the BashTool NotificationEmitter
+// interface so background task completion events can fire Notification hooks.
+type bashNotificationEmitter struct {
+	runner *runtimehooks.Runner
+	config hook.HooksConfig
+}
+
+func (e *bashNotificationEmitter) EmitTaskNotification(taskID string, status string, summary string, outputPath string) {
+	if e.runner == nil || e.config == nil {
+		return
+	}
+	msg := summary
+	if outputPath != "" {
+		msg += "\nOutput: " + outputPath
+	}
+	input := hook.NotificationHookInput{
+		BaseHookInput: hook.BaseHookInput{},
+		HookEventName:    string(hook.EventNotification),
+		Message:          msg,
+		Title:            "Background Bash Task",
+		NotificationType: "bash_task_" + status,
+	}
+	// Fire-and-forget so the background result consumer never blocks on hooks.
+	go e.runner.RunHooksForEvent(context.Background(), e.config, hook.EventNotification, input, "")
+}
+
 // NewBaseWorkspaceModules wires the base workspace exploration and editing tools into one registry.
 func NewBaseWorkspaceModules(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (Modules, error) {
 	return NewModules(BaseWorkspaceTools(fs, policy, permissions, backgroundTaskStore, taskStore)...)
@@ -90,8 +116,9 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, hookRunner *runtimehooks.Runner, hookCfg hook.HooksConfig, disableAllHooks bool) []tool.Tool {
 	dispatcher := &hookDispatcher{runner: hookRunner, config: hookCfg}
 	executor := platformshell.NewExecutor()
+	bashNotifier := &bashNotificationEmitter{runner: hookRunner, config: hookCfg}
 	return []tool.Tool{
-		bash.NewToolWithRuntime(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
+		bash.NewToolWithNotification(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore, bashNotifier),
 		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),

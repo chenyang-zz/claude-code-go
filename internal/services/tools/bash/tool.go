@@ -65,6 +65,8 @@ type Tool struct {
 	approvalMode string
 	// taskStore exposes the shared runtime task lifecycle store used by background Bash tasks.
 	taskStore BackgroundTaskStore
+	// notificationEmitter sends background-task completion notifications into the host event stream.
+	notificationEmitter NotificationEmitter
 }
 
 // Input stores the typed request payload accepted by the migrated Bash tool.
@@ -93,6 +95,12 @@ type Output struct {
 	ExitCode int `json:"exitCode"`
 	// TimedOut reports whether the command exceeded its timeout.
 	TimedOut bool `json:"timedOut"`
+	// OutputFilePath stores the path to a captured output file when the command used stdout redirection.
+	OutputFilePath string `json:"outputFilePath,omitempty"`
+	// OutputFileSize stores the size in bytes of the captured output file.
+	OutputFileSize int64 `json:"outputFileSize,omitempty"`
+	// ElapsedSeconds stores the wall-clock seconds the command took to execute.
+	ElapsedSeconds float64 `json:"elapsedSeconds,omitempty"`
 }
 
 // BackgroundOutput stores the structured result metadata returned when one Bash command starts in the background.
@@ -128,6 +136,13 @@ func NewToolWithRuntime(executor ShellExecutor, permissions CommandPermissionChe
 		approvalMode:       approvalMode,
 		taskStore:          taskStore,
 	}
+}
+
+// NewToolWithNotification constructs a Bash tool with notification emitter support for background task completion events.
+func NewToolWithNotification(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string, taskStore BackgroundTaskStore, emitter NotificationEmitter) *Tool {
+	t := NewToolWithRuntime(executor, permissions, approvalMode, taskStore)
+	t.notificationEmitter = emitter
+	return t
 }
 
 // Name returns the stable registration name for the migrated Bash tool.
@@ -247,7 +262,30 @@ func (t *Tool) executeAllowedCommand(ctx context.Context, call coretool.Call, in
 	if input.RunInBackground {
 		return t.startBackgroundCommand(call, input, command, timeoutMilliseconds)
 	}
+	// When switchable execution is available and the command is eligible for
+	// auto-backgrounding, use the switchable path so long-running commands
+	// can be moved to the background automatically.
+	if t.backgroundExecutor != nil && t.taskStore != nil && isAutobackgroundingAllowed(command) {
+		return t.executeSwitchableCommand(ctx, call, input, command, timeoutMilliseconds)
+	}
 	return t.executeForegroundCommand(ctx, call, command, timeoutMilliseconds)
+}
+
+// isAutobackgroundingAllowed reports whether the command is eligible for
+// automatic backgrounding. It mirrors the TypeScript DISALLOWED_AUTO_BACKGROUND
+// and COMMON_BACKGROUND_COMMANDS heuristics.
+func isAutobackgroundingAllowed(command string) bool {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return false
+	}
+	// Disallow simple sleep commands — they should run in foreground unless
+	// explicitly backgrounded by the user.
+	fields := strings.Fields(trimmed)
+	if len(fields) > 0 && fields[0] == "sleep" {
+		return false
+	}
+	return true
 }
 
 // executeForegroundCommand runs one normalized foreground Bash request and maps the process result into the stable tool result shape.
@@ -259,15 +297,24 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 		return coretool.Result{}, fmt.Errorf("bash tool: executor is not configured")
 	}
 
+	// Parse output redirection before execution so the captured file path is
+	// recorded even when the command fails or times out.
+	redirect := parseOutputRedirection(command)
+	execCommand := redirect.Command
+	if execCommand == "" {
+		execCommand = command
+	}
+
 	logger.DebugCF("bash_tool", "starting foreground bash tool invocation", map[string]any{
-		"working_dir": call.Context.WorkingDir,
-		"timeout_ms":  timeoutMilliseconds,
-		"command_len": len(command),
+		"working_dir":    call.Context.WorkingDir,
+		"timeout_ms":     timeoutMilliseconds,
+		"command_len":    len(execCommand),
+		"has_redirect":   redirect.StdoutFile != "" || redirect.StderrFile != "",
 	})
 
 	startTime := time.Now()
 	req := platformshell.Request{
-		Command:    command,
+		Command:    execCommand,
 		WorkingDir: call.Context.WorkingDir,
 		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
 	}
@@ -284,6 +331,7 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 	}
 
 	execResult, err := t.executor.Execute(ctx, req)
+	elapsed := time.Since(startTime).Seconds()
 	if err != nil {
 		return coretool.Result{
 			Error: fmt.Sprintf("bash tool: %v", err),
@@ -291,11 +339,21 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 	}
 
 	output := Output{
-		Command:  command,
-		Stdout:   execResult.Stdout,
-		Stderr:   execResult.Stderr,
-		ExitCode: execResult.ExitCode,
-		TimedOut: execResult.TimedOut,
+		Command:        execCommand,
+		Stdout:         execResult.Stdout,
+		Stderr:         execResult.Stderr,
+		ExitCode:       execResult.ExitCode,
+		TimedOut:       execResult.TimedOut,
+		ElapsedSeconds: elapsed,
+	}
+
+	// Record captured output file metadata when the command used redirection.
+	if redirect.StdoutFile != "" {
+		output.OutputFilePath = redirect.StdoutFile
+		// Best-effort file size; the file may not be flushed yet.
+		if info, err := os.Stat(redirect.StdoutFile); err == nil {
+			output.OutputFileSize = info.Size()
+		}
 	}
 
 	if execResult.TimedOut {
@@ -316,10 +374,12 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 	}
 
 	logger.DebugCF("bash_tool", "foreground bash tool invocation finished", map[string]any{
-		"exit_code":  output.ExitCode,
-		"timed_out":  output.TimedOut,
-		"stdout_len": len(output.Stdout),
-		"stderr_len": len(output.Stderr),
+		"exit_code":      output.ExitCode,
+		"timed_out":      output.TimedOut,
+		"stdout_len":     len(output.Stdout),
+		"stderr_len":     len(output.Stderr),
+		"elapsed_sec":    output.ElapsedSeconds,
+		"output_file":    output.OutputFilePath,
 	})
 
 	return coretool.Result{
@@ -383,7 +443,7 @@ func (t *Tool) startBackgroundCommand(call coretool.Call, input Input, command s
 	}, nil
 }
 
-// consumeBackgroundResult observes the background process completion and removes the task from the shared active-task store.
+// consumeBackgroundResult observes the background process completion, removes the task from the shared active-task store, and emits a completion notification.
 func (t *Tool) consumeBackgroundResult(taskID string, snapshot coresession.BackgroundTaskSnapshot, process platformshell.BackgroundProcess) {
 	if t == nil || t.taskStore == nil || process == nil {
 		return
@@ -399,19 +459,36 @@ func (t *Tool) consumeBackgroundResult(taskID string, snapshot coresession.Backg
 		return
 	}
 
+	var notifyStatus string
 	switch {
 	case result.TimedOut:
 		snapshot.Status = coresession.BackgroundTaskStatusFailed
+		notifyStatus = "failed"
 	case result.ExitCode == 0:
 		snapshot.Status = coresession.BackgroundTaskStatusCompleted
+		notifyStatus = "completed"
 	case result.Canceled:
 		snapshot.Status = coresession.BackgroundTaskStatusStopped
+		notifyStatus = "killed"
 	default:
 		snapshot.Status = coresession.BackgroundTaskStatusFailed
+		notifyStatus = "failed"
 	}
 
 	t.taskStore.Update(snapshot)
 	t.taskStore.Remove(taskID)
+
+	// Emit notification if an emitter is configured.
+	if t.notificationEmitter != nil {
+		emitBackgroundCompletionNotification(
+			t.notificationEmitter,
+			taskID,
+			snapshot.Summary,
+			notifyStatus,
+			result.ExitCode,
+			"", // outputPath not yet tracked per-task in current store
+		)
+	}
 
 	logger.DebugCF("bash_tool", "background bash task finished", map[string]any{
 		"task_id":     taskID,
@@ -534,16 +611,33 @@ func renderSuccess(output Output) string {
 	stdout := strings.TrimRight(output.Stdout, "\n")
 	stderr := strings.TrimRight(output.Stderr, "\n")
 
+	var body string
 	switch {
 	case stdout == "" && stderr == "":
-		return "Done"
+		body = "Done"
 	case stdout != "" && stderr == "":
-		return stdout
+		body = stdout
 	case stdout == "" && stderr != "":
-		return fmt.Sprintf("stderr:\n%s", stderr)
+		body = fmt.Sprintf("stderr:\n%s", stderr)
 	default:
-		return fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", stdout, stderr)
+		body = fmt.Sprintf("stdout:\n%s\n\nstderr:\n%s", stdout, stderr)
 	}
+
+	return appendOutputFileInfo(body, output)
+}
+
+// appendOutputFileInfo appends captured output-file metadata to a rendered payload when present.
+func appendOutputFileInfo(body string, output Output) string {
+	if output.OutputFilePath == "" {
+		return body
+	}
+	var info string
+	if output.OutputFileSize > 0 {
+		info = fmt.Sprintf("\n\nOutput written to: %s (%d bytes)", output.OutputFilePath, output.OutputFileSize)
+	} else {
+		info = fmt.Sprintf("\n\nOutput written to: %s", output.OutputFilePath)
+	}
+	return body + info
 }
 
 // renderBackgroundStart converts one background Bash task creation into a stable caller-facing text payload.
@@ -554,19 +648,25 @@ func renderBackgroundStart(output BackgroundOutput) string {
 // renderFailure converts one non-zero exit result into a stable caller-facing error payload.
 func renderFailure(output Output) string {
 	details := renderStreamDetails(output.Stdout, output.Stderr)
+	var body string
 	if details == "" {
-		return fmt.Sprintf("Command failed with exit code %d.", output.ExitCode)
+		body = fmt.Sprintf("Command failed with exit code %d.", output.ExitCode)
+	} else {
+		body = fmt.Sprintf("Command failed with exit code %d.\n%s", output.ExitCode, details)
 	}
-	return fmt.Sprintf("Command failed with exit code %d.\n%s", output.ExitCode, details)
+	return appendOutputFileInfo(body, output)
 }
 
 // renderTimeout converts one timed-out foreground result into a stable caller-facing error payload.
 func renderTimeout(output Output, timeoutMilliseconds int) string {
 	details := renderStreamDetails(output.Stdout, output.Stderr)
+	var body string
 	if details == "" {
-		return fmt.Sprintf("Command timed out after %dms.", timeoutMilliseconds)
+		body = fmt.Sprintf("Command timed out after %dms.", timeoutMilliseconds)
+	} else {
+		body = fmt.Sprintf("Command timed out after %dms.\n%s", timeoutMilliseconds, details)
 	}
-	return fmt.Sprintf("Command timed out after %dms.\n%s", timeoutMilliseconds, details)
+	return appendOutputFileInfo(body, output)
 }
 
 // renderStreamDetails normalizes stdout and stderr into one shared multi-section payload.
