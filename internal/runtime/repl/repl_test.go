@@ -1012,7 +1012,7 @@ func TestRunnerRunMCPCommandReportsFallback(t *testing.T) {
 		t.Fatalf("Run(/mcp) error = %v", err)
 	}
 
-	want := "MCP server management is not available in Claude Code Go yet. Configure MCP servers before startup instead.\n"
+	want := "No MCP servers configured. Set CLAUDE_CODE_MCP_SERVERS to configure servers.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/mcp) output = %q, want %q", got, want)
 	}

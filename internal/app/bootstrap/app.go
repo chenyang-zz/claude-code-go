@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
+	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
+	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
+	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
@@ -407,6 +411,39 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Connect MCP servers and register their tools into the workspace registry.
+	mcpConfigs := loadMCPConfigs()
+	if len(mcpConfigs) > 0 {
+		registry := mcpregistry.NewServerRegistry()
+		registry.LoadConfigs(mcpConfigs)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*1000000000) // 30s
+		registry.ConnectAll(ctx)
+		cancel()
+
+		mcpregistry.SetLastRegistry(registry)
+		for _, entry := range registry.Connected() {
+			toolsResult, err := entry.Client.ListTools(context.Background())
+			if err != nil {
+				logger.WarnCF("bootstrap", "mcp listTools failed", map[string]any{
+					"server": entry.Name,
+					"error":  err.Error(),
+				})
+				continue
+			}
+			for _, t := range toolsResult.Tools {
+				proxyTool := mcpproxy.AdaptTool(entry.Name, t, entry.Client)
+				if regErr := modules.Tools.Register(proxyTool); regErr != nil {
+					logger.WarnCF("bootstrap", "mcp tool registration failed", map[string]any{
+						"server": entry.Name,
+						"tool":   t.Name,
+						"error":  regErr.Error(),
+					})
+				}
+			}
+		}
+	}
+
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
 
@@ -460,6 +497,23 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// loadMCPConfigs reads MCP server configurations from the CLAUDE_CODE_MCP_SERVERS
+// environment variable (JSON object mapping server names to ServerConfig).
+func loadMCPConfigs() map[string]mcpclient.ServerConfig {
+	raw := os.Getenv("CLAUDE_CODE_MCP_SERVERS")
+	if raw == "" {
+		return nil
+	}
+	var configs map[string]mcpclient.ServerConfig
+	if err := json.Unmarshal([]byte(raw), &configs); err != nil {
+		logger.WarnCF("bootstrap", "failed to parse MCP server configs", map[string]any{
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return configs
 }
 
 // approvalPrinterForConfig returns a printer directed at stderr when stream-json

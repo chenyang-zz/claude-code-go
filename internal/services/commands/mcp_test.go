@@ -28,7 +28,7 @@ func TestMCPCommandExecuteReportsFallback(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "MCP server management is not available in Claude Code Go yet. Configure MCP servers before startup instead."
+	want := "No MCP servers configured. Set CLAUDE_CODE_MCP_SERVERS to configure servers."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
