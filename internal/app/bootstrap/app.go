@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
+	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
@@ -468,8 +469,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
-		return runtime, policy, nil
-	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
+			runtime.AgentRegistry = resolveAgentRegistry()
+			return runtime, policy, nil
+		case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
 		if cfg.Provider == "openai" && openai.UseResponsesAPI(cfg.Model) {
 			client = openai.NewResponsesClient(openai.Config{
@@ -495,6 +497,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
 		applyOpenAIAdvancedDefaults(runtime)
+		runtime.AgentRegistry = resolveAgentRegistry()
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
@@ -530,6 +533,13 @@ func applyOpenAIAdvancedDefaults(r *engine.Runtime) {
 	if v := os.Getenv("CLAUDE_CODE_INSTRUCTIONS"); v != "" {
 		r.DefaultInstructions = &v
 	}
+}
+
+// resolveAgentRegistry returns the agent registry used by the engine runtime.
+// Currently returns a nil placeholder; a concrete in-memory registry will be
+// wired in a later batch that implements agent loading and lifecycle.
+func resolveAgentRegistry() agent.Registry {
+	return nil
 }
 
 // loadMCPConfigs reads MCP server configurations from the CLAUDE_CODE_MCP_SERVERS

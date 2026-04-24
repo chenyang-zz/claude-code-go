@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/compact"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
@@ -131,6 +132,10 @@ type Runtime struct {
 
 	// DefaultInstructions is an alternative to System for the Responses API.
 	DefaultInstructions *string
+
+	// AgentRegistry holds agent definitions available for agent tool dispatch.
+	// When nil, agent tool lookups fall back to a default empty registry.
+	AgentRegistry agent.Registry
 }
 
 // New builds the minimum single-turn engine.
@@ -1574,6 +1579,10 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		}
 	})
 
+	// Agent tool dispatch placeholder: when call.Name matches the agent tool,
+	// the input can be unmarshaled into agent.Input and the output is agent.Output.
+	// Full agent runtime execution (runAgent, subagent scheduling) is deferred
+	// to a later batch that wires the agent lifecycle into the engine loop.
 	result, invokeErr := e.Executor.Execute(toolCtx, call)
 	var permissionErr *corepermission.PermissionError
 	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
