@@ -12,6 +12,8 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -473,6 +475,19 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = resolveAgentRegistry()
+
+		// Register the Agent tool after the runtime is created so the runner can use it as parent.
+		agentRegistry := resolveAgentRegistry()
+		if agentRegistry != nil {
+			agentTool := agenttool.NewTool(agentRegistry, runtime)
+			if regErr := modules.Tools.Register(agentTool); regErr != nil {
+				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
+			} else {
+				// Re-describe tools so the runtime catalog includes the Agent tool.
+				runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
+			}
+		}
+
 		return runtime, policy, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
@@ -502,6 +517,19 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		applyOpenAIAdvancedDefaults(runtime)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = resolveAgentRegistry()
+
+		// Register the Agent tool after the runtime is created so the runner can use it as parent.
+		agentRegistry := resolveAgentRegistry()
+		if agentRegistry != nil {
+			agentTool := agenttool.NewTool(agentRegistry, runtime)
+			if regErr := modules.Tools.Register(agentTool); regErr != nil {
+				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
+			} else {
+				// Re-describe tools so the runtime catalog includes the Agent tool.
+				runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
+			}
+		}
+
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
@@ -550,10 +578,13 @@ func applyOpenAIAdvancedDefaults(r *engine.Runtime) {
 }
 
 // resolveAgentRegistry returns the agent registry used by the engine runtime.
-// Currently returns a nil placeholder; a concrete in-memory registry will be
-// wired in a later batch that implements agent loading and lifecycle.
+// It creates an in-memory registry and registers all built-in agents.
 func resolveAgentRegistry() agent.Registry {
-	return nil
+	registry := agent.NewInMemoryRegistry()
+	if err := builtin.RegisterBuiltInAgents(registry); err != nil {
+		logger.WarnCF("bootstrap", "failed to register built-in agents", map[string]any{"error": err.Error()})
+	}
+	return registry
 }
 
 // loadMCPConfigs reads MCP server configurations from the CLAUDE_CODE_MCP_SERVERS

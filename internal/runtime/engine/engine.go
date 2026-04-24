@@ -181,7 +181,7 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 	out := make(chan event.Event)
 	go func() {
 		defer close(out)
-		if err := e.runLoop(ctx, req.SessionID, req.CWD, turnTokenBudget, req.SessionStartSource, history, out); err != nil {
+		if err := e.runLoop(ctx, req.SessionID, req.CWD, turnTokenBudget, req.SessionStartSource, history, out, req.System); err != nil {
 			out <- event.Event{
 				Type:      event.TypeError,
 				Timestamp: time.Now(),
@@ -335,7 +335,7 @@ const maxContinuationAttempts = 3
 const continuationUserMessage = "Output token limit hit. Resume directly — no apology, no recap of what you were doing. Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces."
 
 // runLoop executes the minimal serial tool loop until the model returns plain text without new tool_use blocks.
-func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, sessionStartSource string, history conversation.History, out chan<- event.Event) error {
+func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, turnTokenBudget int, sessionStartSource string, history conversation.History, out chan<- event.Event, systemPrompt string) error {
 	e.sessionID = sessionID
 	e.resolveTranscriptPath(sessionID, cwd)
 
@@ -511,16 +511,20 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			Tools:               e.ToolCatalog,
 			EnablePromptCaching: e.EnablePromptCaching,
 		}
-		if e.PromptBuilder != nil {
-			systemPrompt, err := e.PromptBuilder.Build(ctx)
+		resolvedSystemPrompt := strings.TrimSpace(systemPrompt)
+		if resolvedSystemPrompt == "" && e.PromptBuilder != nil {
+			built, err := e.PromptBuilder.Build(ctx)
 			if err != nil {
 				logger.WarnCF("engine", "failed to build system prompt", map[string]any{
 					"session_id": sessionID,
 					"error":      err.Error(),
 				})
-			} else if strings.TrimSpace(systemPrompt) != "" {
-				streamReq.System = systemPrompt
+			} else {
+				resolvedSystemPrompt = strings.TrimSpace(built)
 			}
+		}
+		if resolvedSystemPrompt != "" {
+			streamReq.System = resolvedSystemPrompt
 		}
 		if lastResponseID != "" {
 			streamReq.PreviousResponseID = &lastResponseID

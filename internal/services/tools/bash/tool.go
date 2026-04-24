@@ -67,6 +67,8 @@ type Tool struct {
 	taskStore BackgroundTaskStore
 	// notificationEmitter sends background-task completion notifications into the host event stream.
 	notificationEmitter NotificationEmitter
+	// securityScanner performs pre-execution security checks on allowed commands.
+	securityScanner SecurityScanner
 }
 
 // Input stores the typed request payload accepted by the migrated Bash tool.
@@ -142,6 +144,13 @@ func NewToolWithRuntime(executor ShellExecutor, permissions CommandPermissionChe
 func NewToolWithNotification(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string, taskStore BackgroundTaskStore, emitter NotificationEmitter) *Tool {
 	t := NewToolWithRuntime(executor, permissions, approvalMode, taskStore)
 	t.notificationEmitter = emitter
+	return t
+}
+
+// NewToolWithSecurityScanner constructs a Bash tool with a pre-execution security scanner.
+func NewToolWithSecurityScanner(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string, taskStore BackgroundTaskStore, emitter NotificationEmitter, scanner SecurityScanner) *Tool {
+	t := NewToolWithNotification(executor, permissions, approvalMode, taskStore, emitter)
+	t.securityScanner = scanner
 	return t
 }
 
@@ -275,6 +284,38 @@ func (t *Tool) executeAllowedCommand(ctx context.Context, call coretool.Call, in
 					Decision:   corepermission.DecisionAsk,
 					Message:    "sed command requires approval (contains potentially dangerous operations)",
 				}
+			}
+		}
+	}
+
+	// Security scan: defense-in-depth layer that checks for dangerous command
+	// patterns even when the command is otherwise authorized by permission rules.
+	if t.securityScanner != nil {
+		scanResult := t.securityScanner.Scan(command)
+		switch scanResult.RiskLevel {
+		case RiskLevelDangerous:
+			logger.DebugCF("bash_tool", "bash command blocked by security scanner", map[string]any{
+				"command":         command,
+				"matched_pattern": scanResult.MatchedPattern,
+			})
+			return coretool.Result{}, &corepermission.BashPermissionError{
+				ToolName:   call.Name,
+				Command:    command,
+				WorkingDir: call.Context.WorkingDir,
+				Decision:   corepermission.DecisionDeny,
+				Message:    scanResult.Message,
+			}
+		case RiskLevelWarning:
+			logger.DebugCF("bash_tool", "bash command requires approval by security scanner", map[string]any{
+				"command":         command,
+				"matched_pattern": scanResult.MatchedPattern,
+			})
+			return coretool.Result{}, &corepermission.BashPermissionError{
+				ToolName:   call.Name,
+				Command:    command,
+				WorkingDir: call.Context.WorkingDir,
+				Decision:   corepermission.DecisionAsk,
+				Message:    scanResult.Message,
 			}
 		}
 	}

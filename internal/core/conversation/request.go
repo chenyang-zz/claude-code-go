@@ -22,4 +22,7 @@ type RunRequest struct {
 	// SessionStartSource identifies why a new logical session is starting
 	// ("startup", "resume", "clear", or "compact").
 	SessionStartSource string
+	// System is an optional override for the system prompt sent to the model.
+	// When non-empty it takes precedence over the engine's PromptBuilder.
+	System string
 }

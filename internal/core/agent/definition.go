@@ -49,6 +49,9 @@ type Definition struct {
 	InitialPrompt string
 	// CriticalSystemReminder is a short message re-injected at every user turn.
 	CriticalSystemReminder string
+	// SystemPromptProvider generates the system prompt for this agent.
+	// Built-in agents use this to provide dynamic prompts; custom agents may leave it nil.
+	SystemPromptProvider SystemPromptProvider
 }
 
 // SystemPromptProvider generates the system prompt for an agent.
