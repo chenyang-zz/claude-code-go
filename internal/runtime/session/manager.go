@@ -9,6 +9,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -18,6 +19,11 @@ type Manager struct {
 	Repository coresession.Repository
 	// Now supplies timestamps for deterministic tests.
 	Now func() time.Time
+	// TranscriptFallback, when true, allows session start/resume to fall
+	// back to reading the transcript JSONL file when the repository has no
+	// snapshot for the requested session.  This makes recovery possible
+	// even when the SQLite store has been lost or reset.
+	TranscriptFallback bool
 }
 
 // NewManager builds a manager from an optional repository.
@@ -34,6 +40,8 @@ func (m *Manager) Start(ctx context.Context, id string) (coresession.Snapshot, e
 }
 
 // StartInProject returns an existing session snapshot when available or initializes a new project-scoped session.
+// When TranscriptFallback is enabled and the repository has no record, it attempts
+// to reconstruct the session from the transcript JSONL file before giving up.
 func (m *Manager) StartInProject(ctx context.Context, id string, projectPath string) (coresession.Snapshot, error) {
 	if id == "" {
 		return coresession.Snapshot{}, fmt.Errorf("missing session id")
@@ -45,6 +53,19 @@ func (m *Manager) StartInProject(ctx context.Context, id string, projectPath str
 	}
 	if !errors.Is(err, coresession.ErrSessionNotFound) {
 		return coresession.Snapshot{}, err
+	}
+
+	// Repository has no record — try transcript fallback if enabled.
+	if m.TranscriptFallback && projectPath != "" {
+		ts, err := m.loadFromTranscript(id, projectPath)
+		if err == nil && len(ts.Session.Messages) > 0 {
+			logger.DebugCF("session_manager", "recovered session from transcript fallback", map[string]any{
+				"session_id":    id,
+				"project_path":  projectPath,
+				"message_count": len(ts.Session.Messages),
+			})
+			return ts, nil
+		}
 	}
 
 	session := coresession.Session{
@@ -371,6 +392,27 @@ func (m *Manager) save(ctx context.Context, session coresession.Session) error {
 		return nil
 	}
 	return m.Repository.Save(ctx, session.Clone())
+}
+
+// loadFromTranscript reads the transcript JSONL file for one session and
+// reconstructs a minimal snapshot from it.  The returned snapshot carries
+// Resumed=true so callers treat it like a repository restore.
+func (m *Manager) loadFromTranscript(sessionID, projectPath string) (coresession.Snapshot, error) {
+	path := transcript.GetTranscriptPath(sessionID, projectPath)
+	result, err := transcript.RecoverFile(path)
+	if err != nil {
+		return coresession.Snapshot{}, err
+	}
+
+	return coresession.Snapshot{
+		Session: coresession.Session{
+			ID:          sessionID,
+			ProjectPath: projectPath,
+			Messages:    result.Messages,
+			UpdatedAt:   m.now(),
+		},
+		Resumed: true,
+	}, nil
 }
 
 func (m *Manager) now() time.Time {

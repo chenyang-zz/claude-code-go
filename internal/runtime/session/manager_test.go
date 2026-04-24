@@ -9,6 +9,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
 )
 
 type stubRepository struct {
@@ -612,5 +613,95 @@ func TestAutoSavePersistHistoryVerifiesConversationHistoryBridge(t *testing.T) {
 	}
 	if snapshot.Session.ID != "session-5" {
 		t.Fatalf("snapshot session id = %q, want session-5", snapshot.Session.ID)
+	}
+}
+
+// TestManagerStartInProjectTranscriptFallback verifies that when the repository
+// has no record and TranscriptFallback is enabled, the manager recovers the
+// session from the transcript JSONL file.
+func TestManagerStartInProjectTranscriptFallback(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	repo := &stubRepository{loadErr: coresession.ErrSessionNotFound}
+	manager := NewManager(repo)
+	manager.Now = func() time.Time { return now }
+	manager.TranscriptFallback = true
+
+	// Write a transcript file for the session.
+	tmpDir := t.TempDir()
+	projectPath := tmpDir + "/project"
+	sessionID := "session-tx-fallback"
+	transcriptPath := transcript.GetTranscriptPath(sessionID, projectPath)
+
+	writer, err := transcript.NewWriter(transcriptPath)
+	if err != nil {
+		t.Fatalf("new writer: %v", err)
+	}
+	for _, entry := range transcript.EntriesFromMessage(now, message.Message{
+		Role:    message.RoleUser,
+		Content: []message.ContentPart{message.TextPart("hello from transcript")},
+	}) {
+		if err := writer.WriteEntry(entry); err != nil {
+			t.Fatalf("write entry: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	snapshot, err := manager.StartInProject(context.Background(), sessionID, projectPath)
+	if err != nil {
+		t.Fatalf("StartInProject() error = %v", err)
+	}
+	if !snapshot.Resumed {
+		t.Fatal("StartInProject() resumed = false, want true")
+	}
+	if len(snapshot.Session.Messages) != 1 {
+		t.Fatalf("message count = %d, want 1", len(snapshot.Session.Messages))
+	}
+	if snapshot.Session.Messages[0].Content[0].Text != "hello from transcript" {
+		t.Fatalf("content = %q, want hello from transcript", snapshot.Session.Messages[0].Content[0].Text)
+	}
+}
+
+// TestManagerStartInProjectTranscriptFallbackDisabled verifies that when
+// TranscriptFallback is disabled the manager falls through to creating a new
+// empty session even when a transcript file exists.
+func TestManagerStartInProjectTranscriptFallbackDisabled(t *testing.T) {
+	now := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	repo := &stubRepository{loadErr: coresession.ErrSessionNotFound}
+	manager := NewManager(repo)
+	manager.Now = func() time.Time { return now }
+	manager.TranscriptFallback = false
+
+	tmpDir := t.TempDir()
+	projectPath := tmpDir + "/project"
+	sessionID := "session-tx-no-fallback"
+	transcriptPath := transcript.GetTranscriptPath(sessionID, projectPath)
+
+	writer, err := transcript.NewWriter(transcriptPath)
+	if err != nil {
+		t.Fatalf("new writer: %v", err)
+	}
+	for _, entry := range transcript.EntriesFromMessage(now, message.Message{
+		Role:    message.RoleUser,
+		Content: []message.ContentPart{message.TextPart("ignored")},
+	}) {
+		if err := writer.WriteEntry(entry); err != nil {
+			t.Fatalf("write entry: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	snapshot, err := manager.StartInProject(context.Background(), sessionID, projectPath)
+	if err != nil {
+		t.Fatalf("StartInProject() error = %v", err)
+	}
+	if snapshot.Resumed {
+		t.Fatal("StartInProject() resumed = true, want false")
+	}
+	if len(snapshot.Session.Messages) != 0 {
+		t.Fatalf("message count = %d, want 0", len(snapshot.Session.Messages))
 	}
 }
