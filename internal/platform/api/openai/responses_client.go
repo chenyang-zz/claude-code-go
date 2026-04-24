@@ -127,6 +127,9 @@ type responsesStreamState struct {
 	callName         string
 	callArgs         strings.Builder
 	inFunctionCall   bool
+	responseID       string
+	status           string
+	incompleteReason string
 }
 
 // handleEvent parses one SSE data block and emits model events.
@@ -186,6 +189,35 @@ func (c *ResponsesClient) handleEvent(data string, state *responsesStreamState, 
 			state.promptTokens = event.Response.Usage.InputTokens
 			state.completionTokens = event.Response.Usage.OutputTokens
 		}
+
+	case responsesEventCompleted:
+		if event.Response != nil {
+			state.responseID = event.Response.ID
+			state.status = event.Response.Status
+			if event.Response.IncompleteDetails != nil {
+				state.incompleteReason = event.Response.IncompleteDetails.Reason
+			}
+			if event.Response.Usage != nil {
+				state.promptTokens = event.Response.Usage.InputTokens
+				state.completionTokens = event.Response.Usage.OutputTokens
+			}
+		}
+
+	case responsesEventIncomplete:
+		if event.Response != nil {
+			state.status = event.Response.Status
+			if event.Response.IncompleteDetails != nil {
+				state.incompleteReason = event.Response.IncompleteDetails.Reason
+			}
+		}
+
+	case responsesEventFailed:
+		if event.Response != nil && event.Response.Error != nil {
+			out <- model.Event{
+				Type:  model.EventTypeError,
+				Error: fmt.Sprintf("responses api error: %s", event.Response.Error.Message),
+			}
+		}
 	}
 }
 
@@ -214,11 +246,27 @@ func (c *ResponsesClient) emitToolUse(state *responsesStreamState, out chan<- mo
 
 // emitDone sends the terminal done event with accumulated metadata.
 func (c *ResponsesClient) emitDone(state *responsesStreamState, out chan<- model.Event) {
-	doneEvent := model.Event{Type: model.EventTypeDone}
+	doneEvent := model.Event{
+		Type:       model.EventTypeDone,
+		ResponseID: state.responseID,
+	}
 	if state.promptTokens > 0 || state.completionTokens > 0 {
 		doneEvent.Usage = &model.Usage{
 			InputTokens:  state.promptTokens,
 			OutputTokens: state.completionTokens,
+		}
+	}
+	// Propagate stop reason based on the final response status.
+	switch state.status {
+	case "incomplete":
+		doneEvent.StopReason = model.StopReasonMaxTokens
+	case "failed":
+		// The error has already been emitted via responsesEventFailed.
+	default:
+		if state.inFunctionCall {
+			doneEvent.StopReason = model.StopReasonToolUse
+		} else {
+			doneEvent.StopReason = model.StopReasonEndTurn
 		}
 	}
 	out <- doneEvent

@@ -40,6 +40,9 @@ type Event struct {
 	ToolUse    *ToolUse
 	StopReason StopReason
 	Usage      *Usage
+	// ResponseID carries the provider-side response identifier when available.
+	// Used by the OpenAI Responses API for stateful conversation tracking.
+	ResponseID string
 }
 
 // Stream is the asynchronous event channel returned by a model client.

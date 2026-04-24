@@ -100,6 +100,37 @@ type Runtime struct {
 	Source string
 	// AgentID isolates tracking state for subagents.
 	AgentID string
+
+	// --- OpenAI Responses API advanced parameters ---
+
+	// DefaultTemperature controls sampling randomness when the caller does not
+	// override it. When nil the provider default (1.0) is used.
+	DefaultTemperature *float64
+
+	// DefaultTopP controls nucleus sampling when the caller does not override it.
+	// When nil the provider default (1.0) is used.
+	DefaultTopP *float64
+
+	// DefaultStore controls whether responses are stored server-side.
+	// When nil the provider default applies.
+	DefaultStore *bool
+
+	// DefaultReasoningEffort controls reasoning behaviour for supported models.
+	// Accepted values: "low", "medium", "high".
+	DefaultReasoningEffort *string
+
+	// DefaultToolChoice controls how the model selects tools.
+	// Supported values: "auto", "none", "required", or "function:<name>".
+	DefaultToolChoice *string
+
+	// DefaultMetadata is a map of custom key-value pairs attached to every request.
+	DefaultMetadata map[string]string
+
+	// DefaultUser is the end-user identifier for monitoring and abuse detection.
+	DefaultUser *string
+
+	// DefaultInstructions is an alternative to System for the Responses API.
+	DefaultInstructions *string
 }
 
 // New builds the minimum single-turn engine.
@@ -352,6 +383,10 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		budgetTracker = NewBudgetTracker()
 	}
 	var stopHookActive bool
+	// lastResponseID carries the OpenAI Responses API response identifier
+	// across model calls so that subsequent turns can use previous_response_id
+	// for stateful conversation tracking.
+	var lastResponseID string
 	// taskBudgetRemaining tracks the remaining API-side task budget across
 	// compaction boundaries. Undefined (0) until the first compact fires;
 	// while context is uncompacted the server can see the full history and
@@ -465,6 +500,35 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			Messages:            requestMessages,
 			Tools:               e.ToolCatalog,
 			EnablePromptCaching: e.EnablePromptCaching,
+		}
+		if lastResponseID != "" {
+			streamReq.PreviousResponseID = &lastResponseID
+		}
+
+		// Apply default advanced parameters from runtime configuration.
+		if e.DefaultTemperature != nil {
+			streamReq.Temperature = e.DefaultTemperature
+		}
+		if e.DefaultTopP != nil {
+			streamReq.TopP = e.DefaultTopP
+		}
+		if e.DefaultStore != nil {
+			streamReq.Store = e.DefaultStore
+		}
+		if e.DefaultReasoningEffort != nil {
+			streamReq.ReasoningEffort = e.DefaultReasoningEffort
+		}
+		if e.DefaultToolChoice != nil {
+			streamReq.ToolChoice = e.DefaultToolChoice
+		}
+		if len(e.DefaultMetadata) > 0 {
+			streamReq.Metadata = e.DefaultMetadata
+		}
+		if e.DefaultUser != nil {
+			streamReq.User = e.DefaultUser
+		}
+		if e.DefaultInstructions != nil {
+			streamReq.Instructions = e.DefaultInstructions
 		}
 
 		// Attach API-side task_budget when the feature flag is enabled and
@@ -644,6 +708,10 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		}
 		if result.activeModel != "" {
 			activeModel = result.activeModel
+		}
+		// Carry forward the Responses API response ID for stateful tracking.
+		if result.responseID != "" {
+			lastResponseID = result.responseID
 		}
 
 		// Accumulate usage from this model call.
@@ -1057,6 +1125,7 @@ type streamResult struct {
 	activeModel   string                 // non-empty if fallback was triggered
 	events        []event.Event          // collected events, forwarded only on success
 	streamingExec *StreamingToolExecutor // non-nil when streaming tool execution was used
+	responseID    string                 // OpenAI Responses API response identifier
 }
 
 // streamAndConsume opens a model stream, consumes it, and handles both connection errors
@@ -1249,6 +1318,7 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *St
 	var stopReason model.StopReason
 	var usage model.Usage
 	var events []event.Event
+	var responseID string
 
 	for item := range modelStream {
 		switch item.Type {
@@ -1300,6 +1370,9 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *St
 			if item.Usage != nil {
 				usage = *item.Usage
 			}
+			if item.ResponseID != "" {
+				responseID = item.ResponseID
+			}
 		}
 	}
 
@@ -1310,6 +1383,7 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *St
 		usage:         usage,
 		events:        events,
 		streamingExec: streamingExec,
+		responseID:    responseID,
 	}, nil
 }
 

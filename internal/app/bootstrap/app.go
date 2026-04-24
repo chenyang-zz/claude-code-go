@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
@@ -493,9 +494,41 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
+		applyOpenAIAdvancedDefaults(runtime)
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
+	}
+}
+
+// applyOpenAIAdvancedDefaults reads optional environment variables for OpenAI
+// Responses API advanced parameters and applies them to the runtime.
+func applyOpenAIAdvancedDefaults(r *engine.Runtime) {
+	if v := os.Getenv("CLAUDE_CODE_TEMPERATURE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			r.DefaultTemperature = &f
+		}
+	}
+	if v := os.Getenv("CLAUDE_CODE_TOP_P"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			r.DefaultTopP = &f
+		}
+	}
+	if v := os.Getenv("CLAUDE_CODE_STORE"); v != "" {
+		b := v == "true" || v == "1"
+		r.DefaultStore = &b
+	}
+	if v := os.Getenv("CLAUDE_CODE_REASONING_EFFORT"); v != "" {
+		r.DefaultReasoningEffort = &v
+	}
+	if v := os.Getenv("CLAUDE_CODE_TOOL_CHOICE"); v != "" {
+		r.DefaultToolChoice = &v
+	}
+	if v := os.Getenv("CLAUDE_CODE_USER"); v != "" {
+		r.DefaultUser = &v
+	}
+	if v := os.Getenv("CLAUDE_CODE_INSTRUCTIONS"); v != "" {
+		r.DefaultInstructions = &v
 	}
 }
 

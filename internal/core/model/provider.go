@@ -20,6 +20,42 @@ type Request struct {
 	// marker on the last content block of the last message in the request.
 	// When false (or when the provider is not Anthropic) the marker is omitted.
 	EnablePromptCaching bool
+
+	// PreviousResponseID enables stateful conversation tracking for the
+	// OpenAI Responses API. When set, the server automatically includes
+	// the referenced previous turn in the conversation context.
+	PreviousResponseID *string
+
+	// Store controls whether the response is stored server-side for later
+	// retrieval. When nil the provider default applies (typically true).
+	Store *bool
+
+	// ReasoningEffort controls reasoning behaviour for supported models.
+	// Accepted values are "low", "medium", and "high".
+	ReasoningEffort *string
+
+	// Temperature controls sampling randomness in the range [0, 2].
+	// When nil the provider default (1.0) is used.
+	Temperature *float64
+
+	// TopP controls nucleus sampling in the range [0, 1].
+	// When nil the provider default (1.0) is used.
+	TopP *float64
+
+	// ToolChoice controls how the model selects tools.
+	// Supported values: "auto", "none", "required", or "function:<name>".
+	ToolChoice *string
+
+	// Metadata is a map of custom key-value pairs (max 16 pairs,
+	// 128 characters each) attached to the request.
+	Metadata map[string]string
+
+	// Instructions is an alternative to System for the OpenAI Responses API.
+	// When both are set, Instructions takes precedence for Responses API.
+	Instructions *string
+
+	// User is an end-user identifier for monitoring and abuse detection.
+	User *string
 }
 
 // TaskBudgetParam represents the output_config.task_budget wire format sent

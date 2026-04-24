@@ -12,12 +12,59 @@ import (
 // buildResponsesRequest converts a normalized engine request into an OpenAI
 // Responses API payload.
 func buildResponsesRequest(req model.Request) responsesRequest {
-	return responsesRequest{
+	r := responsesRequest{
 		Model:           req.Model,
 		Input:           mapMessagesToResponsesInput(req.System, req.Messages),
 		Tools:           mapToolsToResponses(req.Tools),
 		Stream:          true,
 		MaxOutputTokens: req.MaxOutputTokens,
+	}
+
+	// Map advanced parameters.
+	if req.Instructions != nil {
+		r.Instructions = *req.Instructions
+	}
+	if req.PreviousResponseID != nil {
+		r.PreviousResponseID = *req.PreviousResponseID
+	}
+	if req.Store != nil {
+		r.Store = req.Store
+	}
+	if req.ReasoningEffort != nil {
+		r.Reasoning = &responsesReasoning{Effort: *req.ReasoningEffort}
+	}
+	if req.Temperature != nil {
+		r.Temperature = req.Temperature
+	}
+	if req.TopP != nil {
+		r.TopP = req.TopP
+	}
+	if req.ToolChoice != nil {
+		r.ToolChoice = mapToolChoice(*req.ToolChoice)
+	}
+	if len(req.Metadata) > 0 {
+		r.Metadata = req.Metadata
+	}
+	if req.User != nil {
+		r.User = *req.User
+	}
+
+	return r
+}
+
+// mapToolChoice converts the internal tool choice string to the Responses
+// API tool_choice union type.
+func mapToolChoice(choice string) *responsesToolChoice {
+	switch choice {
+	case "auto", "none", "required":
+		return &responsesToolChoice{Mode: choice}
+	default:
+		// Support "function:<name>" syntax for forcing a specific tool.
+		if name, ok := strings.CutPrefix(choice, "function:"); ok {
+			return &responsesToolChoice{FunctionName: name}
+		}
+		// Fallback: treat as a mode string.
+		return &responsesToolChoice{Mode: choice}
 	}
 }
 
