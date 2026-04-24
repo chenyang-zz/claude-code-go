@@ -34,6 +34,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
+	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -448,6 +449,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
+	promptBuilder := newPromptBuilder(cfg)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
 	case coreconfig.ProviderAnthropic:
@@ -469,9 +471,10 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
-			runtime.AgentRegistry = resolveAgentRegistry()
-			return runtime, policy, nil
-		case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
+		runtime.PromptBuilder = promptBuilder
+		runtime.AgentRegistry = resolveAgentRegistry()
+		return runtime, policy, nil
+	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
 		if cfg.Provider == "openai" && openai.UseResponsesAPI(cfg.Model) {
 			client = openai.NewResponsesClient(openai.Config{
@@ -497,11 +500,22 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
 		applyOpenAIAdvancedDefaults(runtime)
+		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = resolveAgentRegistry()
 		return runtime, policy, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// newPromptBuilder creates a PromptBuilder with the four basic system prompt sections.
+func newPromptBuilder(cfg coreconfig.Config) *prompts.PromptBuilder {
+	return prompts.NewPromptBuilder(
+		prompts.IdentitySection{},
+		prompts.EnvironmentSection{Model: cfg.Model},
+		prompts.PermissionSection{},
+		prompts.ToolGuidelinesSection{},
+	)
 }
 
 // applyOpenAIAdvancedDefaults reads optional environment variables for OpenAI

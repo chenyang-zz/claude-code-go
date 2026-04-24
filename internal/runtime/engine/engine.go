@@ -25,6 +25,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
+	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -136,6 +137,10 @@ type Runtime struct {
 	// AgentRegistry holds agent definitions available for agent tool dispatch.
 	// When nil, agent tool lookups fall back to a default empty registry.
 	AgentRegistry agent.Registry
+
+	// PromptBuilder generates the system prompt injected into each model request.
+	// When nil, the System field is left empty.
+	PromptBuilder *prompts.PromptBuilder
 }
 
 // New builds the minimum single-turn engine.
@@ -505,6 +510,17 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			Messages:            requestMessages,
 			Tools:               e.ToolCatalog,
 			EnablePromptCaching: e.EnablePromptCaching,
+		}
+		if e.PromptBuilder != nil {
+			systemPrompt, err := e.PromptBuilder.Build(ctx)
+			if err != nil {
+				logger.WarnCF("engine", "failed to build system prompt", map[string]any{
+					"session_id": sessionID,
+					"error":      err.Error(),
+				})
+			} else if strings.TrimSpace(systemPrompt) != "" {
+				streamReq.System = systemPrompt
+			}
 		}
 		if lastResponseID != "" {
 			streamReq.PreviousResponseID = &lastResponseID
