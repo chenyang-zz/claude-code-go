@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -38,10 +39,18 @@ type Entry struct {
 	Client *client.Client
 	// Capabilities stores the initialize-time capability snapshot returned by the server.
 	Capabilities client.ServerCapabilities
+	// Tools stores the latest snapshot returned by tools/list.
+	Tools []client.Tool
+	// Resources stores the latest snapshot returned by resources/list.
+	Resources []client.Resource
+	// Prompts stores the latest snapshot returned by prompts/list.
+	Prompts []client.Prompt
 	// Instructions stores the server-provided usage guidance from the initialize handshake.
 	Instructions string
 	Error        string
 }
+
+const snapshotRefreshTimeout = 5 * time.Second
 
 // ServerRegistry manages the lifecycle of configured MCP servers.
 type ServerRegistry struct {
@@ -139,6 +148,9 @@ func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	r.entries[idx].Instructions = result.Instructions
 	r.entries[idx].Error = ""
 	r.mu.Unlock()
+
+	r.registerNotificationHandlers(idx)
+	r.refreshConnectedSnapshots(ctx, idx)
 }
 
 // SetInstructions records the latest server-provided usage guidance for one entry.
@@ -151,6 +163,136 @@ func (r *ServerRegistry) SetInstructions(name string, instructions string) {
 			return
 		}
 	}
+}
+
+// registerNotificationHandlers wires list_changed notifications to snapshot refreshes.
+func (r *ServerRegistry) registerNotificationHandlers(idx int) {
+	r.mu.RLock()
+	if idx >= len(r.entries) {
+		r.mu.RUnlock()
+		return
+	}
+	entry := r.entries[idx]
+	r.mu.RUnlock()
+
+	if entry.Client == nil {
+		return
+	}
+
+	if entry.Capabilities.Tools != nil && entry.Capabilities.Tools.ListChanged {
+		_ = entry.Client.SetNotificationHandler("tools/list_changed", func(client.JSONRPCNotification) {
+			r.refreshToolsSnapshot(context.Background(), idx)
+		})
+	}
+	if entry.Capabilities.Resources != nil && entry.Capabilities.Resources.ListChanged {
+		_ = entry.Client.SetNotificationHandler("resources/list_changed", func(client.JSONRPCNotification) {
+			r.refreshResourcesSnapshot(context.Background(), idx)
+		})
+	}
+	if entry.Capabilities.Prompts != nil && entry.Capabilities.Prompts.ListChanged {
+		_ = entry.Client.SetNotificationHandler("prompts/list_changed", func(client.JSONRPCNotification) {
+			r.refreshPromptsSnapshot(context.Background(), idx)
+		})
+	}
+}
+
+// refreshConnectedSnapshots populates all supported snapshots immediately after connect.
+func (r *ServerRegistry) refreshConnectedSnapshots(ctx context.Context, idx int) {
+	r.refreshToolsSnapshot(ctx, idx)
+	r.refreshResourcesSnapshot(ctx, idx)
+	r.refreshPromptsSnapshot(ctx, idx)
+}
+
+// refreshToolsSnapshot refreshes the tools snapshot for one connected entry.
+func (r *ServerRegistry) refreshToolsSnapshot(ctx context.Context, idx int) {
+	entry, ok := r.connectedEntry(idx)
+	if !ok || entry.Client == nil {
+		return
+	}
+
+	refreshCtx, cancel := context.WithTimeout(ctx, snapshotRefreshTimeout)
+	defer cancel()
+
+	result, err := entry.Client.ListTools(refreshCtx)
+	if err != nil {
+		logger.WarnCF("mcp", "refresh tools snapshot failed", map[string]any{
+			"server": entry.Name,
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	r.mu.Lock()
+	if idx < len(r.entries) && r.entries[idx].Name == entry.Name {
+		r.entries[idx].Tools = append([]client.Tool(nil), result.Tools...)
+	}
+	r.mu.Unlock()
+}
+
+// refreshResourcesSnapshot refreshes the resources snapshot for one connected entry.
+func (r *ServerRegistry) refreshResourcesSnapshot(ctx context.Context, idx int) {
+	entry, ok := r.connectedEntry(idx)
+	if !ok || entry.Client == nil {
+		return
+	}
+
+	refreshCtx, cancel := context.WithTimeout(ctx, snapshotRefreshTimeout)
+	defer cancel()
+
+	result, err := entry.Client.ListResources(refreshCtx)
+	if err != nil {
+		logger.WarnCF("mcp", "refresh resources snapshot failed", map[string]any{
+			"server": entry.Name,
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	r.mu.Lock()
+	if idx < len(r.entries) && r.entries[idx].Name == entry.Name {
+		r.entries[idx].Resources = append([]client.Resource(nil), result.Resources...)
+	}
+	r.mu.Unlock()
+}
+
+// refreshPromptsSnapshot refreshes the prompts snapshot for one connected entry.
+func (r *ServerRegistry) refreshPromptsSnapshot(ctx context.Context, idx int) {
+	entry, ok := r.connectedEntry(idx)
+	if !ok || entry.Client == nil {
+		return
+	}
+
+	refreshCtx, cancel := context.WithTimeout(ctx, snapshotRefreshTimeout)
+	defer cancel()
+
+	result, err := entry.Client.ListPrompts(refreshCtx)
+	if err != nil {
+		logger.WarnCF("mcp", "refresh prompts snapshot failed", map[string]any{
+			"server": entry.Name,
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	r.mu.Lock()
+	if idx < len(r.entries) && r.entries[idx].Name == entry.Name {
+		r.entries[idx].Prompts = append([]client.Prompt(nil), result.Prompts...)
+	}
+	r.mu.Unlock()
+}
+
+// connectedEntry returns a snapshot of one connected entry.
+func (r *ServerRegistry) connectedEntry(idx int) (Entry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if idx < 0 || idx >= len(r.entries) {
+		return Entry{}, false
+	}
+	entry := r.entries[idx]
+	if entry.Status != StatusConnected {
+		return Entry{}, false
+	}
+	return entry, true
 }
 
 // updateStatus updates the status and error message for a single entry.

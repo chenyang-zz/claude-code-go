@@ -10,7 +10,8 @@ import (
 
 // mockTransport implements Transport for testing.
 type mockTransport struct {
-	responses map[RequestID]JSONRPCResponse
+	responses            map[RequestID]JSONRPCResponse
+	notificationHandlers map[string]NotificationHandler
 }
 
 func (m *mockTransport) Send(ctx context.Context, req JSONRPCRequest) (*JSONRPCResponse, error) {
@@ -22,6 +23,27 @@ func (m *mockTransport) Send(ctx context.Context, req JSONRPCRequest) (*JSONRPCR
 }
 
 func (m *mockTransport) Close() error { return nil }
+
+func (m *mockTransport) SetNotificationHandler(method string, handler NotificationHandler) {
+	if m.notificationHandlers == nil {
+		m.notificationHandlers = make(map[string]NotificationHandler)
+	}
+	if handler == nil {
+		delete(m.notificationHandlers, method)
+		return
+	}
+	m.notificationHandlers[method] = handler
+}
+
+func (m *mockTransport) emitNotification(method string, params json.RawMessage) {
+	if handler := m.notificationHandlers[method]; handler != nil {
+		handler(JSONRPCNotification{
+			JSONRPC: "2.0",
+			Method:  method,
+			Params:  params,
+		})
+	}
+}
 
 func TestClientInitialize(t *testing.T) {
 	mt := &mockTransport{
@@ -196,6 +218,72 @@ func TestClientClose(t *testing.T) {
 	}
 }
 
+func TestClientNotificationHandler(t *testing.T) {
+	mt := &mockTransport{}
+	c := NewClient(mt)
+
+	received := make(chan JSONRPCNotification, 1)
+	if err := c.SetNotificationHandler("tools/list_changed", func(n JSONRPCNotification) {
+		received <- n
+	}); err != nil {
+		t.Fatalf("SetNotificationHandler: %v", err)
+	}
+
+	mt.emitNotification("tools/list_changed", json.RawMessage(`{"foo":"bar"}`))
+
+	select {
+	case n := <-received:
+		if n.Method != "tools/list_changed" {
+			t.Fatalf("notification method = %q", n.Method)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for notification")
+	}
+}
+
+func TestStdioClientTransportDispatchesNotification(t *testing.T) {
+	transport, err := NewStdioClientTransport("sh", []string{"-c", `
+		while IFS= read -r line; do
+			id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+			method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+			case "$method" in
+				initialize)
+					printf '%s\n' '{"jsonrpc":"2.0","method":"tools/list_changed"}'
+					printf '%s\n' '{"jsonrpc":"2.0","id":"'"$id"'","result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":true}},"serverInfo":{"name":"test","version":"1.0"}}}'
+					;;
+			esac
+		done
+	`}, nil)
+	if err != nil {
+		t.Fatalf("NewStdioClientTransport: %v", err)
+	}
+	defer transport.Close()
+
+	c := NewClient(transport)
+	received := make(chan struct{}, 1)
+	if err := c.SetNotificationHandler("tools/list_changed", func(JSONRPCNotification) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+	}); err != nil {
+		t.Fatalf("SetNotificationHandler: %v", err)
+	}
+
+	if _, err := c.Initialize(context.Background(), InitializeRequest{
+		ProtocolVersion: "2024-11-05",
+		ClientInfo:      Implementation{Name: "client", Version: "0.1"},
+	}); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for notification dispatch")
+	}
+}
+
 func TestClientRequestTimeout(t *testing.T) {
 	// mockTransport that blocks until context cancellation.
 	mt := &blockingMockTransport{}
@@ -215,5 +303,7 @@ func (m *blockingMockTransport) Send(ctx context.Context, req JSONRPCRequest) (*
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+
+func (m *blockingMockTransport) SetNotificationHandler(method string, handler NotificationHandler) {}
 
 func (m *blockingMockTransport) Close() error { return nil }

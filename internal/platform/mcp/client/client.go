@@ -19,6 +19,15 @@ func NewClient(t Transport) *Client {
 	return &Client{transport: t}
 }
 
+// SetNotificationHandler registers a callback for a server notification method.
+func (c *Client) SetNotificationHandler(method string, handler NotificationHandler) error {
+	if c.transport == nil {
+		return fmt.Errorf("mcp client: nil transport")
+	}
+	c.transport.SetNotificationHandler(method, handler)
+	return nil
+}
+
 // Initialize performs the MCP initialization handshake.
 func (c *Client) Initialize(ctx context.Context, req InitializeRequest) (*InitializeResult, error) {
 	params, err := json.Marshal(req)

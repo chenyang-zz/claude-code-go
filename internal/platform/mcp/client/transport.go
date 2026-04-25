@@ -18,6 +18,8 @@ import (
 type Transport interface {
 	// Send writes a JSON-RPC request and returns the matching response.
 	Send(ctx context.Context, req JSONRPCRequest) (*JSONRPCResponse, error)
+	// SetNotificationHandler registers a handler for an incoming notification method.
+	SetNotificationHandler(method string, handler NotificationHandler)
 	// Close shuts down the transport and releases resources.
 	Close() error
 }
@@ -25,17 +27,18 @@ type Transport interface {
 // StdioClientTransport runs an MCP server as a subprocess and communicates
 // over stdin/stdout using line-delimited JSON-RPC 2.0 messages.
 type StdioClientTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	stderr  io.ReadCloser
-	pending map[RequestID]chan JSONRPCResponse
-	mu      sync.Mutex
-	nextID  atomic.Int64
-	reader  *bufio.Scanner
-	closeCh chan struct{}
-	closed  atomic.Bool
-	wg      sync.WaitGroup
+	cmd                  *exec.Cmd
+	stdin                io.WriteCloser
+	stdout               io.ReadCloser
+	stderr               io.ReadCloser
+	pending              map[RequestID]chan JSONRPCResponse
+	notificationHandlers map[string]NotificationHandler
+	mu                   sync.Mutex
+	nextID               atomic.Int64
+	reader               *bufio.Scanner
+	closeCh              chan struct{}
+	closed               atomic.Bool
+	wg                   sync.WaitGroup
 }
 
 // NewStdioClientTransport starts the subprocess and returns a ready transport.
@@ -70,13 +73,14 @@ func NewStdioClientTransport(command string, args []string, env map[string]strin
 	}
 
 	t := &StdioClientTransport{
-		cmd:     cmd,
-		stdin:   stdin,
-		stdout:  stdout,
-		stderr:  stderr,
-		pending: make(map[RequestID]chan JSONRPCResponse),
-		reader:  bufio.NewScanner(stdout),
-		closeCh: make(chan struct{}),
+		cmd:                  cmd,
+		stdin:                stdin,
+		stdout:               stdout,
+		stderr:               stderr,
+		pending:              make(map[RequestID]chan JSONRPCResponse),
+		notificationHandlers: make(map[string]NotificationHandler),
+		reader:               bufio.NewScanner(stdout),
+		closeCh:              make(chan struct{}),
 	}
 
 	t.wg.Add(1)
@@ -122,6 +126,17 @@ func (t *StdioClientTransport) Send(ctx context.Context, req JSONRPCRequest) (*J
 		}
 		return &resp, nil
 	}
+}
+
+// SetNotificationHandler registers a callback for an incoming notification method.
+func (t *StdioClientTransport) SetNotificationHandler(method string, handler NotificationHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if handler == nil {
+		delete(t.notificationHandlers, method)
+		return
+	}
+	t.notificationHandlers[method] = handler
 }
 
 // Close terminates the subprocess and cleans up resources.
@@ -177,30 +192,39 @@ func (t *StdioClientTransport) readLoop() {
 
 		// Try response first; fall back to notification.
 		var resp JSONRPCResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
-			logger.DebugCF("mcp", "stdio transport unparseable line", map[string]any{
-				"line":  string(line),
-				"error": err.Error(),
-			})
+		if err := json.Unmarshal(line, &resp); err == nil && resp.ID != "" {
+			t.mu.Lock()
+			ch, ok := t.pending[resp.ID]
+			t.mu.Unlock()
+
+			if ok {
+				ch <- resp
+			} else {
+				logger.DebugCF("mcp", "stdio transport orphan response", map[string]any{
+					"id": resp.ID,
+				})
+			}
 			continue
 		}
 
-		// Empty ID means a notification; drop it for now.
-		if resp.ID == "" {
+		var notif JSONRPCNotification
+		if err := json.Unmarshal(line, &notif); err == nil && notif.Method != "" {
+			t.mu.Lock()
+			handler := t.notificationHandlers[notif.Method]
+			t.mu.Unlock()
+			if handler != nil {
+				go handler(notif)
+			} else {
+				logger.DebugCF("mcp", "stdio transport unhandled notification", map[string]any{
+					"method": notif.Method,
+				})
+			}
 			continue
 		}
 
-		t.mu.Lock()
-		ch, ok := t.pending[resp.ID]
-		t.mu.Unlock()
-
-		if ok {
-			ch <- resp
-		} else {
-			logger.DebugCF("mcp", "stdio transport orphan response", map[string]any{
-				"id": resp.ID,
-			})
-		}
+		logger.DebugCF("mcp", "stdio transport unparseable line", map[string]any{
+			"line": string(line),
+		})
 	}
 }
 

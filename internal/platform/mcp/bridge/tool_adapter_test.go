@@ -132,6 +132,9 @@ func (m *mockClientTransport) Send(ctx context.Context, req client.JSONRPCReques
 
 func (m *mockClientTransport) Close() error { return nil }
 
+func (m *mockClientTransport) SetNotificationHandler(method string, handler client.NotificationHandler) {
+}
+
 // blockingMockTransport blocks until the context is cancelled, then returns
 // the context error.  It is used to verify timeout behaviour.
 type blockingMockTransport struct{}
@@ -142,6 +145,9 @@ func (b *blockingMockTransport) Send(ctx context.Context, req client.JSONRPCRequ
 }
 
 func (b *blockingMockTransport) Close() error { return nil }
+
+func (b *blockingMockTransport) SetNotificationHandler(method string, handler client.NotificationHandler) {
+}
 
 func TestProxyToolInvokeTimeout(t *testing.T) {
 	// Set a very short timeout so the test does not hang.
@@ -281,3 +287,6 @@ func (e *errorMockTransport) Send(ctx context.Context, req client.JSONRPCRequest
 }
 
 func (e *errorMockTransport) Close() error { return nil }
+
+func (e *errorMockTransport) SetNotificationHandler(method string, handler client.NotificationHandler) {
+}

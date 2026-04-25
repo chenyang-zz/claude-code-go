@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 )
 
@@ -51,19 +52,19 @@ func (c MCPCommand) Execute(ctx context.Context, args command.Args) (command.Res
 		status := string(e.Status)
 		fmt.Fprintf(&b, "  %s: %s", e.Name, status)
 
-		if e.Status == mcpregistry.StatusConnected && e.Client != nil {
+		if e.Status == mcpregistry.StatusConnected {
 			sections := make([]string, 0, 3)
-			if result, err := e.Client.ListTools(ctx); err == nil && len(result.Tools) > 0 {
-				sections = append(sections, fmt.Sprintf("%d tools", len(result.Tools)))
+			if tools, err := toolsForEntry(ctx, e); err == nil && len(tools) > 0 {
+				sections = append(sections, fmt.Sprintf("%d tools", len(tools)))
 			}
 			if e.Capabilities.Resources != nil {
-				if result, err := e.Client.ListResources(ctx); err == nil && len(result.Resources) > 0 {
-					sections = append(sections, fmt.Sprintf("%d resources", len(result.Resources)))
+				if resources, err := resourcesForEntry(ctx, e); err == nil && len(resources) > 0 {
+					sections = append(sections, fmt.Sprintf("%d resources", len(resources)))
 				}
 			}
 			if e.Capabilities.Prompts != nil {
-				if result, err := e.Client.ListPrompts(ctx); err == nil && len(result.Prompts) > 0 {
-					sections = append(sections, fmt.Sprintf("%d prompts", len(result.Prompts)))
+				if prompts, err := promptsForEntry(ctx, e); err == nil && len(prompts) > 0 {
+					sections = append(sections, fmt.Sprintf("%d prompts", len(prompts)))
 				}
 			}
 			if len(sections) > 0 {
@@ -112,14 +113,14 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 		fmt.Fprintf(&b, "Error: %s\n", target.Error)
 	}
 
-	if target.Status == mcpregistry.StatusConnected && target.Client != nil {
-		if result, err := target.Client.ListTools(ctx); err != nil {
+	if target.Status == mcpregistry.StatusConnected {
+		if tools, err := toolsForEntry(ctx, *target); err != nil {
 			fmt.Fprintf(&b, "\nFailed to list tools: %v\n", err)
-		} else if len(result.Tools) == 0 {
+		} else if len(tools) == 0 {
 			b.WriteString("\nNo tools exposed by this server.\n")
 		} else {
-			fmt.Fprintf(&b, "\nTools (%d):\n", len(result.Tools))
-			for _, t := range result.Tools {
+			fmt.Fprintf(&b, "\nTools (%d):\n", len(tools))
+			for _, t := range tools {
 				fmt.Fprintf(&b, "\n  %s\n", t.Name)
 				if t.Description != "" {
 					fmt.Fprintf(&b, "    %s\n", t.Description)
@@ -154,12 +155,12 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 			}
 		}
 		if target.Capabilities.Resources != nil {
-			if result, err := target.Client.ListResources(ctx); err == nil {
-				if len(result.Resources) == 0 {
+			if resources, err := resourcesForEntry(ctx, *target); err == nil {
+				if len(resources) == 0 {
 					b.WriteString("\nNo resources exposed by this server.\n")
 				} else {
-					fmt.Fprintf(&b, "\nResources (%d):\n", len(result.Resources))
-					for _, r := range result.Resources {
+					fmt.Fprintf(&b, "\nResources (%d):\n", len(resources))
+					for _, r := range resources {
 						fmt.Fprintf(&b, "\n  %s\n", firstNonEmpty(r.Name, r.URI))
 						if r.URI != "" {
 							fmt.Fprintf(&b, "    URI: %s\n", r.URI)
@@ -175,12 +176,12 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 			}
 		}
 		if target.Capabilities.Prompts != nil {
-			if result, err := target.Client.ListPrompts(ctx); err == nil {
-				if len(result.Prompts) == 0 {
+			if prompts, err := promptsForEntry(ctx, *target); err == nil {
+				if len(prompts) == 0 {
 					b.WriteString("\nNo prompts exposed by this server.\n")
 				} else {
-					fmt.Fprintf(&b, "\nPrompts (%d):\n", len(result.Prompts))
-					for _, p := range result.Prompts {
+					fmt.Fprintf(&b, "\nPrompts (%d):\n", len(prompts))
+					for _, p := range prompts {
 						fmt.Fprintf(&b, "\n  %s\n", firstNonEmpty(p.Title, p.Name))
 						if p.Name != "" {
 							fmt.Fprintf(&b, "    Name: %s\n", p.Name)
@@ -212,6 +213,51 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 	return command.Result{
 		Output: strings.TrimSpace(b.String()),
 	}, nil
+}
+
+// toolsForEntry returns the cached tools snapshot when available, otherwise it falls back to a live fetch.
+func toolsForEntry(ctx context.Context, entry mcpregistry.Entry) ([]mcpclient.Tool, error) {
+	if entry.Tools != nil {
+		return entry.Tools, nil
+	}
+	if entry.Client == nil {
+		return nil, nil
+	}
+	result, err := entry.Client.ListTools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Tools, nil
+}
+
+// resourcesForEntry returns the cached resources snapshot when available, otherwise it falls back to a live fetch.
+func resourcesForEntry(ctx context.Context, entry mcpregistry.Entry) ([]mcpclient.Resource, error) {
+	if entry.Resources != nil {
+		return entry.Resources, nil
+	}
+	if entry.Client == nil {
+		return nil, nil
+	}
+	result, err := entry.Client.ListResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Resources, nil
+}
+
+// promptsForEntry returns the cached prompts snapshot when available, otherwise it falls back to a live fetch.
+func promptsForEntry(ctx context.Context, entry mcpregistry.Entry) ([]mcpclient.Prompt, error) {
+	if entry.Prompts != nil {
+		return entry.Prompts, nil
+	}
+	if entry.Client == nil {
+		return nil, nil
+	}
+	result, err := entry.Client.ListPrompts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Prompts, nil
 }
 
 // firstNonEmpty returns the first non-empty string from the provided values.

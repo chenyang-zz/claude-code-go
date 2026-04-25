@@ -30,6 +30,9 @@ type JSONRPCNotification struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+// NotificationHandler consumes a JSON-RPC notification emitted by the server.
+type NotificationHandler func(JSONRPCNotification)
+
 // JSONRPCError is the error object inside a JSON-RPC response.
 type JSONRPCError struct {
 	Code    int    `json:"code"`
