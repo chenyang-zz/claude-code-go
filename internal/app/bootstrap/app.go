@@ -12,8 +12,6 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
-	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
-	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -22,11 +20,10 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
-	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
-	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
-	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
+	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
+	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
@@ -37,6 +34,9 @@ import (
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
+	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
+	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -543,6 +543,14 @@ func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.P
 		prompts.PermissionSection{},
 		prompts.ToolGuidelinesSection{},
 		prompts.AgentListingSection{Registry: registry},
+		prompts.SessionGuidanceSection{},
+		prompts.MemorySection{},
+		prompts.MCPInstructionsSection{},
+		prompts.ScratchpadSection{},
+		prompts.FunctionResultClearingSection{},
+		prompts.ToolResultsReminderSection{},
+		prompts.BriefSection{},
+		prompts.ProactiveSection{},
 	)
 }
 

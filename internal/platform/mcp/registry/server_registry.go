@@ -36,7 +36,9 @@ type Entry struct {
 	Config client.ServerConfig
 	Status ServerStatus
 	Client *client.Client
-	Error  string
+	// Instructions stores the server-provided usage guidance from the initialize handshake.
+	Instructions string
+	Error        string
 }
 
 // ServerRegistry manages the lifecycle of configured MCP servers.
@@ -131,8 +133,21 @@ func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	r.mu.Lock()
 	r.entries[idx].Client = c
 	r.entries[idx].Status = StatusConnected
+	r.entries[idx].Instructions = result.Instructions
 	r.entries[idx].Error = ""
 	r.mu.Unlock()
+}
+
+// SetInstructions records the latest server-provided usage guidance for one entry.
+func (r *ServerRegistry) SetInstructions(name string, instructions string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range r.entries {
+		if r.entries[i].Name == name {
+			r.entries[i].Instructions = instructions
+			return
+		}
+	}
 }
 
 // updateStatus updates the status and error message for a single entry.

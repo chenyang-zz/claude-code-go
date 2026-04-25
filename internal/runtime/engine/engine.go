@@ -513,7 +513,12 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 		}
 		resolvedSystemPrompt := strings.TrimSpace(systemPrompt)
 		if resolvedSystemPrompt == "" && e.PromptBuilder != nil {
-			built, err := e.PromptBuilder.Build(ctx)
+			builtCtx := prompts.WithRuntimeContext(ctx, prompts.RuntimeContext{
+				EnabledToolNames: buildEnabledToolNameSet(e.ToolCatalog),
+				WorkingDir:       cwd,
+				SessionID:        sessionID,
+			})
+			built, err := e.PromptBuilder.Build(builtCtx)
 			if err != nil {
 				logger.WarnCF("engine", "failed to build system prompt", map[string]any{
 					"session_id": sessionID,
@@ -911,6 +916,23 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			e.appendHistoryWithTranscript(&history, e.executeToolUses(ctx, result.toolUses, out), transcriptWriter)
 		}
 	}
+}
+
+// buildEnabledToolNameSet converts the provider-facing tool catalog into a
+// quick lookup set for prompt sections that need runtime tool availability.
+func buildEnabledToolNameSet(toolDefs []model.ToolDefinition) map[string]struct{} {
+	if len(toolDefs) == 0 {
+		return nil
+	}
+
+	names := make(map[string]struct{}, len(toolDefs))
+	for _, def := range toolDefs {
+		if strings.TrimSpace(def.Name) == "" {
+			continue
+		}
+		names[def.Name] = struct{}{}
+	}
+	return names
 }
 
 // resolveTranscriptPath lazily computes the transcript file path when runtime
