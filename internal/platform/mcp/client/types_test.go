@@ -87,6 +87,56 @@ func TestListToolsResultUnmarshal(t *testing.T) {
 	}
 }
 
+func TestListResourcesResultUnmarshal(t *testing.T) {
+	raw := `{"resources":[{"uri":"file:///tmp/a","name":"config","description":"Config file","mimeType":"text/plain"}]}`
+	var result ListResourcesResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal listResources result: %v", err)
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("len(resources) = %d, want 1", len(result.Resources))
+	}
+	if result.Resources[0].URI != "file:///tmp/a" {
+		t.Fatalf("resource.uri = %q", result.Resources[0].URI)
+	}
+}
+
+func TestListPromptsResultUnmarshal(t *testing.T) {
+	raw := `{"prompts":[{"name":"summarize","description":"Summarize","arguments":{"path":{"name":"path","description":"Target file","required":true}}}]}`
+	var result ListPromptsResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal listPrompts result: %v", err)
+	}
+	if len(result.Prompts) != 1 {
+		t.Fatalf("len(prompts) = %d, want 1", len(result.Prompts))
+	}
+	if result.Prompts[0].Name != "summarize" {
+		t.Fatalf("prompt.name = %q", result.Prompts[0].Name)
+	}
+}
+
+func TestReadResourceResultUnmarshal(t *testing.T) {
+	raw := `{"contents":[{"uri":"file:///tmp/a","mimeType":"text/plain","text":"hello"}]}`
+	var result ReadResourceResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal readResource result: %v", err)
+	}
+	if len(result.Contents) != 1 {
+		t.Fatalf("len(contents) = %d, want 1", len(result.Contents))
+	}
+}
+
+func TestGetPromptResultUnmarshal(t *testing.T) {
+	raw := `{"description":"Summarize","messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}]}`
+	var result GetPromptResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal getPrompt result: %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("len(messages) = %d, want 1", len(result.Messages))
+	}
+}
+
 func TestCallToolResultUnmarshal(t *testing.T) {
 	raw := `{"content":[{"type":"text","text":"hello"}],"isError":false}`
 	var result CallToolResult

@@ -81,6 +81,46 @@ func TestServerRegistryConnected(t *testing.T) {
 	}
 }
 
+func TestServerRegistryStoresCapabilities(t *testing.T) {
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"caps": {
+			Command: "sh",
+			Args: []string{"-c", `
+				while IFS= read -r line; do
+					id=$(printf '%s' "$line" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+					method=$(printf '%s' "$line" | sed -n 's/.*"method":"\([^"]*\)".*/\1/p')
+					case "$method" in
+						initialize)
+							printf '%s\n' '{"jsonrpc":"2.0","id":"'"$id"'","result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{},"resources":{},"prompts":{}},"serverInfo":{"name":"caps","version":"1.0"}}}'
+							;;
+						tools/list)
+							printf '%s\n' '{"jsonrpc":"2.0","id":"'"$id"'","result":{"tools":[]}}'
+							;;
+						resources/list)
+							printf '%s\n' '{"jsonrpc":"2.0","id":"'"$id"'","result":{"resources":[]}}'
+							;;
+						prompts/list)
+							printf '%s\n' '{"jsonrpc":"2.0","id":"'"$id"'","result":{"prompts":[]}}'
+							;;
+					esac
+				done
+			`},
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r.ConnectAll(ctx)
+
+	entries := r.List()
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Capabilities.Tools == nil || entries[0].Capabilities.Resources == nil || entries[0].Capabilities.Prompts == nil {
+		t.Fatalf("capabilities = %#v", entries[0].Capabilities)
+	}
+}
+
 func TestSetGetLastRegistry(t *testing.T) {
 	r := NewServerRegistry()
 	SetLastRegistry(r)

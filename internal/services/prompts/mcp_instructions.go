@@ -37,5 +37,5 @@ func (s MCPInstructionsSection) Compute(ctx context.Context) (string, error) {
 		return "", nil
 	}
 
-	return "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n" + strings.Join(blocks, "\n\n"), nil
+	return "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools, resources, and prompts:\n\n" + strings.Join(blocks, "\n\n"), nil
 }

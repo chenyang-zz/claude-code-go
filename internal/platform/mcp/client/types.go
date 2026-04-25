@@ -45,16 +45,16 @@ func (e *JSONRPCError) Error() string {
 
 // InitializeRequest is sent by the client to begin an MCP session.
 type InitializeRequest struct {
-	ProtocolVersion string              `json:"protocolVersion"`
-	Capabilities    ClientCapabilities  `json:"capabilities"`
-	ClientInfo      Implementation      `json:"clientInfo"`
+	ProtocolVersion string             `json:"protocolVersion"`
+	Capabilities    ClientCapabilities `json:"capabilities"`
+	ClientInfo      Implementation     `json:"clientInfo"`
 }
 
 // ClientCapabilities declares what the client supports.
 type ClientCapabilities struct {
-	Roots        map[string]any `json:"roots,omitempty"`
-	Sampling     map[string]any `json:"sampling,omitempty"`
-	Elicitation  map[string]any `json:"elicitation,omitempty"`
+	Roots       map[string]any `json:"roots,omitempty"`
+	Sampling    map[string]any `json:"sampling,omitempty"`
+	Elicitation map[string]any `json:"elicitation,omitempty"`
 }
 
 // Implementation describes a client or server implementation.
@@ -73,10 +73,10 @@ type InitializeResult struct {
 
 // ServerCapabilities declares what the server supports.
 type ServerCapabilities struct {
-	Tools      *ToolsCapability      `json:"tools,omitempty"`
-	Resources  *ResourcesCapability  `json:"resources,omitempty"`
-	Prompts    *PromptsCapability    `json:"prompts,omitempty"`
-	Logging    map[string]any        `json:"logging,omitempty"`
+	Tools     *ToolsCapability     `json:"tools,omitempty"`
+	Resources *ResourcesCapability `json:"resources,omitempty"`
+	Prompts   *PromptsCapability   `json:"prompts,omitempty"`
+	Logging   map[string]any       `json:"logging,omitempty"`
 }
 
 // ToolsCapability indicates the server exposes callable tools.
@@ -103,30 +103,97 @@ type ListToolsRequest struct {
 
 // ListToolsResult is the response to a tools/list request.
 type ListToolsResult struct {
-	Tools    []Tool   `json:"tools"`
+	Tools      []Tool `json:"tools"`
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 // Tool describes a single tool exposed by an MCP server.
 type Tool struct {
-	Name        string        `json:"name"`
-	Description string        `json:"description,omitempty"`
-	InputSchema ToolInputSchema `json:"inputSchema,omitempty"`
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	InputSchema ToolInputSchema  `json:"inputSchema,omitempty"`
 	Annotations *ToolAnnotations `json:"annotations,omitempty"`
+}
+
+// ListResourcesRequest requests the list of resources from a server.
+type ListResourcesRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// ListResourcesResult is the response to a resources/list request.
+type ListResourcesResult struct {
+	Resources  []Resource `json:"resources"`
+	NextCursor string     `json:"nextCursor,omitempty"`
+}
+
+// Resource describes a single resource exposed by an MCP server.
+type Resource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+// ReadResourceRequest requests a single resource by URI.
+type ReadResourceRequest struct {
+	URI string `json:"uri"`
+}
+
+// ReadResourceResult is the response to a resources/read request.
+type ReadResourceResult struct {
+	Contents []map[string]any `json:"contents"`
+}
+
+// ListPromptsRequest requests the list of prompts from a server.
+type ListPromptsRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// ListPromptsResult is the response to a prompts/list request.
+type ListPromptsResult struct {
+	Prompts    []Prompt `json:"prompts"`
+	NextCursor string   `json:"nextCursor,omitempty"`
+}
+
+// Prompt describes a single prompt template exposed by an MCP server.
+type Prompt struct {
+	Name        string                    `json:"name"`
+	Title       string                    `json:"title,omitempty"`
+	Description string                    `json:"description,omitempty"`
+	Arguments   map[string]PromptArgument `json:"arguments,omitempty"`
+}
+
+// PromptArgument describes one prompt argument.
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// GetPromptRequest requests one prompt template with optional arguments.
+type GetPromptRequest struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments,omitempty"`
+}
+
+// GetPromptResult is the response to a prompts/get request.
+type GetPromptResult struct {
+	Description string           `json:"description,omitempty"`
+	Messages    []map[string]any `json:"messages"`
 }
 
 // ToolInputSchema is the JSON Schema for a tool's input.
 type ToolInputSchema struct {
-	Type       string              `json:"type,omitempty"`
-	Properties map[string]any      `json:"properties,omitempty"`
-	Required   []string            `json:"required,omitempty"`
+	Type       string         `json:"type,omitempty"`
+	Properties map[string]any `json:"properties,omitempty"`
+	Required   []string       `json:"required,omitempty"`
 }
 
 // ToolAnnotations carries hints about tool behavior.
 type ToolAnnotations struct {
-	ReadOnlyHint     bool `json:"readOnlyHint,omitempty"`
-	DestructiveHint  bool `json:"destructiveHint,omitempty"`
-	OpenWorldHint    bool `json:"openWorldHint,omitempty"`
+	ReadOnlyHint    bool `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool `json:"destructiveHint,omitempty"`
+	OpenWorldHint   bool `json:"openWorldHint,omitempty"`
 }
 
 // MCP tools/call types.
@@ -140,9 +207,9 @@ type CallToolRequest struct {
 
 // CallToolResult is the response from a tool invocation.
 type CallToolResult struct {
-	Content          []ContentItem `json:"content"`
-	IsError          bool          `json:"isError,omitempty"`
-	Meta             map[string]any `json:"_meta,omitempty"`
+	Content           []ContentItem  `json:"content"`
+	IsError           bool           `json:"isError,omitempty"`
+	Meta              map[string]any `json:"_meta,omitempty"`
 	StructuredContent map[string]any `json:"structuredContent,omitempty"`
 }
 

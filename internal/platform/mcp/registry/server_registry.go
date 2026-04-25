@@ -36,6 +36,8 @@ type Entry struct {
 	Config client.ServerConfig
 	Status ServerStatus
 	Client *client.Client
+	// Capabilities stores the initialize-time capability snapshot returned by the server.
+	Capabilities client.ServerCapabilities
 	// Instructions stores the server-provided usage guidance from the initialize handshake.
 	Instructions string
 	Error        string
@@ -133,6 +135,7 @@ func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	r.mu.Lock()
 	r.entries[idx].Client = c
 	r.entries[idx].Status = StatusConnected
+	r.entries[idx].Capabilities = result.Capabilities
 	r.entries[idx].Instructions = result.Instructions
 	r.entries[idx].Error = ""
 	r.mu.Unlock()

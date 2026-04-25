@@ -65,6 +65,112 @@ func (c *Client) ListTools(ctx context.Context) (*ListToolsResult, error) {
 	return &result, nil
 }
 
+// ListResources fetches the list of resources exposed by the server.
+func (c *Client) ListResources(ctx context.Context) (*ListResourcesResult, error) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("mcp client: closed")
+	}
+	c.mu.RUnlock()
+
+	req := ListResourcesRequest{}
+	params, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: marshal listResources request: %w", err)
+	}
+
+	resp, err := c.request(ctx, "resources/list", params)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: listResources: %w", err)
+	}
+
+	var result ListResourcesResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("mcp client: unmarshal listResources result: %w", err)
+	}
+	return &result, nil
+}
+
+// ReadResource reads a single resource by URI.
+func (c *Client) ReadResource(ctx context.Context, req ReadResourceRequest) (*ReadResourceResult, error) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("mcp client: closed")
+	}
+	c.mu.RUnlock()
+
+	params, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: marshal readResource request: %w", err)
+	}
+
+	resp, err := c.request(ctx, "resources/read", params)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: readResource: %w", err)
+	}
+
+	var result ReadResourceResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("mcp client: unmarshal readResource result: %w", err)
+	}
+	return &result, nil
+}
+
+// ListPrompts fetches the list of prompts exposed by the server.
+func (c *Client) ListPrompts(ctx context.Context) (*ListPromptsResult, error) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("mcp client: closed")
+	}
+	c.mu.RUnlock()
+
+	req := ListPromptsRequest{}
+	params, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: marshal listPrompts request: %w", err)
+	}
+
+	resp, err := c.request(ctx, "prompts/list", params)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: listPrompts: %w", err)
+	}
+
+	var result ListPromptsResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("mcp client: unmarshal listPrompts result: %w", err)
+	}
+	return &result, nil
+}
+
+// GetPrompt fetches a single prompt template and its rendered messages.
+func (c *Client) GetPrompt(ctx context.Context, req GetPromptRequest) (*GetPromptResult, error) {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("mcp client: closed")
+	}
+	c.mu.RUnlock()
+
+	params, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: marshal getPrompt request: %w", err)
+	}
+
+	resp, err := c.request(ctx, "prompts/get", params)
+	if err != nil {
+		return nil, fmt.Errorf("mcp client: getPrompt: %w", err)
+	}
+
+	var result GetPromptResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("mcp client: unmarshal getPrompt result: %w", err)
+	}
+	return &result, nil
+}
+
 // CallTool invokes a named tool on the server.
 func (c *Client) CallTool(ctx context.Context, req CallToolRequest) (*CallToolResult, error) {
 	c.mu.RLock()

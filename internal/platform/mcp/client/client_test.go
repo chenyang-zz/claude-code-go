@@ -83,6 +83,86 @@ func TestClientListTools(t *testing.T) {
 	}
 }
 
+func TestClientListResources(t *testing.T) {
+	mt := &mockTransport{
+		responses: map[RequestID]JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  json.RawMessage(`{"resources":[{"uri":"file:///tmp/a","name":"config","description":"Config file"}]}`),
+			},
+		},
+	}
+	c := NewClient(mt)
+	result, err := c.ListResources(context.Background())
+	if err != nil {
+		t.Fatalf("listResources: %v", err)
+	}
+	if len(result.Resources) != 1 || result.Resources[0].URI != "file:///tmp/a" {
+		t.Fatalf("resources = %+v", result.Resources)
+	}
+}
+
+func TestClientReadResource(t *testing.T) {
+	mt := &mockTransport{
+		responses: map[RequestID]JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  json.RawMessage(`{"contents":[{"uri":"file:///tmp/a","mimeType":"text/plain","text":"hello"}]}`),
+			},
+		},
+	}
+	c := NewClient(mt)
+	result, err := c.ReadResource(context.Background(), ReadResourceRequest{URI: "file:///tmp/a"})
+	if err != nil {
+		t.Fatalf("readResource: %v", err)
+	}
+	if len(result.Contents) != 1 {
+		t.Fatalf("contents = %+v", result.Contents)
+	}
+}
+
+func TestClientListPrompts(t *testing.T) {
+	mt := &mockTransport{
+		responses: map[RequestID]JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  json.RawMessage(`{"prompts":[{"name":"summarize","description":"Summarize","arguments":{"path":{"name":"path","description":"Target file","required":true}}}]}`),
+			},
+		},
+	}
+	c := NewClient(mt)
+	result, err := c.ListPrompts(context.Background())
+	if err != nil {
+		t.Fatalf("listPrompts: %v", err)
+	}
+	if len(result.Prompts) != 1 || result.Prompts[0].Name != "summarize" {
+		t.Fatalf("prompts = %+v", result.Prompts)
+	}
+}
+
+func TestClientGetPrompt(t *testing.T) {
+	mt := &mockTransport{
+		responses: map[RequestID]JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  json.RawMessage(`{"description":"Summarize","messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}]}`),
+			},
+		},
+	}
+	c := NewClient(mt)
+	result, err := c.GetPrompt(context.Background(), GetPromptRequest{Name: "summarize"})
+	if err != nil {
+		t.Fatalf("getPrompt: %v", err)
+	}
+	if len(result.Messages) != 1 {
+		t.Fatalf("messages = %+v", result.Messages)
+	}
+}
+
 func TestClientCallTool(t *testing.T) {
 	mt := &mockTransport{
 		responses: map[RequestID]JSONRPCResponse{

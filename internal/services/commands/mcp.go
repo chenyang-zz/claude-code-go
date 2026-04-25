@@ -52,18 +52,22 @@ func (c MCPCommand) Execute(ctx context.Context, args command.Args) (command.Res
 		fmt.Fprintf(&b, "  %s: %s", e.Name, status)
 
 		if e.Status == mcpregistry.StatusConnected && e.Client != nil {
-			if result, err := e.Client.ListTools(ctx); err == nil {
-				if len(result.Tools) > 0 {
-					fmt.Fprintf(&b, " (%d tools)", len(result.Tools))
-					var names []string
-					for _, t := range result.Tools {
-						names = append(names, t.Name)
-					}
-					if len(names) > 0 {
-						b.WriteString("\n    ")
-						b.WriteString(strings.Join(names, ", "))
-					}
+			sections := make([]string, 0, 3)
+			if result, err := e.Client.ListTools(ctx); err == nil && len(result.Tools) > 0 {
+				sections = append(sections, fmt.Sprintf("%d tools", len(result.Tools)))
+			}
+			if e.Capabilities.Resources != nil {
+				if result, err := e.Client.ListResources(ctx); err == nil && len(result.Resources) > 0 {
+					sections = append(sections, fmt.Sprintf("%d resources", len(result.Resources)))
 				}
+			}
+			if e.Capabilities.Prompts != nil {
+				if result, err := e.Client.ListPrompts(ctx); err == nil && len(result.Prompts) > 0 {
+					sections = append(sections, fmt.Sprintf("%d prompts", len(result.Prompts)))
+				}
+			}
+			if len(sections) > 0 {
+				fmt.Fprintf(&b, " (%s)", strings.Join(sections, ", "))
 			}
 		}
 
@@ -109,8 +113,7 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 	}
 
 	if target.Status == mcpregistry.StatusConnected && target.Client != nil {
-		result, err := target.Client.ListTools(ctx)
-		if err != nil {
+		if result, err := target.Client.ListTools(ctx); err != nil {
 			fmt.Fprintf(&b, "\nFailed to list tools: %v\n", err)
 		} else if len(result.Tools) == 0 {
 			b.WriteString("\nNo tools exposed by this server.\n")
@@ -150,6 +153,58 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 				}
 			}
 		}
+		if target.Capabilities.Resources != nil {
+			if result, err := target.Client.ListResources(ctx); err == nil {
+				if len(result.Resources) == 0 {
+					b.WriteString("\nNo resources exposed by this server.\n")
+				} else {
+					fmt.Fprintf(&b, "\nResources (%d):\n", len(result.Resources))
+					for _, r := range result.Resources {
+						fmt.Fprintf(&b, "\n  %s\n", firstNonEmpty(r.Name, r.URI))
+						if r.URI != "" {
+							fmt.Fprintf(&b, "    URI: %s\n", r.URI)
+						}
+						if r.Description != "" {
+							fmt.Fprintf(&b, "    %s\n", r.Description)
+						}
+						if r.MimeType != "" {
+							fmt.Fprintf(&b, "    MIME: %s\n", r.MimeType)
+						}
+					}
+				}
+			}
+		}
+		if target.Capabilities.Prompts != nil {
+			if result, err := target.Client.ListPrompts(ctx); err == nil {
+				if len(result.Prompts) == 0 {
+					b.WriteString("\nNo prompts exposed by this server.\n")
+				} else {
+					fmt.Fprintf(&b, "\nPrompts (%d):\n", len(result.Prompts))
+					for _, p := range result.Prompts {
+						fmt.Fprintf(&b, "\n  %s\n", firstNonEmpty(p.Title, p.Name))
+						if p.Name != "" {
+							fmt.Fprintf(&b, "    Name: %s\n", p.Name)
+						}
+						if p.Description != "" {
+							fmt.Fprintf(&b, "    %s\n", p.Description)
+						}
+						if len(p.Arguments) > 0 {
+							b.WriteString("    Arguments:\n")
+							for _, arg := range p.Arguments {
+								marker := ""
+								if arg.Required {
+									marker = " (required)"
+								}
+								fmt.Fprintf(&b, "      %s%s\n", arg.Name, marker)
+								if arg.Description != "" {
+									fmt.Fprintf(&b, "        %s\n", arg.Description)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 	} else {
 		b.WriteString("\nServer is not connected; tool list unavailable.\n")
 	}
@@ -157,4 +212,14 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 	return command.Result{
 		Output: strings.TrimSpace(b.String()),
 	}, nil
+}
+
+// firstNonEmpty returns the first non-empty string from the provided values.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

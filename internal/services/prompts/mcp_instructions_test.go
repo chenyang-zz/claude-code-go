@@ -48,6 +48,9 @@ func TestMCPInstructionsSection_ComputeWithRegistry(t *testing.T) {
 	if !strings.Contains(got, "# MCP Server Instructions") {
 		t.Fatalf("Compute() = %q, want MCP instructions header", got)
 	}
+	if !strings.Contains(got, "tools, resources, and prompts") {
+		t.Fatalf("Compute() = %q, want updated capability wording", got)
+	}
 	if !strings.Contains(got, "Use this server for workspace file lookups.") {
 		t.Fatalf("Compute() = %q, want server instructions", got)
 	}
