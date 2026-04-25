@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
@@ -18,8 +19,34 @@ func TestTool_Name(t *testing.T) {
 
 func TestTool_Description(t *testing.T) {
 	tool := NewTool(nil, nil)
-	if got := tool.Description(); got == "" {
+	got := tool.Description()
+	if got == "" {
 		t.Error("Description() should not be empty")
+	}
+	// Verify it contains the fallback content when registry is nil
+	if !strings.Contains(got, "Launch a specialized agent") {
+		t.Error("Description() missing expected content")
+	}
+}
+
+func TestTool_Description_WithRegistry(t *testing.T) {
+	registry := agent.NewInMemoryRegistry()
+	_ = registry.Register(agent.Definition{
+		AgentType: "explore",
+		WhenToUse: "Search specialist",
+		Tools:     []string{"Read", "Bash"},
+	})
+	tool := NewTool(registry, nil)
+	got := tool.Description()
+	if got == "" {
+		t.Error("Description() should not be empty")
+	}
+	// With registry, should contain dynamic content
+	if !strings.Contains(got, "Available agent types") {
+		t.Error("Description() missing dynamic content")
+	}
+	if !strings.Contains(got, "- explore: Search specialist (Tools: Read, Bash)") {
+		t.Error("Description() missing agent listing")
 	}
 }
 

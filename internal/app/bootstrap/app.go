@@ -451,7 +451,8 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
-	promptBuilder := newPromptBuilder(cfg)
+	agentRegistry := resolveAgentRegistry()
+	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
 	case coreconfig.ProviderAnthropic:
@@ -474,10 +475,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
 		)
 		runtime.PromptBuilder = promptBuilder
-		runtime.AgentRegistry = resolveAgentRegistry()
+		runtime.AgentRegistry = agentRegistry
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
-		agentRegistry := resolveAgentRegistry()
 		if agentRegistry != nil {
 			agentTool := agenttool.NewTool(agentRegistry, runtime)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
@@ -516,10 +516,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		)
 		applyOpenAIAdvancedDefaults(runtime)
 		runtime.PromptBuilder = promptBuilder
-		runtime.AgentRegistry = resolveAgentRegistry()
+		runtime.AgentRegistry = agentRegistry
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
-		agentRegistry := resolveAgentRegistry()
 		if agentRegistry != nil {
 			agentTool := agenttool.NewTool(agentRegistry, runtime)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
@@ -536,13 +535,14 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	}
 }
 
-// newPromptBuilder creates a PromptBuilder with the four basic system prompt sections.
-func newPromptBuilder(cfg coreconfig.Config) *prompts.PromptBuilder {
+// newPromptBuilder creates a PromptBuilder with the standard system prompt sections.
+func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.PromptBuilder {
 	return prompts.NewPromptBuilder(
 		prompts.IdentitySection{},
 		prompts.EnvironmentSection{Model: cfg.Model},
 		prompts.PermissionSection{},
 		prompts.ToolGuidelinesSection{},
+		prompts.AgentListingSection{Registry: registry},
 	)
 }
 

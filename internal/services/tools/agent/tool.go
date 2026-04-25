@@ -17,14 +17,19 @@ import (
 type Tool struct {
 	registry      agent.Registry
 	parentRuntime *engine.Runtime
+	descriptor    *Descriptor
 }
 
 // NewTool creates an Agent tool wired to the given registry and parent runtime.
 func NewTool(registry agent.Registry, parentRuntime *engine.Runtime) *Tool {
-	return &Tool{
+	t := &Tool{
 		registry:      registry,
 		parentRuntime: parentRuntime,
 	}
+	if registry != nil {
+		t.descriptor = &Descriptor{Registry: registry}
+	}
+	return t
 }
 
 // Name returns the tool name used for registration and dispatch.
@@ -33,7 +38,12 @@ func (t *Tool) Name() string {
 }
 
 // Description returns the tool description exposed to the model.
+// When a descriptor is configured, it returns a dynamic description based
+// on the registered agent types; otherwise it falls back to a static string.
 func (t *Tool) Description() string {
+	if t.descriptor != nil {
+		return t.descriptor.Description()
+	}
 	return "Launch a specialized agent to perform a task. Use this when you need to delegate work to a subagent."
 }
 
