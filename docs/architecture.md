@@ -27,6 +27,7 @@ claude-code-go/
 │   │   ├── config/
 │   │   ├── conversation/
 │   │   ├── event/
+│   │   ├── hook/
 │   │   ├── message/
 │   │   ├── model/
 │   │   ├── permission/
@@ -54,6 +55,7 @@ claude-code-go/
 │   │   ├── coordinator/
 │   │   ├── engine/
 │   │   ├── executor/
+│   │   ├── hooks/
 │   │   ├── repl/
 │   │   └── session/
 │   ├── services/
@@ -102,6 +104,7 @@ claude-code-go/
   - 这里处理顺序、重试、事件流、审批、调度，但不直接绑定某个外部厂商。
 - `internal/platform`
   - 外部系统适配层。负责 Anthropic/OpenAI API、文件系统、shell、git、sqlite、MCP、plugin、telemetry 等宿主能力接入。
+  - 其中 `internal/platform/mcp` 负责把外部 MCP server 的协议消息转成内部可消费的 client、bridge 与 registry 能力，包括 request/notification 分发和协议桥接。
   - 这里解决“怎么跟外界说话”。
 - `internal/services`
   - 内建产品能力层。把 `core` 抽象和 `platform` 能力组合成用户可见的命令、工具、提示词等功能。
@@ -135,6 +138,7 @@ claude-code-go/
 - `platform` 可以实现 `core` 中定义的接口，但不应该反过来把自己的类型泄漏进 `core`。
 - `ui` 可以依赖 `runtime`、`services`、`core`，但不应成为业务决策中心。
 - `core` 不依赖 `platform` 或 `ui`，也尽量不依赖具体第三方 SDK。
+- `runtime/hooks` 可以在不引入 UI 的前提下承接命令型 hook 执行与 matcher 过滤；当前已支持按 MCP server name 过滤 elicitation 相关 hooks。
 
 这样做的原因很直接：
 
@@ -187,7 +191,8 @@ claude-code-go/
 
 - MCP server
   - 典型位置：`internal/platform/mcp/registry`、`internal/platform/mcp/client`
-  - 它们代表外部工具/资源提供方，通常通过 MCP 协议暴露能力。
+  - 它们代表外部工具/资源/提示词提供方，通常通过 MCP 协议暴露能力。
+  - 这里也包括 MCP 控制面消息的处理，例如 `elicitation/create` 请求和 `notifications/elicitation/complete` 通知。
 - API server / model provider
   - 典型位置：`internal/platform/api/anthropic`、`internal/platform/api/openai`
   - 它们是远程模型服务端，提供补全、流式响应等能力。
@@ -219,9 +224,10 @@ claude-code-go/
 
 1. `core/tool` 定义“工具”应该长什么样。
 2. `platform/mcp/client` 负责连接外部 MCP server。
-3. `platform/mcp/bridge` 把 MCP 协议对象转换成系统内部可调用对象。
+3. `platform/mcp/bridge` 把 MCP 协议对象转换成系统内部可调用对象，并把 elicitation 这类控制面请求接到 hook 生命周期。
 4. `services/tools/mcp` 把代理后的能力作为产品级 tool 暴露出去。
-5. `runtime/engine` 在对话过程中决定何时调用它。
+5. `runtime/hooks` 负责执行命令型 hooks，`runtime/engine` 在对话过程中决定何时调用它。
+6. `app/bootstrap` 在客户端连接建立后注册 MCP bridge，使 request、notification 和 hooks 能形成闭环。
 
 这样分层的好处是：
 
@@ -239,7 +245,8 @@ claude-code-go/
 4. `internal/runtime/engine` 基于 `core` 的请求、事件、工具抽象执行主循环。
 5. `internal/services` 提供具体命令、工具、提示词。
 6. 如需访问外部资源，则通过 `internal/platform` 的 adapter/client/server 完成。
-7. 结果以 `core/event` 流的形式交给 `internal/ui` 渲染。
+7. 若外部 MCP server 触发 `elicitation/create`，则 `platform/mcp/client` 分发 request，`platform/mcp/bridge` 先执行 hooks 再默认回退，`runtime/hooks` 根据 server name 做匹配，最后将结果写回协议。
+8. 结果以 `core/event` 流的形式交给 `internal/ui` 渲染。
 
 ## Practical Placement Guide
 
@@ -248,6 +255,8 @@ claude-code-go/
 - 如果你在定义稳定接口、消息结构、权限决策、事件模型，放 `core`。
 - 如果你在写执行顺序、重试、调度、审批流程，放 `runtime`。
 - 如果你在接外部 API、MCP、shell、git、sqlite、plugin，放 `platform`。
+- 如果你在做 MCP request / notification 分发、elicitation bridge 或连接级协议适配，放 `platform/mcp`。
+- 如果你在做 hook matcher、hook 输入输出模型，放 `core/hook` 与 `runtime/hooks`。
 - 如果你在实现 `/login`、`/mcp`、`BashTool`、`FileReadTool` 这类产品能力，放 `services`。
 - 如果你在做启动装配和依赖注入，放 `app`。
 - 如果你在做 console/TUI/json 输出，放 `ui`。
