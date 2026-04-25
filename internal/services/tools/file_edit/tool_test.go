@@ -904,6 +904,49 @@ func TestToolInvokeRejectsMissingString(t *testing.T) {
 	}
 }
 
+// TestToolInvokeRejectsTeamMemorySecrets verifies team memory edits with secrets are blocked before writing.
+func TestToolInvokeRejectsTeamMemorySecrets(t *testing.T) {
+	projectDir := t.TempDir()
+	teamMemoryPath := filepath.Join(projectDir, "projects", "demo", "memory", "team", "MEMORY.md")
+	if err := os.MkdirAll(filepath.Dir(teamMemoryPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	mustWriteFile(t, teamMemoryPath, "before\n")
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  teamMemoryPath,
+			"old_string": "before",
+			"new_string": "ghp_" + strings.Repeat("a", 36),
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					teamMemoryPath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: time.Unix(100, 0),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "potential secrets") {
+		t.Fatalf("Invoke() result.Error = %q, want team memory secret rejection", result.Error)
+	}
+}
+
 // newAllowWritePolicy constructs a minimal policy that allows writes inside one workspace.
 func newAllowWritePolicy(workspace string) (*corepermission.FilesystemPolicy, error) {
 	return corepermission.NewFilesystemPolicy(corepermission.RuleSet{

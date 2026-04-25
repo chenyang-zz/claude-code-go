@@ -128,13 +128,18 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if strings.TrimSpace(input.FilePath) == "" {
 		return coretool.Result{Error: "file_path is required"}, nil
 	}
-	if input.OldString == input.NewString {
-		return coretool.Result{Error: "No changes to make: old_string and new_string are exactly the same."}, nil
-	}
 
 	filePath, err := platformfs.ExpandPath(input.FilePath, call.Context.WorkingDir)
 	if err != nil {
 		return coretool.Result{Error: fmt.Sprintf("file edit tool: expand path: %v", err)}, nil
+	}
+
+	if secretError := toolshared.CheckTeamMemorySecrets(filePath, input.NewString); secretError != "" {
+		return coretool.Result{Error: secretError}, nil
+	}
+
+	if input.OldString == input.NewString {
+		return coretool.Result{Error: "No changes to make: old_string and new_string are exactly the same."}, nil
 	}
 
 	evaluation := t.policy.CheckWritePermissionForTool(ctx, t.Name(), filePath, call.Context.WorkingDir)

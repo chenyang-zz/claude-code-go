@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -326,6 +327,36 @@ func TestToolInvokeRejectsDirectory(t *testing.T) {
 	}
 	if result.Error != "Path is a directory, not a file: docs" {
 		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+}
+
+// TestToolInvokeRejectsTeamMemorySecrets verifies secret content is blocked for team memory paths.
+func TestToolInvokeRejectsTeamMemorySecrets(t *testing.T) {
+	projectDir := t.TempDir()
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+	teamMemoryPath := filepath.Join(projectDir, "projects", "demo", "memory", "team", "MEMORY.md")
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": teamMemoryPath,
+			"content":   "ghp_" + strings.Repeat("a", 36),
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "potential secrets") {
+		t.Fatalf("Invoke() result.Error = %q, want team memory secret rejection", result.Error)
 	}
 }
 

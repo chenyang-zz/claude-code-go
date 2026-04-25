@@ -116,6 +116,10 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: fmt.Sprintf("file write tool: expand path: %v", err)}, nil
 	}
 
+	if secretError := toolshared.CheckTeamMemorySecrets(filePath, input.Content); secretError != "" {
+		return coretool.Result{Error: secretError}, nil
+	}
+
 	evaluation := t.policy.CheckWritePermissionForTool(ctx, t.Name(), filePath, call.Context.WorkingDir)
 	if err := evaluation.ToError(corepermission.FilesystemRequest{
 		ToolName:   t.Name(),
