@@ -26,6 +26,7 @@ import (
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
+	platformteam "github.com/sheepzhao/claude-code-go/internal/platform/team"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
@@ -347,7 +348,9 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.SecurityReviewCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.AgentsCommand{}); err != nil {
+	if err := registry.Register(servicecommands.AgentsCommand{
+		StatusProvider: platformteam.NewReader(cfg.HomeDir, taskStore),
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.PluginCommand{}); err != nil {
