@@ -25,6 +25,9 @@ func RegisterBuiltInAgents(registry agent.Registry) error {
 	if err := register(VerificationAgentDefinition); err != nil {
 		return err
 	}
+	if err := register(StatuslineSetupAgentDefinition); err != nil {
+		return err
+	}
 
 	return nil
 }

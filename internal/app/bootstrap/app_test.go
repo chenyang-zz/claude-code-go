@@ -641,7 +641,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
-		Usage:       "/mcp [enable|disable <server-name>]",
+		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name>",
 	}) {
 		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want mcp metadata", got)
 	}

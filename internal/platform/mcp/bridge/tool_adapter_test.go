@@ -2,6 +2,9 @@ package bridge
 
 import (
 	"context"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -128,3 +131,153 @@ func (m *mockClientTransport) Send(ctx context.Context, req client.JSONRPCReques
 }
 
 func (m *mockClientTransport) Close() error { return nil }
+
+// blockingMockTransport blocks until the context is cancelled, then returns
+// the context error.  It is used to verify timeout behaviour.
+type blockingMockTransport struct{}
+
+func (b *blockingMockTransport) Send(ctx context.Context, req client.JSONRPCRequest) (*client.JSONRPCResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (b *blockingMockTransport) Close() error { return nil }
+
+func TestProxyToolInvokeTimeout(t *testing.T) {
+	// Set a very short timeout so the test does not hang.
+	os.Setenv(envMcpToolTimeout, "50")
+	defer os.Unsetenv(envMcpToolTimeout)
+
+	c := client.NewClient(&blockingMockTransport{})
+	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
+
+	result, err := pt.Invoke(context.Background(), tool.Call{ID: "1", Input: map[string]any{}})
+	if err != nil {
+		t.Fatalf("invoke error: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatal("expected error result after timeout")
+	}
+	// The error should contain "deadline exceeded".
+	if !strings.Contains(result.Error, "deadline exceeded") && !strings.Contains(result.Error, "context deadline exceeded") {
+		t.Fatalf("expected deadline exceeded in error, got: %q", result.Error)
+	}
+}
+
+func TestProxyToolInvokeProgress(t *testing.T) {
+	mt := &mockClientTransport{
+		responses: map[client.RequestID]client.JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  []byte(`{"content":[{"type":"text","text":"ok"}],"isError":false}`),
+			},
+		},
+	}
+	c := client.NewClient(mt)
+	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
+
+	var events []map[string]any
+	progressFn := func(data any) {
+		if m, ok := data.(map[string]any); ok {
+			events = append(events, m)
+		}
+	}
+	ctx := tool.WithProgress(context.Background(), progressFn)
+
+	_, err := pt.Invoke(ctx, tool.Call{ID: "1", Input: map[string]any{}})
+	if err != nil {
+		t.Fatalf("invoke error: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 progress events, got %d", len(events))
+	}
+	if events[0]["status"] != "started" {
+		t.Fatalf("first event status = %q, want started", events[0]["status"])
+	}
+	if events[1]["status"] != "finished" {
+		t.Fatalf("second event status = %q, want finished", events[1]["status"])
+	}
+}
+
+func TestProxyToolInvokeAuthError(t *testing.T) {
+	// Transport that returns an auth-like error.
+	authTransport := &errorMockTransport{err: errors.New("server returned 401 Unauthorized")}
+	c := client.NewClient(authTransport)
+	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
+
+	result, err := pt.Invoke(context.Background(), tool.Call{ID: "1", Input: map[string]any{}})
+	if err != nil {
+		t.Fatalf("invoke error: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatal("expected error result")
+	}
+	// The Meta should contain the classified error.
+	metaErr, ok := result.Meta["error"]
+	if !ok {
+		t.Fatal("expected error in Meta")
+	}
+	if _, ok := metaErr.(*McpAuthError); !ok {
+		t.Fatalf("expected *McpAuthError in Meta, got %T", metaErr)
+	}
+}
+
+func TestProxyToolInvokeSessionExpiredError(t *testing.T) {
+	authTransport := &errorMockTransport{err: errors.New("connection closed")}
+	c := client.NewClient(authTransport)
+	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
+
+	result, err := pt.Invoke(context.Background(), tool.Call{ID: "1", Input: map[string]any{}})
+	if err != nil {
+		t.Fatalf("invoke error: %v", err)
+	}
+	metaErr, ok := result.Meta["error"]
+	if !ok {
+		t.Fatal("expected error in Meta")
+	}
+	if _, ok := metaErr.(*McpSessionExpiredError); !ok {
+		t.Fatalf("expected *McpSessionExpiredError in Meta, got %T", metaErr)
+	}
+}
+
+func TestProxyToolInvokeMcpToolCallError(t *testing.T) {
+	mt := &mockClientTransport{
+		responses: map[client.RequestID]client.JSONRPCResponse{
+			"1": {
+				JSONRPC: "2.0",
+				ID:      "1",
+				Result:  []byte(`{"content":[{"type":"text","text":"bad args"}],"isError":true}`),
+			},
+		},
+	}
+	c := client.NewClient(mt)
+	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
+
+	result, err := pt.Invoke(context.Background(), tool.Call{ID: "1", Input: map[string]any{}})
+	if err != nil {
+		t.Fatalf("invoke error: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatal("expected error result")
+	}
+	metaErr, ok := result.Meta["error"]
+	if !ok {
+		t.Fatal("expected error in Meta")
+	}
+	if _, ok := metaErr.(*McpToolCallError); !ok {
+		t.Fatalf("expected *McpToolCallError in Meta, got %T", metaErr)
+	}
+}
+
+// errorMockTransport always returns a fixed error.
+type errorMockTransport struct {
+	err error
+}
+
+func (e *errorMockTransport) Send(ctx context.Context, req client.JSONRPCRequest) (*client.JSONRPCResponse, error) {
+	return nil, e.err
+}
+
+func (e *errorMockTransport) Close() error { return nil }

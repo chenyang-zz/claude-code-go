@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
@@ -57,20 +58,53 @@ func (p *ProxyTool) IsConcurrencySafe() bool {
 // Invoke calls the MCP server and returns the tool result.
 func (p *ProxyTool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) {
 	logger.DebugCF("mcp", "invoking proxy tool", map[string]any{
-		"server":    p.serverName,
-		"tool":      p.mcpTool.Name,
-		"call_id":   call.ID,
+		"server":  p.serverName,
+		"tool":    p.mcpTool.Name,
+		"call_id": call.ID,
 	})
+
+	start := time.Now()
+
+	// Report start progress when a callback is available.
+	tool.ReportProgress(ctx, map[string]any{
+		"type":       "mcp_progress",
+		"status":     "started",
+		"serverName": p.serverName,
+		"toolName":   p.mcpTool.Name,
+	})
+
+	// Apply a bounded timeout so a hung MCP server does not block the engine loop.
+	timeout := getMcpToolTimeout()
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	req := client.CallToolRequest{
 		Name:      p.mcpTool.Name,
 		Arguments: call.Input,
 	}
 
-	result, err := p.client.CallTool(ctx, req)
+	result, err := p.client.CallTool(callCtx, req)
+
+	elapsed := time.Since(start)
+
+	// Report finish progress (always, even on error).
+	tool.ReportProgress(ctx, map[string]any{
+		"type":       "mcp_progress",
+		"status":     "finished",
+		"serverName": p.serverName,
+		"toolName":   p.mcpTool.Name,
+		"elapsedMs":  elapsed.Milliseconds(),
+	})
+
 	if err != nil {
+		classified := classifyMcpError(p.serverName, p.mcpTool.Name, err)
 		return tool.Result{
-			Error: fmt.Sprintf("mcp tool call failed: %v", err),
+			Error: classified.Error(),
+			Meta: map[string]any{
+				"server": p.serverName,
+				"tool":   p.mcpTool.Name,
+				"error":  classified,
+			},
 		}, nil
 	}
 
@@ -81,7 +115,20 @@ func (p *ProxyTool) Invoke(ctx context.Context, call tool.Call) (tool.Result, er
 		} else {
 			msg = "MCP tool returned an error"
 		}
-		return tool.Result{Error: msg}, nil
+		toolErr := &McpToolCallError{
+			ServerName: p.serverName,
+			ToolName:   p.mcpTool.Name,
+			Message:    msg,
+			Meta:       result.Meta,
+		}
+		return tool.Result{
+			Error: toolErr.Error(),
+			Meta: map[string]any{
+				"server": p.serverName,
+				"tool":   p.mcpTool.Name,
+				"error":  toolErr,
+			},
+		}, nil
 	}
 
 	output := contentToString(result.Content)

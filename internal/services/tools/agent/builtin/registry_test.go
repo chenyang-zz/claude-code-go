@@ -46,10 +46,11 @@ func TestRegisterBuiltInAgents_RegistersAll(t *testing.T) {
 	}
 
 	wantTypes := map[string]bool{
-		"Explore":         false,
-		"general-purpose": false,
-		"Plan":            false,
-		"verification":    false,
+		"Explore":           false,
+		"general-purpose":   false,
+		"Plan":              false,
+		"verification":      false,
+		"statusline-setup":  false,
 	}
 
 	if len(reg.defs) != len(wantTypes) {
