@@ -131,14 +131,7 @@ func (p *ProxyTool) Invoke(ctx context.Context, call tool.Call) (tool.Result, er
 		}, nil
 	}
 
-	output := contentToString(result.Content)
-	return tool.Result{
-		Output: output,
-		Meta: map[string]any{
-			"server": p.serverName,
-			"tool":   p.mcpTool.Name,
-		},
-	}, nil
+	return buildToolResultOutput(p.serverName, p.mcpTool, call, result), nil
 }
 
 // contentToString flattens MCP content items into a single string.

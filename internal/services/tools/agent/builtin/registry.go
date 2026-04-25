@@ -28,6 +28,9 @@ func RegisterBuiltInAgents(registry agent.Registry) error {
 	if err := register(StatuslineSetupAgentDefinition); err != nil {
 		return err
 	}
+	if err := register(ClaudeCodeGuideAgentDefinition); err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -1,9 +1,11 @@
 package builtin
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
+	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 )
 
 // mockRegistry is a test double that records registered definitions.
@@ -51,6 +53,7 @@ func TestRegisterBuiltInAgents_RegistersAll(t *testing.T) {
 		"Plan":              false,
 		"verification":      false,
 		"statusline-setup":  false,
+		"claude-code-guide": false,
 	}
 
 	if len(reg.defs) != len(wantTypes) {
@@ -176,5 +179,49 @@ func TestRegisterBuiltInAgents_VerificationHasCorrectFields(t *testing.T) {
 	}
 	if verDef.CriticalSystemReminder == "" {
 		t.Error("verification CriticalSystemReminder is empty")
+	}
+}
+
+func TestRegisterBuiltInAgents_ClaudeCodeGuideHasCorrectFields(t *testing.T) {
+	reg := &mockRegistry{}
+	if err := RegisterBuiltInAgents(reg); err != nil {
+		t.Fatalf("RegisterBuiltInAgents failed: %v", err)
+	}
+
+	var guideDef *agent.Definition
+	for i := range reg.defs {
+		if reg.defs[i].AgentType == "claude-code-guide" {
+			guideDef = &reg.defs[i]
+			break
+		}
+	}
+	if guideDef == nil {
+		t.Fatal("claude-code-guide agent not found in registry")
+	}
+
+	if guideDef.Model != "haiku" {
+		t.Errorf("claude-code-guide Model = %q, want %q", guideDef.Model, "haiku")
+	}
+	if guideDef.PermissionMode != "dontAsk" {
+		t.Errorf("claude-code-guide PermissionMode = %q, want %q", guideDef.PermissionMode, "dontAsk")
+	}
+	wantTools := []string{"Glob", "Grep", "Read", "WebFetch"}
+	if len(guideDef.Tools) != len(wantTools) {
+		t.Errorf("claude-code-guide Tools = %v, want %v", guideDef.Tools, wantTools)
+	}
+	for i, tool := range wantTools {
+		if i >= len(guideDef.Tools) || guideDef.Tools[i] != tool {
+			t.Errorf("claude-code-guide Tools[%d] = %q, want %q", i, guideDef.Tools[i], tool)
+		}
+	}
+	if guideDef.SystemPromptProvider == nil {
+		t.Error("claude-code-guide SystemPromptProvider is nil")
+	}
+	sp := guideDef.SystemPromptProvider.GetSystemPrompt(tool.UseContext{})
+	if sp == "" {
+		t.Error("claude-code-guide system prompt is empty")
+	}
+	if !strings.Contains(sp, "Claude guide agent") {
+		t.Errorf("claude-code-guide system prompt missing expected content")
 	}
 }

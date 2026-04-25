@@ -542,6 +542,7 @@ func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.P
 		prompts.EnvironmentSection{Model: cfg.Model},
 		prompts.PermissionSection{},
 		prompts.ToolGuidelinesSection{},
+		prompts.WebFetchGuidelinesSection{},
 		prompts.AgentListingSection{Registry: registry},
 		prompts.SessionGuidanceSection{},
 		prompts.MemorySection{},
