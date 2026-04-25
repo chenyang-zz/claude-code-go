@@ -1,0 +1,37 @@
+internal/services/tools/agent/builtin/registry.go
+  1dcbd7e44df24cde 9-16,19-28
+internal/services/tools/agent/builtin/general_purpose_test.go
+  1dcbd7e44df24cde 1-65
+internal/services/tools/agent/builtin/verification.go
+  1dcbd7e44df24cde 1-161
+internal/services/tools/agent/builtin/registry_test.go
+  1dcbd7e44df24cde 1-179
+internal/services/tools/agent/builtin/plan_test.go
+  1dcbd7e44df24cde 1-74
+internal/services/tools/agent/builtin/verification_test.go
+  1dcbd7e44df24cde 1-99
+internal/services/tools/agent/builtin/general_purpose.go
+  1dcbd7e44df24cde 1-49
+internal/services/tools/agent/builtin/plan.go
+  1dcbd7e44df24cde 1-87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1180a30251540f1caa3ad122cf136965cc26b315",
+  "prompts": {
+    "1dcbd7e44df24cde": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b42ac7c6-d947-4771-91d3-0e21c95329ab",
+        "model": "kimi-for-coding"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 733,
+      "total_deletions": 4,
+      "accepted_lines": 732,
+      "overriden_lines": 0
+    }
+  }
+}
