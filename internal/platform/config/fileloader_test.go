@@ -540,6 +540,58 @@ func TestFileLoaderLoadPreservesHooksPolicyFields(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadPreservesComplexSettingsFields verifies the loader preserves the structural settings fields added in batch-123.
+func TestFileLoaderLoadPreservesComplexSettingsFields(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"extraKnownMarketplaces":{"anthropic-tools":{"source":{"source":"settings","name":"anthropic-tools"}}},"sandbox":{"mode":"workspace"},"pluginConfigs":{"example@anthropic-tools":{"options":{"flag":true}}},"remote":{"defaultEnvironmentId":"env-123"},"autoUpdatesChannel":"stable","minimumVersion":"1.2.3","plansDirectory":"plans","channelsEnabled":true,"allowedChannelPlugins":[{"marketplace":"anthropic-tools","plugin":"example"}],"sshConfigs":[{"id":"prod","name":"Production","sshHost":"ops@example.com"}],"claudeMdExcludes":["**/legacy/CLAUDE.md"],"pluginTrustMessage":"Trusted internally"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(cfg.ExtraKnownMarketplaces) != 1 {
+		t.Fatalf("Load() extraKnownMarketplaces = %#v, want one entry", cfg.ExtraKnownMarketplaces)
+	}
+	if len(cfg.Sandbox) != 1 || cfg.Sandbox["mode"] != "workspace" {
+		t.Fatalf("Load() sandbox = %#v, want workspace mode", cfg.Sandbox)
+	}
+	if len(cfg.PluginConfigs) != 1 {
+		t.Fatalf("Load() pluginConfigs = %#v, want one entry", cfg.PluginConfigs)
+	}
+	if cfg.Remote.DefaultEnvironmentID != "env-123" {
+		t.Fatalf("Load() remote.defaultEnvironmentId = %q, want env-123", cfg.Remote.DefaultEnvironmentID)
+	}
+	if cfg.AutoUpdatesChannel != "stable" || cfg.MinimumVersion != "1.2.3" || cfg.PlansDirectory != "plans" {
+		t.Fatalf("Load() update/plans fields = %#v, want stable/1.2.3/plans", cfg)
+	}
+	if !cfg.ChannelsEnabled {
+		t.Fatalf("Load() channelsEnabled = %v, want true", cfg.ChannelsEnabled)
+	}
+	if len(cfg.AllowedChannelPlugins) != 1 || cfg.AllowedChannelPlugins[0].Marketplace != "anthropic-tools" || cfg.AllowedChannelPlugins[0].Plugin != "example" {
+		t.Fatalf("Load() allowedChannelPlugins = %#v, want one entry", cfg.AllowedChannelPlugins)
+	}
+	if len(cfg.SSHConfigs) != 1 || cfg.SSHConfigs[0].ID != "prod" || cfg.SSHConfigs[0].SSHHost != "ops@example.com" {
+		t.Fatalf("Load() sshConfigs = %#v, want one SSH entry", cfg.SSHConfigs)
+	}
+	if len(cfg.ClaudeMdExcludes) != 1 || cfg.ClaudeMdExcludes[0] != "**/legacy/CLAUDE.md" {
+		t.Fatalf("Load() claudeMdExcludes = %#v, want one exclusion", cfg.ClaudeMdExcludes)
+	}
+	if cfg.PluginTrustMessage != "Trusted internally" {
+		t.Fatalf("Load() pluginTrustMessage = %q, want Trusted internally", cfg.PluginTrustMessage)
+	}
+}
+
 // TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv verifies trusted `--settings` env entries still merge after on-disk settings.
 func TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv(t *testing.T) {
 	tempDir := t.TempDir()

@@ -157,6 +157,32 @@ func hasLoadedSettingsValues(cfg coreconfig.Config) bool {
 		cfg.HasAllowManagedHooksOnlySetting ||
 		cfg.HasAllowedHttpHookUrls ||
 		cfg.HasHttpHookAllowedEnvVars ||
+		len(cfg.EnabledPlugins) > 0 ||
+		cfg.StatusLine.Type != "" ||
+		cfg.StatusLine.Command != "" ||
+		cfg.StatusLine.Padding != nil ||
+		len(cfg.ExtraKnownMarketplaces) > 0 ||
+		len(cfg.StrictKnownMarketplaces) > 0 ||
+		len(cfg.BlockedMarketplaces) > 0 ||
+		cfg.ForceLoginMethod != "" ||
+		cfg.ForceLoginOrgUUID != "" ||
+		cfg.OtelHeadersHelper != "" ||
+		cfg.OutputStyle != "" ||
+		cfg.Language != "" ||
+		cfg.SkipWebFetchPreflight ||
+		len(cfg.Sandbox) > 0 ||
+		cfg.Agent != "" ||
+		len(cfg.CompanyAnnouncements) > 0 ||
+		len(cfg.PluginConfigs) > 0 ||
+		cfg.Remote.DefaultEnvironmentID != "" ||
+		cfg.AutoUpdatesChannel != "" ||
+		cfg.MinimumVersion != "" ||
+		cfg.PlansDirectory != "" ||
+		cfg.ChannelsEnabled ||
+		len(cfg.AllowedChannelPlugins) > 0 ||
+		len(cfg.SSHConfigs) > 0 ||
+		len(cfg.ClaudeMdExcludes) > 0 ||
+		cfg.PluginTrustMessage != "" ||
 		len(cfg.Permissions.Allow) > 0 ||
 		len(cfg.Permissions.Deny) > 0 ||
 		len(cfg.Permissions.Ask) > 0 ||

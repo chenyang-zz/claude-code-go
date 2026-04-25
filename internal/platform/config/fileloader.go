@@ -32,18 +32,58 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model                  string         `json:"model"`
-	EffortLevel            *string        `json:"effortLevel"`
-	FastMode               *bool          `json:"fastMode"`
-	Theme                  string         `json:"theme"`
-	EditorMode             string         `json:"editorMode"`
-	Provider               string         `json:"provider"`
-	SessionDBPath          string         `json:"sessionDbPath"`
-	Env                    map[string]any `json:"env"`
-	AllowManagedHooksOnly  *bool          `json:"allowManagedHooksOnly"`
-	AllowedHttpHookUrls    []string       `json:"allowedHttpHookUrls"`
-	HttpHookAllowedEnvVars []string       `json:"httpHookAllowedEnvVars"`
-	OAuthAccount           struct {
+	Model                   string                    `json:"model"`
+	EffortLevel             *string                   `json:"effortLevel"`
+	FastMode                *bool                     `json:"fastMode"`
+	Theme                   string                    `json:"theme"`
+	EditorMode              string                    `json:"editorMode"`
+	Provider                string                    `json:"provider"`
+	SessionDBPath           string                    `json:"sessionDbPath"`
+	Env                     map[string]any            `json:"env"`
+	AllowManagedHooksOnly   *bool                     `json:"allowManagedHooksOnly"`
+	AllowedHttpHookUrls     []string                  `json:"allowedHttpHookUrls"`
+	HttpHookAllowedEnvVars  []string                  `json:"httpHookAllowedEnvVars"`
+	EnabledPlugins          map[string]any            `json:"enabledPlugins"`
+	ExtraKnownMarketplaces  map[string]map[string]any `json:"extraKnownMarketplaces"`
+	StrictKnownMarketplaces []string                  `json:"strictKnownMarketplaces"`
+	BlockedMarketplaces     []string                  `json:"blockedMarketplaces"`
+	StatusLine              struct {
+		Type    string   `json:"type"`
+		Command string   `json:"command"`
+		Padding *float64 `json:"padding"`
+	} `json:"statusLine"`
+	ForceLoginMethod      string                    `json:"forceLoginMethod"`
+	ForceLoginOrgUUID     string                    `json:"forceLoginOrgUUID"`
+	OtelHeadersHelper     string                    `json:"otelHeadersHelper"`
+	OutputStyle           string                    `json:"outputStyle"`
+	Language              string                    `json:"language"`
+	SkipWebFetchPreflight *bool                     `json:"skipWebFetchPreflight"`
+	Sandbox               map[string]any            `json:"sandbox"`
+	Agent                 string                    `json:"agent"`
+	CompanyAnnouncements  []string                  `json:"companyAnnouncements"`
+	PluginConfigs         map[string]map[string]any `json:"pluginConfigs"`
+	Remote                struct {
+		DefaultEnvironmentID string `json:"defaultEnvironmentId"`
+	} `json:"remote"`
+	AutoUpdatesChannel    string `json:"autoUpdatesChannel"`
+	MinimumVersion        string `json:"minimumVersion"`
+	PlansDirectory        string `json:"plansDirectory"`
+	ChannelsEnabled       *bool  `json:"channelsEnabled"`
+	AllowedChannelPlugins []struct {
+		Marketplace string `json:"marketplace"`
+		Plugin      string `json:"plugin"`
+	} `json:"allowedChannelPlugins"`
+	SSHConfigs []struct {
+		ID              string `json:"id"`
+		Name            string `json:"name"`
+		SSHHost         string `json:"sshHost"`
+		SSHPort         int    `json:"sshPort"`
+		SSHIdentityFile string `json:"sshIdentityFile"`
+		StartDirectory  string `json:"startDirectory"`
+	} `json:"sshConfigs"`
+	ClaudeMdExcludes   []string `json:"claudeMdExcludes"`
+	PluginTrustMessage string   `json:"pluginTrustMessage"`
+	OAuthAccount       struct {
 		AccountUUID      string `json:"accountUuid"`
 		EmailAddress     string `json:"emailAddress"`
 		OrganizationUUID string `json:"organizationUuid"`
@@ -380,8 +420,119 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 		HasAllowedHttpHookUrls:          parsed.AllowedHttpHookUrls != nil,
 		HttpHookAllowedEnvVars:          append([]string(nil), parsed.HttpHookAllowedEnvVars...),
 		HasHttpHookAllowedEnvVars:       parsed.HttpHookAllowedEnvVars != nil,
-		DisableAllHooks:                 parsed.DisableAllHooks,
+		EnabledPlugins:                  cloneAnyMap(parsed.EnabledPlugins),
+		StatusLine: coreconfig.StatusLineConfig{
+			Type:    strings.TrimSpace(parsed.StatusLine.Type),
+			Command: strings.TrimSpace(parsed.StatusLine.Command),
+			Padding: parsed.StatusLine.Padding,
+		},
+		ExtraKnownMarketplaces:  convertMarketplaceSettingsMap(parsed.ExtraKnownMarketplaces),
+		StrictKnownMarketplaces: append([]string(nil), parsed.StrictKnownMarketplaces...),
+		BlockedMarketplaces:     append([]string(nil), parsed.BlockedMarketplaces...),
+		ForceLoginMethod:        strings.TrimSpace(parsed.ForceLoginMethod),
+		ForceLoginOrgUUID:       strings.TrimSpace(parsed.ForceLoginOrgUUID),
+		OtelHeadersHelper:       strings.TrimSpace(parsed.OtelHeadersHelper),
+		OutputStyle:             strings.TrimSpace(parsed.OutputStyle),
+		Language:                strings.TrimSpace(parsed.Language),
+		SkipWebFetchPreflight:   parsed.SkipWebFetchPreflight != nil && *parsed.SkipWebFetchPreflight,
+		Sandbox:                 cloneAnyMap(parsed.Sandbox),
+		Agent:                   strings.TrimSpace(parsed.Agent),
+		CompanyAnnouncements:    append([]string(nil), parsed.CompanyAnnouncements...),
+		PluginConfigs:           convertPluginSettingsMap(parsed.PluginConfigs),
+		Remote: coreconfig.RemoteSettingsConfig{
+			DefaultEnvironmentID: strings.TrimSpace(parsed.Remote.DefaultEnvironmentID),
+		},
+		AutoUpdatesChannel:        strings.TrimSpace(parsed.AutoUpdatesChannel),
+		MinimumVersion:            strings.TrimSpace(parsed.MinimumVersion),
+		PlansDirectory:            strings.TrimSpace(parsed.PlansDirectory),
+		ChannelsEnabled:           parsed.ChannelsEnabled != nil && *parsed.ChannelsEnabled,
+		HasChannelsEnabledSetting: parsed.ChannelsEnabled != nil,
+		AllowedChannelPlugins:     convertChannelPluginSettings(parsed.AllowedChannelPlugins),
+		SSHConfigs:                convertSSHSettings(parsed.SSHConfigs),
+		ClaudeMdExcludes:          append([]string(nil), parsed.ClaudeMdExcludes...),
+		PluginTrustMessage:        strings.TrimSpace(parsed.PluginTrustMessage),
+		DisableAllHooks:           parsed.DisableAllHooks,
 	}, nil
+}
+
+// convertMarketplaceSettingsMap converts parsed marketplace maps into the runtime config representation.
+func convertMarketplaceSettingsMap(values map[string]map[string]any) map[string]coreconfig.MarketplaceConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]coreconfig.MarketplaceConfig, len(values))
+	for key, value := range values {
+		result[key] = coreconfig.MarketplaceConfig(cloneAnyMap(value))
+	}
+	return result
+}
+
+// convertPluginSettingsMap converts parsed plugin config maps into the runtime config representation.
+func convertPluginSettingsMap(values map[string]map[string]any) map[string]coreconfig.PluginConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]coreconfig.PluginConfig, len(values))
+	for key, value := range values {
+		result[key] = coreconfig.PluginConfig(cloneAnyMap(value))
+	}
+	return result
+}
+
+// convertChannelPluginSettings converts parsed channel plugin entries into runtime config entries.
+func convertChannelPluginSettings(values []struct {
+	Marketplace string `json:"marketplace"`
+	Plugin      string `json:"plugin"`
+}) []coreconfig.ChannelPluginConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	entries := make([]coreconfig.ChannelPluginConfig, 0, len(values))
+	for _, entry := range values {
+		entries = append(entries, coreconfig.ChannelPluginConfig{
+			Marketplace: strings.TrimSpace(entry.Marketplace),
+			Plugin:      strings.TrimSpace(entry.Plugin),
+		})
+	}
+	return entries
+}
+
+// cloneAnyMap copies one generic object map one level deep.
+func cloneAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+// convertSSHSettings converts parsed SSH settings entries into runtime config entries.
+func convertSSHSettings(values []struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	SSHHost         string `json:"sshHost"`
+	SSHPort         int    `json:"sshPort"`
+	SSHIdentityFile string `json:"sshIdentityFile"`
+	StartDirectory  string `json:"startDirectory"`
+}) []coreconfig.SSHConfigConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	entries := make([]coreconfig.SSHConfigConfig, 0, len(values))
+	for _, entry := range values {
+		entries = append(entries, coreconfig.SSHConfigConfig{
+			ID:              strings.TrimSpace(entry.ID),
+			Name:            strings.TrimSpace(entry.Name),
+			SSHHost:         strings.TrimSpace(entry.SSHHost),
+			SSHPort:         entry.SSHPort,
+			SSHIdentityFile: strings.TrimSpace(entry.SSHIdentityFile),
+			StartDirectory:  strings.TrimSpace(entry.StartDirectory),
+		})
+	}
+	return entries
 }
 
 // coerceSettingsEnvMap converts one settings env object into the runtime string map used by the Go host.

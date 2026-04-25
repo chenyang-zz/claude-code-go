@@ -60,6 +60,17 @@ func TestValidateSettingsContentAcceptsHooksPolicyFields(t *testing.T) {
 	}
 }
 
+// TestValidateSettingsContentAcceptsComplexSettingsFields verifies the validator accepts the structural settings fields kept in batch-123.
+func TestValidateSettingsContentAcceptsComplexSettingsFields(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"extraKnownMarketplaces\": {\n    \"anthropic-tools\": {\n      \"source\": {\n        \"source\": \"settings\",\n        \"name\": \"anthropic-tools\"\n      }\n    }\n  },\n  \"sandbox\": {\n    \"mode\": \"workspace\"\n  },\n  \"pluginConfigs\": {\n    \"example@anthropic-tools\": {\n      \"options\": {\n        \"flag\": true\n      }\n    }\n  },\n  \"remote\": {\n    \"defaultEnvironmentId\": \"env-123\"\n  },\n  \"autoUpdatesChannel\": \"stable\",\n  \"minimumVersion\": \"1.2.3\",\n  \"plansDirectory\": \"plans\",\n  \"channelsEnabled\": true,\n  \"allowedChannelPlugins\": [\n    {\n      \"marketplace\": \"anthropic-tools\",\n      \"plugin\": \"example\"\n    }\n  ],\n  \"sshConfigs\": [\n    {\n      \"id\": \"prod\",\n      \"name\": \"Production\",\n      \"sshHost\": \"ops@example.com\"\n    }\n  ],\n  \"claudeMdExcludes\": [\"**/legacy/CLAUDE.md\"],\n  \"pluginTrustMessage\": \"Trusted internally\"\n}\n")
+	if !result.IsValid {
+		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
+	}
+	if !strings.Contains(result.FullSchema, "\"extraKnownMarketplaces\"") || !strings.Contains(result.FullSchema, "\"allowedChannelPlugins\"") || !strings.Contains(result.FullSchema, "\"sshConfigs\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want complex settings fields schema", result.FullSchema)
+	}
+}
+
 // TestValidateSettingsContentAcceptsEnvField verifies settings env is part of the supported schema subset.
 func TestValidateSettingsContentAcceptsEnvField(t *testing.T) {
 	result := ValidateSettingsContent("{\n  \"env\": {\n    \"COUNT\": 3,\n    \"ENABLED\": true,\n    \"NAME\": \"claude\"\n  }\n}\n")

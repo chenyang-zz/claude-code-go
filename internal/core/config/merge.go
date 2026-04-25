@@ -94,6 +94,79 @@ func Merge(base, override Config) Config {
 		base.HttpHookAllowedEnvVars = append([]string(nil), override.HttpHookAllowedEnvVars...)
 		base.HasHttpHookAllowedEnvVars = true
 	}
+	if len(override.EnabledPlugins) > 0 {
+		base.EnabledPlugins = cloneAnyMap(override.EnabledPlugins)
+	}
+	if override.StatusLine.Type != "" || override.StatusLine.Command != "" || override.StatusLine.Padding != nil {
+		base.StatusLine = override.StatusLine
+	}
+	if len(override.ExtraKnownMarketplaces) > 0 {
+		base.ExtraKnownMarketplaces = cloneMarketplaceMap(override.ExtraKnownMarketplaces)
+	}
+	if len(override.StrictKnownMarketplaces) > 0 {
+		base.StrictKnownMarketplaces = append([]string(nil), override.StrictKnownMarketplaces...)
+	}
+	if len(override.BlockedMarketplaces) > 0 {
+		base.BlockedMarketplaces = append([]string(nil), override.BlockedMarketplaces...)
+	}
+	if override.ForceLoginMethod != "" {
+		base.ForceLoginMethod = override.ForceLoginMethod
+	}
+	if override.ForceLoginOrgUUID != "" {
+		base.ForceLoginOrgUUID = override.ForceLoginOrgUUID
+	}
+	if override.OtelHeadersHelper != "" {
+		base.OtelHeadersHelper = override.OtelHeadersHelper
+	}
+	if override.OutputStyle != "" {
+		base.OutputStyle = override.OutputStyle
+	}
+	if override.Language != "" {
+		base.Language = override.Language
+	}
+	if override.SkipWebFetchPreflight {
+		base.SkipWebFetchPreflight = true
+	}
+	if len(override.Sandbox) > 0 {
+		base.Sandbox = cloneAnyMap(override.Sandbox)
+	}
+	if override.Agent != "" {
+		base.Agent = override.Agent
+	}
+	if len(override.CompanyAnnouncements) > 0 {
+		base.CompanyAnnouncements = append([]string(nil), override.CompanyAnnouncements...)
+	}
+	if len(override.PluginConfigs) > 0 {
+		base.PluginConfigs = clonePluginConfigMap(override.PluginConfigs)
+	}
+	if override.Remote.DefaultEnvironmentID != "" {
+		base.Remote = override.Remote
+	}
+	if override.AutoUpdatesChannel != "" {
+		base.AutoUpdatesChannel = override.AutoUpdatesChannel
+	}
+	if override.MinimumVersion != "" {
+		base.MinimumVersion = override.MinimumVersion
+	}
+	if override.PlansDirectory != "" {
+		base.PlansDirectory = override.PlansDirectory
+	}
+	if override.HasChannelsEnabledSetting {
+		base.ChannelsEnabled = override.ChannelsEnabled
+		base.HasChannelsEnabledSetting = true
+	}
+	if len(override.AllowedChannelPlugins) > 0 {
+		base.AllowedChannelPlugins = append([]ChannelPluginConfig(nil), override.AllowedChannelPlugins...)
+	}
+	if len(override.SSHConfigs) > 0 {
+		base.SSHConfigs = append([]SSHConfigConfig(nil), override.SSHConfigs...)
+	}
+	if len(override.ClaudeMdExcludes) > 0 {
+		base.ClaudeMdExcludes = append([]string(nil), override.ClaudeMdExcludes...)
+	}
+	if override.PluginTrustMessage != "" {
+		base.PluginTrustMessage = override.PluginTrustMessage
+	}
 	if override.DisableAllHooks {
 		base.DisableAllHooks = true
 	}
@@ -149,6 +222,42 @@ func cloneAdditionalDirectoryEntries(entries []AdditionalDirectoryConfig) []Addi
 	}
 	cloned := make([]AdditionalDirectoryConfig, len(entries))
 	copy(cloned, entries)
+	return cloned
+}
+
+// cloneAnyMap copies a generic object map one level deep.
+func cloneAnyMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+// cloneMarketplaceMap copies a marketplace map and its immediate object values.
+func cloneMarketplaceMap(values map[string]MarketplaceConfig) map[string]MarketplaceConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]MarketplaceConfig, len(values))
+	for key, value := range values {
+		cloned[key] = MarketplaceConfig(cloneAnyMap(value))
+	}
+	return cloned
+}
+
+// clonePluginConfigMap copies a plugin config map and its immediate object values.
+func clonePluginConfigMap(values map[string]PluginConfig) map[string]PluginConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]PluginConfig, len(values))
+	for key, value := range values {
+		cloned[key] = PluginConfig(cloneAnyMap(value))
+	}
 	return cloned
 }
 

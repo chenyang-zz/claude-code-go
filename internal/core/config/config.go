@@ -88,6 +88,56 @@ type Config struct {
 	HttpHookAllowedEnvVars []string
 	// HasHttpHookAllowedEnvVars reports whether HttpHookAllowedEnvVars was explicitly configured.
 	HasHttpHookAllowedEnvVars bool
+	// EnabledPlugins stores the marketplace-first enabled plugin map from settings.
+	EnabledPlugins map[string]any
+	// StatusLine stores the custom status line settings blob.
+	StatusLine StatusLineConfig
+	// ExtraKnownMarketplaces stores repository-specific extra marketplace definitions.
+	ExtraKnownMarketplaces map[string]MarketplaceConfig
+	// StrictKnownMarketplaces stores the policy allowlist of marketplace sources.
+	StrictKnownMarketplaces []string
+	// BlockedMarketplaces stores the policy denylist of marketplace sources.
+	BlockedMarketplaces []string
+	// ForceLoginMethod stores the forced login method selection.
+	ForceLoginMethod string
+	// ForceLoginOrgUUID stores the forced OAuth organization UUID.
+	ForceLoginOrgUUID string
+	// OtelHeadersHelper stores the OpenTelemetry headers helper path.
+	OtelHeadersHelper string
+	// OutputStyle stores the assistant output style preference.
+	OutputStyle string
+	// Language stores the preferred assistant language.
+	Language string
+	// SkipWebFetchPreflight stores the enterprise preflight bypass preference.
+	SkipWebFetchPreflight bool
+	// Sandbox stores the minimal sandbox settings blob surfaced through settings.
+	Sandbox map[string]any
+	// Agent stores the main-thread agent selection from settings.
+	Agent string
+	// CompanyAnnouncements stores the startup announcements list.
+	CompanyAnnouncements []string
+	// PluginConfigs stores per-plugin configuration blobs keyed by plugin id.
+	PluginConfigs map[string]PluginConfig
+	// Remote stores the minimal remote-session settings surface.
+	Remote RemoteSettingsConfig
+	// AutoUpdatesChannel stores the selected update channel.
+	AutoUpdatesChannel string
+	// MinimumVersion stores the minimum supported version pin.
+	MinimumVersion string
+	// PlansDirectory stores the custom plan directory path.
+	PlansDirectory string
+	// ChannelsEnabled controls whether enterprise channel notifications are enabled.
+	ChannelsEnabled bool
+	// HasChannelsEnabledSetting reports whether ChannelsEnabled was explicitly configured.
+	HasChannelsEnabledSetting bool
+	// AllowedChannelPlugins stores the allowlist of channel plugins.
+	AllowedChannelPlugins []ChannelPluginConfig
+	// SSHConfigs stores the configured SSH profiles.
+	SSHConfigs []SSHConfigConfig
+	// ClaudeMdExcludes stores the excluded CLAUDE.md patterns.
+	ClaudeMdExcludes []string
+	// PluginTrustMessage stores the optional custom trust warning text.
+	PluginTrustMessage string
 	// DisableAllHooks disables all hook execution when set via policy settings.
 	DisableAllHooks bool
 	// OutputFormat selects the output rendering mode (e.g. "console" or "stream-json").
@@ -146,6 +196,52 @@ type PermissionConfig struct {
 	AdditionalDirectoryEntries []AdditionalDirectoryConfig
 	// DisableBypassPermissionsMode preserves the literal disable marker when bypass mode is turned off.
 	DisableBypassPermissionsMode string
+}
+
+// MarketplaceConfig stores the minimal extra marketplace metadata preserved from settings.
+type MarketplaceConfig map[string]any
+
+// StatusLineConfig stores the custom status line configuration.
+type StatusLineConfig struct {
+	// Type stores the status line variant.
+	Type string
+	// Command stores the shell command used by the status line.
+	Command string
+	// Padding stores the optional padding value.
+	Padding *float64
+}
+
+// PluginConfig stores the minimal per-plugin configuration preserved from settings.
+type PluginConfig map[string]any
+
+// RemoteSettingsConfig stores the minimal remote settings block preserved from settings.
+type RemoteSettingsConfig struct {
+	// DefaultEnvironmentID selects the default remote environment.
+	DefaultEnvironmentID string
+}
+
+// ChannelPluginConfig stores one allowed channel plugin entry.
+type ChannelPluginConfig struct {
+	// Marketplace identifies the plugin marketplace source.
+	Marketplace string
+	// Plugin identifies the plugin within the marketplace.
+	Plugin string
+}
+
+// SSHConfigConfig stores one SSH profile entry from settings.
+type SSHConfigConfig struct {
+	// ID stores the stable SSH config identifier.
+	ID string
+	// Name stores the display name of the SSH profile.
+	Name string
+	// SSHHost stores the target SSH host or alias.
+	SSHHost string
+	// SSHPort stores the optional SSH port.
+	SSHPort int
+	// SSHIdentityFile stores the optional private key path.
+	SSHIdentityFile string
+	// StartDirectory stores the optional default remote working directory.
+	StartDirectory string
 }
 
 // DefaultConfig returns the minimum configuration required by the single-turn text runtime.

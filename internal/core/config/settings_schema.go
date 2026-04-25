@@ -157,6 +157,132 @@ func SettingsSchemaDocument() map[string]any {
 				"description":          "Hook configuration mapped by event name",
 				"properties":           map[string]any{},
 			},
+			"enabledPlugins": map[string]any{
+				"type":        "object",
+				"description": "Marketplace-first enabled plugin map",
+			},
+			"extraKnownMarketplaces": map[string]any{
+				"type":        "object",
+				"description": "Additional marketplaces to make available for this repository",
+			},
+			"strictKnownMarketplaces": settingsStringArraySchema("Enterprise strict marketplace allowlist"),
+			"blockedMarketplaces":     settingsStringArraySchema("Enterprise marketplace blocklist"),
+			"statusLine": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"description":          "Custom status line display configuration",
+				"properties": map[string]any{
+					"type": map[string]any{
+						"type":  "string",
+						"const": "command",
+					},
+					"command": map[string]any{
+						"type": "string",
+					},
+					"padding": map[string]any{
+						"type": "number",
+					},
+				},
+			},
+			"forceLoginMethod": map[string]any{
+				"type":        "string",
+				"enum":        []string{"claudeai", "console"},
+				"description": "Force a specific login method",
+			},
+			"forceLoginOrgUUID": map[string]any{
+				"type":        "string",
+				"description": "Organization UUID to use for OAuth login",
+			},
+			"otelHeadersHelper": map[string]any{
+				"type":        "string",
+				"description": "Path to a script that outputs OpenTelemetry headers",
+			},
+			"outputStyle": map[string]any{
+				"type":        "string",
+				"description": "Controls the output style for assistant responses",
+			},
+			"language": map[string]any{
+				"type":        "string",
+				"description": "Preferred language for Claude responses and voice dictation",
+			},
+			"skipWebFetchPreflight": map[string]any{
+				"type":        "boolean",
+				"description": "Skip the WebFetch blocklist check for enterprise environments",
+			},
+			"sandbox": map[string]any{
+				"type":        "object",
+				"description": "Sandbox settings blob",
+			},
+			"agent": map[string]any{
+				"type":        "string",
+				"description": "Main-thread agent selection",
+			},
+			"companyAnnouncements": settingsStringArraySchema("Company announcements to display at startup"),
+			"pluginConfigs": map[string]any{
+				"type":        "object",
+				"description": "Per-plugin configuration blobs",
+			},
+			"remote": map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"description":          "Remote session configuration",
+				"properties": map[string]any{
+					"defaultEnvironmentId": map[string]any{
+						"type":        "string",
+						"description": "Default environment ID to use for remote sessions",
+					},
+				},
+			},
+			"autoUpdatesChannel": map[string]any{
+				"type":        "string",
+				"enum":        []string{"latest", "stable"},
+				"description": "Release channel for auto-updates",
+			},
+			"minimumVersion": map[string]any{
+				"type":        "string",
+				"description": "Minimum version to stay on",
+			},
+			"plansDirectory": map[string]any{
+				"type":        "string",
+				"description": "Custom directory for plan files",
+			},
+			"channelsEnabled": map[string]any{
+				"type":        "boolean",
+				"description": "Teams/Enterprise opt-in for channel notifications",
+			},
+			"allowedChannelPlugins": map[string]any{
+				"type":        "array",
+				"description": "Allowlist of channel plugins",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"marketplace": map[string]any{"type": "string"},
+						"plugin":      map[string]any{"type": "string"},
+					},
+				},
+			},
+			"sshConfigs": map[string]any{
+				"type":        "array",
+				"description": "SSH connection configurations for remote environments",
+				"items": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"id":              map[string]any{"type": "string"},
+						"name":            map[string]any{"type": "string"},
+						"sshHost":         map[string]any{"type": "string"},
+						"sshPort":         map[string]any{"type": "integer"},
+						"sshIdentityFile": map[string]any{"type": "string"},
+						"startDirectory":  map[string]any{"type": "string"},
+					},
+				},
+			},
+			"claudeMdExcludes": settingsStringArraySchema("Glob patterns or absolute paths of CLAUDE.md files to exclude from loading"),
+			"pluginTrustMessage": map[string]any{
+				"type":        "string",
+				"description": "Custom trust warning appended to plugin installation prompts",
+			},
 			"allowManagedHooksOnly": map[string]any{
 				"type":        "boolean",
 				"description": "When true (and set in managed settings), only hooks from managed settings run",
@@ -259,6 +385,34 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			issues = append(issues, validatePermissionsField(objectValue[key])...)
 		case "hooks":
 			issues = append(issues, validateHooksField(key, objectValue[key])...)
+		case "enabledPlugins", "sandbox", "pluginConfigs", "remote", "statusLine":
+			if issue, ok := validateObjectField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "extraKnownMarketplaces":
+			issues = append(issues, validateObjectMapField(key, objectValue[key])...)
+		case "strictKnownMarketplaces", "blockedMarketplaces", "companyAnnouncements", "claudeMdExcludes":
+			if issue, ok := validateStringArrayEntriesField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "forceLoginMethod":
+			if issue, ok := validateEnumField(key, objectValue[key], []string{"claudeai", "console"}); ok {
+				issues = append(issues, issue)
+			}
+		case "forceLoginOrgUUID", "otelHeadersHelper", "outputStyle", "language", "agent", "minimumVersion", "plansDirectory", "pluginTrustMessage":
+			if issue, ok := validateStringField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "skipWebFetchPreflight", "channelsEnabled":
+			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "autoUpdatesChannel":
+			if issue, ok := validateEnumField(key, objectValue[key], []string{"latest", "stable"}); ok {
+				issues = append(issues, issue)
+			}
+		case "allowedChannelPlugins", "sshConfigs":
+			issues = append(issues, validateObjectArrayField(key, objectValue[key])...)
 		case "allowManagedHooksOnly":
 			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
@@ -401,6 +555,58 @@ func validateStringArrayEntriesField(path string, value any) (ValidationIssue, b
 		}, true
 	}
 	return ValidationIssue{}, false
+}
+
+// validateObjectMapField verifies an object whose values must themselves be objects.
+func validateObjectMapField(path string, value any) []ValidationIssue {
+	objectValue, ok := value.(map[string]any)
+	if !ok {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(value)),
+		}}
+	}
+
+	issues := make([]ValidationIssue, 0)
+	keys := make([]string, 0, len(objectValue))
+	for key := range objectValue {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if _, ok := objectValue[key].(map[string]any); ok {
+			continue
+		}
+		issues = append(issues, ValidationIssue{
+			Path:    path + "." + key,
+			Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(objectValue[key])),
+		})
+	}
+	return issues
+}
+
+// validateObjectArrayField verifies an array whose entries must be objects.
+func validateObjectArrayField(path string, value any) []ValidationIssue {
+	items, ok := value.([]any)
+	if !ok {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected array, but received %s", jsonTypeName(value)),
+		}}
+	}
+
+	issues := make([]ValidationIssue, 0)
+	for index, item := range items {
+		if _, ok := item.(map[string]any); ok {
+			continue
+		}
+		issues = append(issues, ValidationIssue{
+			Path:    fmt.Sprintf("%s.%d", path, index),
+			Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(item)),
+		})
+	}
+	return issues
 }
 
 // validateObjectField verifies a top-level object field without constraining nested values.
