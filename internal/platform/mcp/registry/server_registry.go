@@ -208,7 +208,9 @@ func newTransportForEntry(ctx context.Context, entry Entry) (client.Transport, e
 		return client.NewSSEClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
 	case "ws":
 		return client.NewWebSocketClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
-	case "http", "claudeai-proxy", "sdk":
+	case "http":
+		return client.NewHTTPClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
+	case "claudeai-proxy", "sdk":
 		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)
 	default:
 		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)

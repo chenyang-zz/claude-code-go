@@ -44,7 +44,7 @@ func TestServerRegistryLoadConfigs(t *testing.T) {
 func TestServerRegistryConnectAllUnsupportedType(t *testing.T) {
 	r := NewServerRegistry()
 	r.LoadConfigs(map[string]client.ServerConfig{
-		"http": {Type: "http", URL: "https://example.com/mcp"},
+		"proxy": {Type: "claudeai-proxy", URL: "https://example.com/mcp"},
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -56,6 +56,39 @@ func TestServerRegistryConnectAllUnsupportedType(t *testing.T) {
 	}
 	if entries[0].Status != StatusFailed {
 		t.Fatalf("status = %q, want failed", entries[0].Status)
+	}
+}
+
+func TestServerRegistryConnectAllHTTP(t *testing.T) {
+	t.Parallel()
+
+	server := newRegistryHTTPServer(t)
+	defer server.Close()
+
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"http": {Type: "http", URL: server.URL, Headers: map[string]string{"X-Test": "ok"}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r.ConnectAll(ctx)
+
+	entries := r.List()
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Status != StatusConnected {
+		t.Fatalf("status = %q, want connected", entries[0].Status)
+	}
+	if len(entries[0].Tools) != 1 || entries[0].Tools[0].Name != "tool_one" {
+		t.Fatalf("tools = %#v", entries[0].Tools)
+	}
+	if len(entries[0].Resources) != 1 || entries[0].Resources[0].URI != "file:///tmp/a" {
+		t.Fatalf("resources = %#v", entries[0].Resources)
+	}
+	if len(entries[0].Prompts) != 1 || entries[0].Prompts[0].Name != "summarize" {
+		t.Fatalf("prompts = %#v", entries[0].Prompts)
 	}
 }
 
@@ -112,6 +145,49 @@ func TestServerRegistryConnectAllWebSocket(t *testing.T) {
 	if len(entries[0].Tools) != 1 || entries[0].Tools[0].Name != "tool_one" {
 		t.Fatalf("tools = %#v", entries[0].Tools)
 	}
+}
+
+func newRegistryHTTPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if got := r.Header.Get("X-Test"); got != "ok" {
+			t.Fatalf("X-Test header = %q, want ok", got)
+		}
+
+		var req client.JSONRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		resp := client.JSONRPCResponse{JSONRPC: "2.0", ID: req.ID}
+		switch req.Method {
+		case "initialize":
+			resp.Result = json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false},"resources":{"listChanged":false},"prompts":{"listChanged":false}},"serverInfo":{"name":"http-test","version":"1.0"}}`)
+		case "tools/list":
+			resp.Result = json.RawMessage(`{"tools":[{"name":"tool_one","description":"one"}]}`)
+		case "resources/list":
+			resp.Result = json.RawMessage(`{"resources":[{"uri":"file:///tmp/a","name":"config"}]}`)
+		case "prompts/list":
+			resp.Result = json.RawMessage(`{"prompts":[{"name":"summarize","description":"Summarize"}]}`)
+		default:
+			resp.Error = &client.JSONRPCError{
+				Code:    -32601,
+				Message: fmt.Sprintf("unknown method %q", req.Method),
+			}
+		}
+
+		payload, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write(payload)
+	}))
 }
 
 func TestServerRegistryCloseAll(t *testing.T) {
