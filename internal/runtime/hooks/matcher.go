@@ -12,6 +12,8 @@ import (
 type MatchQuery struct {
 	// ToolName is the tool name used to match against HookMatcher.Matcher (e.g. "Bash", "Write").
 	ToolName string
+	// Matcher is a generic match key used for non-tool hook families such as MCP server names.
+	Matcher string
 }
 
 // MatchHooks returns all command hooks that match the given event and query.
@@ -46,6 +48,9 @@ func MatchHooks(config hook.HooksConfig, event hook.HookEvent, query MatchQuery)
 func matchesMatcherPattern(pattern string, query MatchQuery) bool {
 	if pattern == "" {
 		return true
+	}
+	if query.Matcher != "" {
+		return pattern == query.Matcher
 	}
 	// Stop-type events have no tool name query, so all patterns match.
 	if query.ToolName == "" {

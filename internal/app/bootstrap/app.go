@@ -22,6 +22,7 @@ import (
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
+	mcpbridge "github.com/sheepzhao/claude-code-go/internal/platform/mcp/bridge"
 	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
@@ -448,6 +449,14 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 						"error":  regErr.Error(),
 					})
 				}
+			}
+		}
+		for _, entry := range registry.Connected() {
+			if err := mcpbridge.RegisterElicitationHandlers(entry.Client, entry.Name, hookRunner, cfg.Hooks, cfg.DisableAllHooks); err != nil {
+				logger.WarnCF("bootstrap", "failed to register mcp elicitation handlers", map[string]any{
+					"server": entry.Name,
+					"error":  err.Error(),
+				})
 			}
 		}
 	}

@@ -175,6 +175,46 @@ type NotificationHookInput struct {
 	NotificationType string `json:"notification_type"`
 }
 
+// ElicitationHookInput is the JSON payload piped to Elicitation event hooks via stdin.
+// Hooks receive this before the MCP server sees a response and can programmatically
+// accept, decline, or cancel the elicitation.
+type ElicitationHookInput struct {
+	BaseHookInput
+	// HookEventName is always "Elicitation".
+	HookEventName string `json:"hook_event_name"`
+	// MCPServerName identifies the server that issued the elicitation request.
+	MCPServerName string `json:"mcp_server_name"`
+	// Message is the text presented to the user by the server.
+	Message string `json:"message"`
+	// Mode identifies the elicitation mode: "form" or "url".
+	Mode string `json:"mode,omitempty"`
+	// URL carries the URL for URL-mode elicitations.
+	URL string `json:"url,omitempty"`
+	// ElicitationID identifies the elicitation when the server supplies one.
+	ElicitationID string `json:"elicitation_id,omitempty"`
+	// RequestedSchema carries the schema for form-mode elicitations.
+	RequestedSchema map[string]any `json:"requested_schema,omitempty"`
+}
+
+// ElicitationResultHookInput is the JSON payload piped to ElicitationResult hooks via stdin.
+// Hooks receive this after an elicitation has been resolved and can observe or override
+// the response before it is sent back to the MCP server.
+type ElicitationResultHookInput struct {
+	BaseHookInput
+	// HookEventName is always "ElicitationResult".
+	HookEventName string `json:"hook_event_name"`
+	// MCPServerName identifies the server that issued the elicitation request.
+	MCPServerName string `json:"mcp_server_name"`
+	// ElicitationID identifies the elicitation when the server supplies one.
+	ElicitationID string `json:"elicitation_id,omitempty"`
+	// Mode identifies the elicitation mode: "form" or "url".
+	Mode string `json:"mode,omitempty"`
+	// Action is the resolved elicitation action.
+	Action string `json:"action"`
+	// Content carries submitted form values when the action is "accept".
+	Content map[string]any `json:"content,omitempty"`
+}
+
 // SessionStartHookInput is the JSON payload piped to SessionStart event hooks via stdin.
 // Hooks receive this at session startup or resume.
 type SessionStartHookInput struct {

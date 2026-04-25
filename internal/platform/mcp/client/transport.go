@@ -20,6 +20,8 @@ type Transport interface {
 	Send(ctx context.Context, req JSONRPCRequest) (*JSONRPCResponse, error)
 	// SetNotificationHandler registers a handler for an incoming notification method.
 	SetNotificationHandler(method string, handler NotificationHandler)
+	// SetRequestHandler registers a handler for an incoming request method.
+	SetRequestHandler(method string, handler RequestHandler)
 	// Close shuts down the transport and releases resources.
 	Close() error
 }
@@ -33,7 +35,9 @@ type StdioClientTransport struct {
 	stderr               io.ReadCloser
 	pending              map[RequestID]chan JSONRPCResponse
 	notificationHandlers map[string]NotificationHandler
+	requestHandlers      map[string]RequestHandler
 	mu                   sync.Mutex
+	writeMu              sync.Mutex
 	nextID               atomic.Int64
 	reader               *bufio.Scanner
 	closeCh              chan struct{}
@@ -79,6 +83,7 @@ func NewStdioClientTransport(command string, args []string, env map[string]strin
 		stderr:               stderr,
 		pending:              make(map[RequestID]chan JSONRPCResponse),
 		notificationHandlers: make(map[string]NotificationHandler),
+		requestHandlers:      make(map[string]RequestHandler),
 		reader:               bufio.NewScanner(stdout),
 		closeCh:              make(chan struct{}),
 	}
@@ -113,9 +118,12 @@ func (t *StdioClientTransport) Send(ctx context.Context, req JSONRPCRequest) (*J
 	}
 
 	data = append(data, '\n')
+	t.writeMu.Lock()
 	if _, err := t.stdin.Write(data); err != nil {
+		t.writeMu.Unlock()
 		return nil, fmt.Errorf("mcp stdio transport: write request: %w", err)
 	}
+	t.writeMu.Unlock()
 
 	select {
 	case <-ctx.Done():
@@ -137,6 +145,17 @@ func (t *StdioClientTransport) SetNotificationHandler(method string, handler Not
 		return
 	}
 	t.notificationHandlers[method] = handler
+}
+
+// SetRequestHandler registers a callback for an incoming server request method.
+func (t *StdioClientTransport) SetRequestHandler(method string, handler RequestHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if handler == nil {
+		delete(t.requestHandlers, method)
+		return
+	}
+	t.requestHandlers[method] = handler
 }
 
 // Close terminates the subprocess and cleans up resources.
@@ -190,7 +209,14 @@ func (t *StdioClientTransport) readLoop() {
 			continue
 		}
 
-		// Try response first; fall back to notification.
+		// Try incoming request first so server-initiated RPC calls do not get
+		// mistaken for responses.
+		var req JSONRPCRequest
+		if err := json.Unmarshal(line, &req); err == nil && req.Method != "" && req.ID != "" {
+			t.handleRequest(req)
+			continue
+		}
+
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(line, &resp); err == nil && resp.ID != "" {
 			t.mu.Lock()
@@ -226,6 +252,86 @@ func (t *StdioClientTransport) readLoop() {
 			"line": string(line),
 		})
 	}
+}
+
+// handleRequest dispatches one incoming JSON-RPC request to the registered handler.
+func (t *StdioClientTransport) handleRequest(req JSONRPCRequest) {
+	t.mu.Lock()
+	handler := t.requestHandlers[req.Method]
+	t.mu.Unlock()
+
+	if handler == nil {
+		logger.DebugCF("mcp", "stdio transport unhandled request", map[string]any{
+			"method": req.Method,
+			"id":     req.ID,
+		})
+		t.writeResponse(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32601,
+				Message: fmt.Sprintf("mcp stdio transport: unhandled request %q", req.Method),
+			},
+		})
+		return
+	}
+
+	go func() {
+		result, err := handler(req)
+		if err != nil {
+			t.writeResponse(JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &JSONRPCError{
+					Code:    -32000,
+					Message: err.Error(),
+				},
+			})
+			return
+		}
+		t.writeResponse(JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  mustMarshalRaw(result),
+		})
+	}()
+}
+
+// writeResponse serializes one JSON-RPC response back to the subprocess stdin.
+func (t *StdioClientTransport) writeResponse(resp JSONRPCResponse) {
+	data, err := json.Marshal(resp)
+	if err != nil {
+		logger.WarnCF("mcp", "stdio transport marshal response failed", map[string]any{
+			"id":    resp.ID,
+			"error": err.Error(),
+		})
+		return
+	}
+
+	data = append(data, '\n')
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+	if _, err := t.stdin.Write(data); err != nil {
+		logger.WarnCF("mcp", "stdio transport write response failed", map[string]any{
+			"id":    resp.ID,
+			"error": err.Error(),
+		})
+	}
+}
+
+// mustMarshalRaw converts a handler result into JSON raw bytes when possible.
+func mustMarshalRaw(v any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		logger.WarnCF("mcp", "stdio transport marshal request handler result failed", map[string]any{
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return json.RawMessage(data)
 }
 
 // NextID returns a monotonically increasing request ID.

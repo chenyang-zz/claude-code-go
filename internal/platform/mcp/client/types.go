@@ -33,6 +33,9 @@ type JSONRPCNotification struct {
 // NotificationHandler consumes a JSON-RPC notification emitted by the server.
 type NotificationHandler func(JSONRPCNotification)
 
+// RequestHandler consumes a JSON-RPC request emitted by the server and returns a response payload.
+type RequestHandler func(JSONRPCRequest) (any, error)
+
 // JSONRPCError is the error object inside a JSON-RPC response.
 type JSONRPCError struct {
 	Code    int    `json:"code"`
@@ -197,6 +200,40 @@ type ToolAnnotations struct {
 	ReadOnlyHint    bool `json:"readOnlyHint,omitempty"`
 	DestructiveHint bool `json:"destructiveHint,omitempty"`
 	OpenWorldHint   bool `json:"openWorldHint,omitempty"`
+}
+
+// ElicitRequestMethod is the JSON-RPC method used by MCP servers to request user input.
+const ElicitRequestMethod = "elicitation/create"
+
+// ElicitationCompleteNotificationMethod is the JSON-RPC notification emitted when a URL-mode elicitation completes.
+const ElicitationCompleteNotificationMethod = "notifications/elicitation/complete"
+
+// ElicitRequestParams models the MCP elicitation request payload.
+type ElicitRequestParams struct {
+	// Mode indicates whether the elicitation is a "form" or "url" flow.
+	Mode string `json:"mode"`
+	// Message explains why the server is requesting user input.
+	Message string `json:"message"`
+	// RequestedSchema describes the expected response shape for form-mode elicitations.
+	RequestedSchema map[string]any `json:"requestedSchema,omitempty"`
+	// URL carries the external URL for URL-mode elicitations.
+	URL string `json:"url,omitempty"`
+	// ElicitationID identifies the URL-mode elicitation when one is provided.
+	ElicitationID string `json:"elicitationId,omitempty"`
+}
+
+// ElicitResult is the MCP response returned to an elicitation request.
+type ElicitResult struct {
+	// Action is one of "accept", "decline", or "cancel".
+	Action string `json:"action"`
+	// Content carries submitted form values for accepted form-mode elicitations.
+	Content map[string]any `json:"content,omitempty"`
+}
+
+// ElicitationCompleteNotification models the completion notification payload for URL-mode elicitations.
+type ElicitationCompleteNotification struct {
+	// ElicitationID identifies the completed elicitation.
+	ElicitationID string `json:"elicitationId"`
 }
 
 // MCP tools/call types.

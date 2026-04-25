@@ -12,6 +12,7 @@ import (
 type mockTransport struct {
 	responses            map[RequestID]JSONRPCResponse
 	notificationHandlers map[string]NotificationHandler
+	requestHandlers      map[string]RequestHandler
 }
 
 func (m *mockTransport) Send(ctx context.Context, req JSONRPCRequest) (*JSONRPCResponse, error) {
@@ -35,6 +36,17 @@ func (m *mockTransport) SetNotificationHandler(method string, handler Notificati
 	m.notificationHandlers[method] = handler
 }
 
+func (m *mockTransport) SetRequestHandler(method string, handler RequestHandler) {
+	if m.requestHandlers == nil {
+		m.requestHandlers = make(map[string]RequestHandler)
+	}
+	if handler == nil {
+		delete(m.requestHandlers, method)
+		return
+	}
+	m.requestHandlers[method] = handler
+}
+
 func (m *mockTransport) emitNotification(method string, params json.RawMessage) {
 	if handler := m.notificationHandlers[method]; handler != nil {
 		handler(JSONRPCNotification{
@@ -43,6 +55,19 @@ func (m *mockTransport) emitNotification(method string, params json.RawMessage) 
 			Params:  params,
 		})
 	}
+}
+
+func (m *mockTransport) emitRequest(method string, params json.RawMessage) any {
+	if handler := m.requestHandlers[method]; handler != nil {
+		result, _ := handler(JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      "req-1",
+			Method:  method,
+			Params:  params,
+		})
+		return result
+	}
+	return nil
 }
 
 func TestClientInitialize(t *testing.T) {
@@ -241,6 +266,37 @@ func TestClientNotificationHandler(t *testing.T) {
 	}
 }
 
+func TestClientRequestHandler(t *testing.T) {
+	mt := &mockTransport{}
+	c := NewClient(mt)
+
+	received := make(chan JSONRPCRequest, 1)
+	if err := c.SetRequestHandler(ElicitRequestMethod, func(req JSONRPCRequest) (any, error) {
+		received <- req
+		return ElicitResult{Action: "cancel"}, nil
+	}); err != nil {
+		t.Fatalf("SetRequestHandler: %v", err)
+	}
+
+	result := mt.emitRequest(ElicitRequestMethod, json.RawMessage(`{"mode":"form","message":"Need input"}`))
+	elicitResult, ok := result.(ElicitResult)
+	if !ok {
+		t.Fatalf("request result type = %T, want client.ElicitResult", result)
+	}
+	if elicitResult.Action != "cancel" {
+		t.Fatalf("request result action = %q, want cancel", elicitResult.Action)
+	}
+
+	select {
+	case req := <-received:
+		if req.Method != ElicitRequestMethod {
+			t.Fatalf("request method = %q, want %q", req.Method, ElicitRequestMethod)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request handler")
+	}
+}
+
 func TestStdioClientTransportDispatchesNotification(t *testing.T) {
 	transport, err := NewStdioClientTransport("sh", []string{"-c", `
 		while IFS= read -r line; do
@@ -305,5 +361,7 @@ func (m *blockingMockTransport) Send(ctx context.Context, req JSONRPCRequest) (*
 }
 
 func (m *blockingMockTransport) SetNotificationHandler(method string, handler NotificationHandler) {}
+
+func (m *blockingMockTransport) SetRequestHandler(method string, handler RequestHandler) {}
 
 func (m *blockingMockTransport) Close() error { return nil }

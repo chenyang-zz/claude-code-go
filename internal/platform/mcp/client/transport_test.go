@@ -1,11 +1,19 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
+
+type bufferWriteCloser struct {
+	bytes.Buffer
+}
+
+func (b *bufferWriteCloser) Close() error { return nil }
 
 // mockStdioServer prints a JSON-RPC response for each line read from stdin.
 func TestStdioClientTransportSendAndReceive(t *testing.T) {
@@ -82,5 +90,45 @@ func TestStdioClientTransportNextID(t *testing.T) {
 	}
 	if id1 == id2 {
 		t.Fatalf("ids should differ: %q vs %q", id1, id2)
+	}
+}
+
+func TestStdioClientTransportHandlesIncomingRequest(t *testing.T) {
+	transport := &StdioClientTransport{
+		stdin:                &bufferWriteCloser{},
+		pending:              make(map[RequestID]chan JSONRPCResponse),
+		notificationHandlers: make(map[string]NotificationHandler),
+		requestHandlers:      make(map[string]RequestHandler),
+	}
+
+	done := make(chan struct{}, 1)
+	transport.SetRequestHandler(ElicitRequestMethod, func(req JSONRPCRequest) (any, error) {
+		done <- struct{}{}
+		return ElicitResult{Action: "cancel"}, nil
+	})
+
+	transport.handleRequest(JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      "elic-1",
+		Method:  ElicitRequestMethod,
+		Params:  json.RawMessage(`{"mode":"form","message":"Need input"}`),
+	})
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request handler")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		written := transport.stdin.(*bufferWriteCloser).String()
+		if strings.Contains(written, `"id":"elic-1"`) && strings.Contains(written, `"action":"cancel"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("written response = %q, want request id and cancel action", written)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
