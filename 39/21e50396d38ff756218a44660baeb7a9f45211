@@ -1,0 +1,51 @@
+internal/app/wiring/modules.go
+  1dcbd7e44df24cde 5,27,99-101,117,138
+internal/services/tools/web_fetch/permissions_test.go
+  1dcbd7e44df24cde 1-72
+internal/services/tools/web_fetch/tool.go
+  1dcbd7e44df24cde 1-221
+internal/services/tools/web_fetch/cache_test.go
+  1dcbd7e44df24cde 1-74
+internal/services/tools/web_fetch/fetch_test.go
+  1dcbd7e44df24cde 1-192
+internal/core/permission/error.go
+  1dcbd7e44df24cde 75-100
+internal/runtime/engine/engine.go
+  1dcbd7e44df24cde 1639-1643,1842-1876
+internal/services/tools/web_fetch/cache.go
+  1dcbd7e44df24cde 1-147
+internal/services/tools/web_fetch/tool_test.go
+  1dcbd7e44df24cde 1-158
+internal/core/permission/grant.go
+  1dcbd7e44df24cde 83-121
+internal/services/tools/web_fetch/fetch.go
+  1dcbd7e44df24cde 1-297
+internal/services/tools/web_fetch/markdown.go
+  1dcbd7e44df24cde 1-159
+internal/services/tools/web_fetch/permissions.go
+  1dcbd7e44df24cde 1-130
+internal/services/tools/web_fetch/markdown_test.go
+  1dcbd7e44df24cde 1-89
+internal/services/tools/web_fetch/preapproved.go
+  1dcbd7e44df24cde 1-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "3921e50396d38ff756218a44660baeb7a9f45211",
+  "prompts": {
+    "1dcbd7e44df24cde": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b42ac7c6-d947-4771-91d3-0e21c95329ab",
+        "model": "kimi-for-coding"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1804,
+      "total_deletions": 34,
+      "accepted_lines": 1770,
+      "overriden_lines": 0
+    }
+  }
+}
