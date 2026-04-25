@@ -49,6 +49,17 @@ func TestValidateSettingsContentAcceptsExpandedFields(t *testing.T) {
 	}
 }
 
+// TestValidateSettingsContentAcceptsEnvField verifies settings env is part of the supported schema subset.
+func TestValidateSettingsContentAcceptsEnvField(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"env\": {\n    \"COUNT\": 3,\n    \"ENABLED\": true,\n    \"NAME\": \"claude\"\n  }\n}\n")
+	if !result.IsValid {
+		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
+	}
+	if !strings.Contains(result.FullSchema, "\"env\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want env schema", result.FullSchema)
+	}
+}
+
 // TestValidateSettingsContentRejectsExpandedFieldErrors verifies enum and integer constraint errors keep stable caller-facing messages.
 func TestValidateSettingsContentRejectsExpandedFieldErrors(t *testing.T) {
 	result := ValidateSettingsContent("{\n  \"cleanupPeriodDays\": -1,\n  \"permissions\": {\n    \"defaultMode\": \"auto\"\n  }\n}\n")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
@@ -31,14 +32,14 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model         string            `json:"model"`
-	EffortLevel   *string           `json:"effortLevel"`
-	FastMode      *bool             `json:"fastMode"`
-	Theme         string            `json:"theme"`
-	EditorMode    string            `json:"editorMode"`
-	Provider      string            `json:"provider"`
-	SessionDBPath string            `json:"sessionDbPath"`
-	Env           map[string]string `json:"env"`
+	Model         string         `json:"model"`
+	EffortLevel   *string        `json:"effortLevel"`
+	FastMode      *bool          `json:"fastMode"`
+	Theme         string         `json:"theme"`
+	EditorMode    string         `json:"editorMode"`
+	Provider      string         `json:"provider"`
+	SessionDBPath string         `json:"sessionDbPath"`
+	Env           map[string]any `json:"env"`
 	OAuthAccount  struct {
 		AccountUUID      string `json:"accountUuid"`
 		EmailAddress     string `json:"emailAddress"`
@@ -343,7 +344,7 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 	}
 
 	return coreconfig.Config{
-		Env:                   cloneStringMap(parsed.Env),
+		Env:                   coerceSettingsEnvMap(parsed.Env),
 		Model:                 parsed.Model,
 		EffortLevel:           readEffortLevel(parsed.EffortLevel),
 		HasEffortLevelSetting: parsed.EffortLevel != nil,
@@ -372,6 +373,48 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 		Hooks:           hooksCfg,
 		DisableAllHooks: parsed.DisableAllHooks,
 	}, nil
+}
+
+// coerceSettingsEnvMap converts one settings env object into the runtime string map used by the Go host.
+func coerceSettingsEnvMap(raw map[string]any) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	coerced := make(map[string]string, len(raw))
+	for key, value := range raw {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			continue
+		}
+		coerced[trimmedKey] = coerceSettingsEnvValue(value)
+	}
+	if len(coerced) == 0 {
+		return nil
+	}
+	return coerced
+}
+
+// coerceSettingsEnvValue converts one JSON value into the stable string representation used by env settings.
+func coerceSettingsEnvValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return typed
+	case bool:
+		return strconv.FormatBool(typed)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case json.Number:
+		return typed.String()
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(encoded)
+	}
 }
 
 // additionalDirectorySourceFromSettingSource maps one settings layer into the matching directory source label.

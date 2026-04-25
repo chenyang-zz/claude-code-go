@@ -478,6 +478,37 @@ func TestFileLoaderLoadSettingsEnvTrustModel(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadCoercesSettingsEnvValues verifies non-string settings env values are stringified before reaching runtime config.
+func TestFileLoaderLoadCoercesSettingsEnvValues(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"env":{"COUNT":3,"ENABLED":true,"NAME":"claude"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Env["COUNT"] != "3" {
+		t.Fatalf("Load() env COUNT = %q, want 3", cfg.Env["COUNT"])
+	}
+	if cfg.Env["ENABLED"] != "true" {
+		t.Fatalf("Load() env ENABLED = %q, want true", cfg.Env["ENABLED"])
+	}
+	if cfg.Env["NAME"] != "claude" {
+		t.Fatalf("Load() env NAME = %q, want claude", cfg.Env["NAME"])
+	}
+}
+
 // TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv verifies trusted `--settings` env entries still merge after on-disk settings.
 func TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv(t *testing.T) {
 	tempDir := t.TempDir()

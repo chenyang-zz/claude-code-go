@@ -109,6 +109,13 @@ func SettingsSchemaDocument() map[string]any {
 				"type":        "string",
 				"description": "Override the SQLite path used by the Go host session store",
 			},
+			"env": map[string]any{
+				"type":        "object",
+				"description": "Environment variables to set for Claude Code sessions",
+				"additionalProperties": map[string]any{
+					"type": "string",
+				},
+			},
 			"respectGitignore": map[string]any{
 				"type":        "boolean",
 				"description": "Whether file discovery should respect .gitignore files",
@@ -212,6 +219,10 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			}
 		case "apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh", "sessionDbPath":
 			if issue, ok := validateStringField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "env":
+			if issue, ok := validateObjectField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
 			}
 		case "respectGitignore", "includeCoAuthoredBy", "includeGitInstructions":
@@ -342,6 +353,17 @@ func validateBooleanField(path string, value any) (ValidationIssue, bool) {
 	return ValidationIssue{
 		Path:    path,
 		Message: fmt.Sprintf("Expected boolean, but received %s", jsonTypeName(value)),
+	}, true
+}
+
+// validateObjectField verifies a top-level object field without constraining nested values.
+func validateObjectField(path string, value any) (ValidationIssue, bool) {
+	if _, ok := value.(map[string]any); ok {
+		return ValidationIssue{}, false
+	}
+	return ValidationIssue{
+		Path:    path,
+		Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(value)),
 	}, true
 }
 

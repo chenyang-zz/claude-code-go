@@ -676,6 +676,54 @@ func TestToolInvokeRejectsInvalidSettingsEdits(t *testing.T) {
 	}
 }
 
+// TestToolInvokeRejectsInvalidSettingsEditsWithEnv verifies env-enabled settings files still receive edit validation.
+func TestToolInvokeRejectsInvalidSettingsEditsWithEnv(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(settingsDir, "settings.json")
+	mustWriteFile(t, filePath, "{\n  \"model\": \"sonnet\",\n  \"env\": {\n    \"COUNT\": 1\n  }\n}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  ".claude/settings.json",
+			"old_string": "\"sonnet\"",
+			"new_string": "\"sonnet\",\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if !strings.Contains(result.Error, "Claude Code settings.json validation failed after edit") {
+		t.Fatalf("Invoke() result.Error = %q, want env-aware settings validation error", result.Error)
+	}
+}
+
 // TestToolInvokeAllowsRepairingAlreadyInvalidSettings verifies edits can proceed when the original settings file is already invalid.
 func TestToolInvokeAllowsRepairingAlreadyInvalidSettings(t *testing.T) {
 	projectDir := t.TempDir()
