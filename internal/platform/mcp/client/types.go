@@ -263,8 +263,18 @@ type ContentItem struct {
 
 // ServerConfig describes a single MCP server entry from settings.
 type ServerConfig struct {
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	// Type selects the transport family, such as "stdio", "sse", or "ws".
+	Type string `json:"type,omitempty"`
+	// Command stores the subprocess command for stdio-based servers.
+	Command string `json:"command,omitempty"`
+	// Args stores the subprocess arguments for stdio-based servers.
+	Args []string `json:"args,omitempty"`
+	// Env stores per-server environment variables for stdio-based servers.
+	Env map[string]string `json:"env,omitempty"`
+	// URL stores the remote endpoint for transport families that connect over HTTP or WebSocket.
+	URL string `json:"url,omitempty"`
+	// Headers stores static request headers for remote transports.
+	Headers map[string]string `json:"headers,omitempty"`
+	// HeadersHelper stores the optional script used to resolve dynamic request headers.
+	HeadersHelper string `json:"headersHelper,omitempty"`
 }

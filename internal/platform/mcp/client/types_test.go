@@ -153,9 +153,12 @@ func TestCallToolResultUnmarshal(t *testing.T) {
 
 func TestServerConfigMarshal(t *testing.T) {
 	cfg := ServerConfig{
-		Command: "npx",
-		Args:    []string{"-y", "@modelcontextprotocol/server-filesystem"},
-		Env:     map[string]string{"FOO": "bar"},
+		Command:       "npx",
+		Args:          []string{"-y", "@modelcontextprotocol/server-filesystem"},
+		Env:           map[string]string{"FOO": "bar"},
+		URL:           "https://mcp.example.com/stream",
+		Headers:       map[string]string{"X-Test": "ok"},
+		HeadersHelper: "/usr/local/bin/mcp-headers",
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -170,5 +173,14 @@ func TestServerConfigMarshal(t *testing.T) {
 	}
 	if len(back.Args) != 2 || back.Args[0] != "-y" {
 		t.Fatalf("args = %v", back.Args)
+	}
+	if back.URL != cfg.URL {
+		t.Fatalf("url = %q", back.URL)
+	}
+	if back.Headers["X-Test"] != "ok" {
+		t.Fatalf("headers = %#v", back.Headers)
+	}
+	if back.HeadersHelper != cfg.HeadersHelper {
+		t.Fatalf("headersHelper = %q", back.HeadersHelper)
 	}
 }
