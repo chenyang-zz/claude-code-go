@@ -42,6 +42,8 @@ type Tool struct {
 	policy *corepermission.FilesystemPolicy
 	// maxFileSizeBytes caps full-file reads when the caller does not request a limited range.
 	maxFileSizeBytes int64
+	// maxTokens caps the estimated token count of returned content.
+	maxTokens int
 }
 
 // Input is the typed request payload accepted by the migrated FileReadTool.
@@ -146,10 +148,12 @@ type lineReadResult struct {
 
 // NewTool constructs a FileReadTool with explicit host dependencies.
 func NewTool(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy) *Tool {
+	limits := getDefaultFileReadingLimits()
 	return &Tool{
 		fs:               fs,
 		policy:           policy,
-		maxFileSizeBytes: defaultMaxFileSizeBytes,
+		maxFileSizeBytes: limits.MaxSizeBytes,
+		maxTokens:        limits.MaxTokens,
 	}
 }
 
@@ -271,6 +275,10 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 
 	readResult, err := t.readTextRange(ctx, filePath, offset, input.Limit)
 	if err != nil {
+		return coretool.Result{Error: err.Error()}, nil
+	}
+
+	if err := validateContentTokens(readResult.content, ext, t.maxTokens); err != nil {
 		return coretool.Result{Error: err.Error()}, nil
 	}
 

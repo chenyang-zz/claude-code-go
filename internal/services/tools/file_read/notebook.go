@@ -80,6 +80,11 @@ func (t *Tool) readNotebookFile(ctx context.Context, filePath string, size int64
 		}, nil
 	}
 
+	// Validate token count after serialization.
+	if err := validateContentTokens(string(cellsJSON), "ipynb", t.maxTokens); err != nil {
+		return coretool.Result{Error: err.Error()}, nil
+	}
+
 	// Get file modification time for read state.
 	info, err := t.fs.Stat(filePath)
 	if err != nil {
