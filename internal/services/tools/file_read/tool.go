@@ -298,7 +298,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	})
 
 	return coretool.Result{
-		Output: renderOutput(output),
+		Output: renderOutput(output, memoryFreshnessReminder(filePath, info.ModTime())),
 		Meta: map[string]any{
 			"data":       output,
 			"read_state": buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
@@ -420,8 +420,11 @@ func (t *Tool) effectiveMaxFileSizeBytes() int64 {
 }
 
 // renderOutput converts the structured read result into the minimal caller-facing text payload.
-func renderOutput(output Output) string {
+func renderOutput(output Output, prefix string) string {
 	if output.Content == "" {
+		if prefix != "" {
+			return prefix + renderOutput(output, "")
+		}
 		if output.TotalLines == 0 {
 			return "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
 		}
@@ -433,7 +436,11 @@ func renderOutput(output Output) string {
 	for index, line := range lines {
 		rendered = append(rendered, fmt.Sprintf("%6d\t%s", output.StartLine+index, line))
 	}
-	return strings.Join(rendered, "\n")
+	result := strings.Join(rendered, "\n")
+	if prefix == "" {
+		return result
+	}
+	return prefix + result
 }
 
 // normalizeLine trims one streamed line into the same content shape expected by the line-number formatter.

@@ -84,6 +84,73 @@ func TestToolInvokeReadsTextFile(t *testing.T) {
 	}
 }
 
+// TestToolInvokePrefixesSessionMemoryFiles verifies memory-like files get a freshness reminder prefix.
+func TestToolInvokePrefixesSessionMemoryFiles(t *testing.T) {
+	projectDir := t.TempDir()
+	configDir := filepath.Join(projectDir, ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+
+	filePath := filepath.Join(configDir, "session-memory", "summary.md")
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(filePath), err)
+	}
+	mustWriteFile(t, filePath, "remember this\n")
+
+	oldTime := time.Now().Add(-73 * time.Hour)
+	if err := os.Chtimes(filePath, oldTime, oldTime); err != nil {
+		t.Fatalf("Chtimes(%q) error = %v", filePath, err)
+	}
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": filePath,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q, want empty", result.Error)
+	}
+
+	wantPrefix := "<system-reminder>This memory is 3 days old. Memories are point-in-time observations, not live state - claims about code behavior or file:line citations may be outdated. Verify against current code before asserting as fact.</system-reminder>\n"
+	wantOutput := wantPrefix + "     1\tremember this"
+	if result.Output != wantOutput {
+		t.Fatalf("Invoke() output = %q, want %q", result.Output, wantOutput)
+	}
+}
+
+// TestIsMemoryAttachmentPath recognizes the session-memory and project-memory layouts used by the reminder.
+func TestIsMemoryAttachmentPath(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), ".claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+
+	sessionMemoryPath := filepath.Join(configDir, "session-memory", "summary.md")
+	projectMemoryPath := filepath.Join(configDir, "projects", "demo", "memory", "notes.md")
+	ordinaryPath := filepath.Join(t.TempDir(), "docs", "notes.md")
+
+	if !isMemoryAttachmentPath(sessionMemoryPath) {
+		t.Fatalf("isMemoryAttachmentPath(%q) = false, want true", sessionMemoryPath)
+	}
+	if !isMemoryAttachmentPath(projectMemoryPath) {
+		t.Fatalf("isMemoryAttachmentPath(%q) = false, want true", projectMemoryPath)
+	}
+	if isMemoryAttachmentPath(ordinaryPath) {
+		t.Fatalf("isMemoryAttachmentPath(%q) = true, want false", ordinaryPath)
+	}
+}
+
 // TestToolInvokeSupportsOffsetAndLimit verifies callers can read a targeted line window.
 func TestToolInvokeSupportsOffsetAndLimit(t *testing.T) {
 	projectDir := t.TempDir()
