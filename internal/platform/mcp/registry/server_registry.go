@@ -102,17 +102,7 @@ func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	entry := r.entries[idx]
 	r.mu.RUnlock()
 
-	if entry.Config.Type != "" && entry.Config.Type != "stdio" {
-		// Only stdio is supported in the minimum skeleton.
-		r.updateStatus(idx, StatusFailed, fmt.Sprintf("unsupported transport type %q", entry.Config.Type))
-		return
-	}
-
-	transport, err := client.NewStdioClientTransport(
-		entry.Config.Command,
-		entry.Config.Args,
-		entry.Config.Env,
-	)
+	transport, err := newTransportForEntry(ctx, entry)
 	if err != nil {
 		r.updateStatus(idx, StatusFailed, fmt.Sprintf("transport: %v", err))
 		return
@@ -201,6 +191,28 @@ func (r *ServerRegistry) refreshConnectedSnapshots(ctx context.Context, idx int)
 	r.refreshToolsSnapshot(ctx, idx)
 	r.refreshResourcesSnapshot(ctx, idx)
 	r.refreshPromptsSnapshot(ctx, idx)
+}
+
+// newTransportForEntry creates the appropriate MCP transport for one server config.
+// stdio remains the default for backwards compatibility; sse/ws now route through
+// the new remote transport bridge.
+func newTransportForEntry(ctx context.Context, entry Entry) (client.Transport, error) {
+	switch entry.Config.Type {
+	case "", "stdio":
+		return client.NewStdioClientTransport(
+			entry.Config.Command,
+			entry.Config.Args,
+			entry.Config.Env,
+		)
+	case "sse":
+		return client.NewSSEClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
+	case "ws":
+		return client.NewWebSocketClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
+	case "http", "claudeai-proxy", "sdk":
+		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)
+	default:
+		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)
+	}
 }
 
 // refreshToolsSnapshot refreshes the tools snapshot for one connected entry.

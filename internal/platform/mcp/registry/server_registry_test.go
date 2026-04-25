@@ -2,9 +2,15 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 )
 
@@ -38,7 +44,7 @@ func TestServerRegistryLoadConfigs(t *testing.T) {
 func TestServerRegistryConnectAllUnsupportedType(t *testing.T) {
 	r := NewServerRegistry()
 	r.LoadConfigs(map[string]client.ServerConfig{
-		"sse": {Type: "sse", Command: "noop"},
+		"http": {Type: "http", URL: "https://example.com/mcp"},
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -50,6 +56,61 @@ func TestServerRegistryConnectAllUnsupportedType(t *testing.T) {
 	}
 	if entries[0].Status != StatusFailed {
 		t.Fatalf("status = %q, want failed", entries[0].Status)
+	}
+}
+
+func TestServerRegistryConnectAllSSE(t *testing.T) {
+	t.Parallel()
+
+	server := newRegistryRemoteSSEServer(t)
+	defer server.Close()
+
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"sse": {Type: "sse", URL: server.URL},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r.ConnectAll(ctx)
+
+	entries := r.List()
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Status != StatusConnected {
+		t.Fatalf("status = %q, want connected", entries[0].Status)
+	}
+	if len(entries[0].Tools) != 1 || entries[0].Tools[0].Name != "tool_one" {
+		t.Fatalf("tools = %#v", entries[0].Tools)
+	}
+}
+
+func TestServerRegistryConnectAllWebSocket(t *testing.T) {
+	t.Parallel()
+
+	server := newRegistryRemoteWebSocketServer(t)
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"ws": {Type: "ws", URL: wsURL},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r.ConnectAll(ctx)
+
+	entries := r.List()
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Status != StatusConnected {
+		t.Fatalf("status = %q, want connected", entries[0].Status)
+	}
+	if len(entries[0].Tools) != 1 || entries[0].Tools[0].Name != "tool_one" {
+		t.Fatalf("tools = %#v", entries[0].Tools)
 	}
 }
 
@@ -199,4 +260,130 @@ func TestSetGetLastRegistry(t *testing.T) {
 	if GetLastRegistry() != r {
 		t.Fatal("GetLastRegistry did not return the set registry")
 	}
+}
+
+func newRegistryRemoteSSEServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	events := make(chan []byte, 16)
+	serveResponse := func(req client.JSONRPCRequest) client.JSONRPCResponse {
+		switch req.Method {
+		case "initialize":
+			return client.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false},"resources":{"listChanged":false},"prompts":{"listChanged":false}},"serverInfo":{"name":"sse-test","version":"1.0"}}`),
+			}
+		case "tools/list":
+			return client.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  json.RawMessage(`{"tools":[{"name":"tool_one","description":"one"}]}`),
+			}
+		case "resources/list":
+			return client.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  json.RawMessage(`{"resources":[{"uri":"file:///tmp/a","name":"config"}]}`),
+			}
+		case "prompts/list":
+			return client.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  json.RawMessage(`{"prompts":[{"name":"summarize","description":"Summarize"}]}`),
+			}
+		default:
+			return client.JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &client.JSONRPCError{
+					Code:    -32601,
+					Message: fmt.Sprintf("unknown method %q", req.Method),
+				},
+			}
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("content-type", "text/event-stream")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Fatalf("response writer does not support flushing")
+			}
+			_, _ = fmt.Fprintln(w, ": ok")
+			flusher.Flush()
+			for {
+				select {
+				case payload := <-events:
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+					flusher.Flush()
+				case <-r.Context().Done():
+					return
+				}
+			}
+		case http.MethodPost:
+			var req client.JSONRPCRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode request: %v", err)
+			}
+			payload, err := json.Marshal(serveResponse(req))
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+			events <- payload
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+
+	return server
+}
+
+func newRegistryRemoteWebSocketServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		defer conn.Close()
+
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req client.JSONRPCRequest
+			if err := json.Unmarshal(msg, &req); err != nil {
+				t.Fatalf("unmarshal request: %v", err)
+			}
+			resp := client.JSONRPCResponse{JSONRPC: "2.0", ID: req.ID}
+			switch req.Method {
+			case "initialize":
+				resp.Result = json.RawMessage(`{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false},"resources":{"listChanged":false},"prompts":{"listChanged":false}},"serverInfo":{"name":"ws-test","version":"1.0"}}`)
+			case "tools/list":
+				resp.Result = json.RawMessage(`{"tools":[{"name":"tool_one","description":"one"}]}`)
+			case "resources/list":
+				resp.Result = json.RawMessage(`{"resources":[{"uri":"file:///tmp/a","name":"config"}]}`)
+			case "prompts/list":
+				resp.Result = json.RawMessage(`{"prompts":[{"name":"summarize","description":"Summarize"}]}`)
+			default:
+				resp.Error = &client.JSONRPCError{Code: -32601, Message: fmt.Sprintf("unknown method %q", req.Method)}
+			}
+			payload, err := json.Marshal(resp)
+			if err != nil {
+				t.Fatalf("marshal response: %v", err)
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				t.Fatalf("write response: %v", err)
+			}
+		}
+	}))
+
+	return server
 }
