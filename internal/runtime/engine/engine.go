@@ -1636,6 +1636,11 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		return e.executeBashApproval(ctx, call, bashPermissionErr, out)
 	}
 
+	var webFetchPermissionErr *corepermission.WebFetchPermissionError
+	if errors.As(invokeErr, &webFetchPermissionErr) && webFetchPermissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
+		return e.executeWebFetchApproval(ctx, call, webFetchPermissionErr, out)
+	}
+
 	if invokeErr == nil && strings.TrimSpace(result.Error) == "" {
 		// PostToolUse hooks: run after successful tool execution.
 		if e.shouldRunToolHooks(hook.EventPostToolUse) {
@@ -1833,6 +1838,41 @@ func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, p
 		Command:    permissionErr.Command,
 		WorkingDir: call.Context.WorkingDir,
 	})
+	return e.Executor.Execute(retryCtx, call)
+}
+
+// executeWebFetchApproval resolves one WebFetch approval request through the runtime prompt and one-shot retry flow.
+func (e *Runtime) executeWebFetchApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.WebFetchPermissionError, out chan<- event.Event) (coretool.Result, error) {
+	out <- event.Event{
+		Type:      event.TypeApprovalRequired,
+		Timestamp: time.Now(),
+		Payload: event.ApprovalPayload{
+			CallID:   call.ID,
+			ToolName: call.Name,
+			Path:     permissionErr.URL,
+			Action:   "fetch",
+			Message:  permissionErr.Message,
+		},
+	}
+
+	decision, err := e.ApprovalService.Decide(ctx, approval.Request{
+		CallID:   call.ID,
+		ToolName: call.Name,
+		Path:     permissionErr.URL,
+		Action:   "fetch",
+		Message:  permissionErr.Message,
+	})
+	if err != nil {
+		return coretool.Result{}, err
+	}
+	if !decision.Approved {
+		if strings.TrimSpace(decision.Reason) == "" {
+			decision.Reason = fmt.Sprintf("Permission to fetch %q was not granted.", permissionErr.URL)
+		}
+		return coretool.Result{Error: decision.Reason}, nil
+	}
+
+	retryCtx := corepermission.WithWebFetchGrant(ctx, call.Name, permissionErr.URL, call.Context.WorkingDir)
 	return e.Executor.Execute(retryCtx, call)
 }
 

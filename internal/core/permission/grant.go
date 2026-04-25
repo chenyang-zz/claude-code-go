@@ -80,3 +80,42 @@ func HasBashGrant(ctx context.Context, req BashRequest) bool {
 	}
 	return false
 }
+
+type grantedWebFetchAccessKey struct{}
+
+type grantedWebFetchAccess struct {
+	toolName   string
+	url        string
+	workingDir string
+}
+
+// WithWebFetchGrant attaches one in-memory WebFetch approval grant to the context for the duration of one retry.
+func WithWebFetchGrant(ctx context.Context, toolName, rawURL, workingDir string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	grants, _ := ctx.Value(grantedWebFetchAccessKey{}).([]grantedWebFetchAccess)
+	next := append([]grantedWebFetchAccess(nil), grants...)
+	next = append(next, grantedWebFetchAccess{
+		toolName:   toolName,
+		url:        rawURL,
+		workingDir: workingDir,
+	})
+	return context.WithValue(ctx, grantedWebFetchAccessKey{}, next)
+}
+
+// HasWebFetchGrant reports whether the current context already carries a matching WebFetch approval grant.
+func HasWebFetchGrant(ctx context.Context, toolName, rawURL, workingDir string) bool {
+	if ctx == nil {
+		return false
+	}
+
+	grants, _ := ctx.Value(grantedWebFetchAccessKey{}).([]grantedWebFetchAccess)
+	for _, grant := range grants {
+		if grant.toolName == toolName && grant.url == rawURL && grant.workingDir == workingDir {
+			return true
+		}
+	}
+	return false
+}

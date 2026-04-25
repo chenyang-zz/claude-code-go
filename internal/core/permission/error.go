@@ -72,3 +72,29 @@ func (e *BashPermissionError) Error() string {
 func (e *BashPermissionError) Unwrap() error {
 	return ErrUnauthorized
 }
+
+// WebFetchPermissionError is the stable caller-facing error returned for WebFetch ask/deny outcomes.
+type WebFetchPermissionError struct {
+	// ToolName identifies the tool whose fetch request requires approval.
+	ToolName string
+	// URL stores the requested URL associated with the blocked request.
+	URL string
+	// WorkingDir stores the execution working directory used to scope the one-shot grant.
+	WorkingDir string
+	// Decision preserves whether the policy denied the request or requires approval.
+	Decision Decision
+	// Rule stores the matched rule when one participated in the decision.
+	Rule string
+	// Message stores the stable error message exposed to callers.
+	Message string
+}
+
+// Error returns the stable caller-facing message for the unauthorized WebFetch request.
+func (e *WebFetchPermissionError) Error() string {
+	return e.Message
+}
+
+// Unwrap exposes a sentinel so callers can recognize WebFetch permission failures with errors.Is.
+func (e *WebFetchPermissionError) Unwrap() error {
+	return ErrUnauthorized
+}

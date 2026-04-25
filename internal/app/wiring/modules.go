@@ -2,6 +2,7 @@ package wiring
 
 import (
 	"context"
+	"time"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
@@ -23,6 +24,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_list"
 	taskstop "github.com/sheepzhao/claude-code-go/internal/services/tools/task_stop"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_update"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/web_fetch"
 )
 
 // Modules aggregates host-level runtime dependencies assembled during startup.
@@ -94,6 +96,9 @@ func NewBaseWorkspaceModulesWithHooks(fs platformfs.FileSystem, policy *coreperm
 	return NewModules(BaseWorkspaceToolsWithHooks(fs, policy, permissions, backgroundTaskStore, taskStore, hookRunner, hookCfg, disableAllHooks)...)
 }
 
+// webFetchCache is the process-level shared cache for WebFetch results.
+var webFetchCache = web_fetch.NewCache(50*1024*1024, 15*time.Minute)
+
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
 func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) []tool.Tool {
 	executor := platformshell.NewExecutor()
@@ -109,6 +114,7 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		task_get.NewTool(taskStore),
 		task_list.NewTool(taskStore),
 		task_update.NewTool(taskStore),
+		web_fetch.NewTool(webFetchCache, permissions.Allow, permissions.Deny, permissions.Ask),
 	}
 }
 
@@ -129,5 +135,6 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		task_get.NewTool(taskStore),
 		task_list.NewTool(taskStore),
 		task_update.NewToolWithHooks(taskStore, dispatcher, hookCfg, disableAllHooks),
+		web_fetch.NewTool(webFetchCache, permissions.Allow, permissions.Deny, permissions.Ask),
 	}
 }
