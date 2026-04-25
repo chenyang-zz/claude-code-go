@@ -69,7 +69,7 @@ func (t *httpClientTransport) Send(ctx context.Context, req JSONRPCRequest) (*JS
 		return nil, fmt.Errorf("mcp http transport: build request: %w", err)
 	}
 	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("accept", "application/json")
+	httpReq.Header.Set("accept", "application/json, text/event-stream")
 	for key, value := range t.headers {
 		httpReq.Header.Set(key, value)
 	}

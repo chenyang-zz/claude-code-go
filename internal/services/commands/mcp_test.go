@@ -71,6 +71,35 @@ func TestMCPCommandExecuteDetailEmptyRegistry(t *testing.T) {
 	}
 }
 
+// TestMCPCommandExecuteDetailShowsOAuthConfig verifies /mcp detail surfaces oauth metadata when present.
+func TestMCPCommandExecuteDetailShowsOAuthConfig(t *testing.T) {
+	reg := mcpregistry.NewServerRegistry()
+	reg.LoadConfigs(map[string]mcpclient.ServerConfig{
+		"proxy": {
+			Type: "http",
+			URL:  "https://example.invalid/mcp",
+			OAuth: &mcpclient.OAuthConfig{
+				ClientID:              "client-123",
+				AuthServerMetadataURL: "https://auth.example.invalid/.well-known/oauth-authorization-server",
+				XAA:                   boolPtr(true),
+			},
+		},
+	})
+	mcpregistry.SetLastRegistry(reg)
+	defer mcpregistry.SetLastRegistry(nil)
+
+	cmd := MCPCommand{}
+	result, err := cmd.Execute(context.Background(), command.Args{Raw: []string{"detail", "proxy"}})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"OAuth: configured", "XAA: enabled", "Server is not connected"} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("detail output = %q, want %q", result.Output, want)
+		}
+	}
+}
+
 // TestMCPCommandExecuteListEmptyRegistry verifies /mcp with an empty registry.
 func TestMCPCommandExecuteListEmptyRegistry(t *testing.T) {
 	reg := mcpregistry.NewServerRegistry()
@@ -85,6 +114,10 @@ func TestMCPCommandExecuteListEmptyRegistry(t *testing.T) {
 	if result.Output != "No MCP servers configured." {
 		t.Fatalf("Execute() output = %q, want 'No MCP servers configured.'", result.Output)
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func TestMCPCommandExecuteShowsResourcesAndPrompts(t *testing.T) {

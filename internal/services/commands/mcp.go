@@ -112,6 +112,12 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 	if target.Error != "" {
 		fmt.Fprintf(&b, "Error: %s\n", target.Error)
 	}
+	if target.Config.OAuth != nil {
+		b.WriteString("OAuth: configured\n")
+		if target.Config.OAuth.XAA != nil && *target.Config.OAuth.XAA {
+			b.WriteString("XAA: enabled\n")
+		}
+	}
 
 	if target.Status == mcpregistry.StatusConnected {
 		if tools, err := toolsForEntry(ctx, *target); err != nil {

@@ -277,4 +277,18 @@ type ServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// HeadersHelper stores the optional script used to resolve dynamic request headers.
 	HeadersHelper string `json:"headersHelper,omitempty"`
+	// OAuth stores per-server OAuth/XAA configuration used by remote MCP auth flows.
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig stores the minimal per-server auth metadata needed for MCP auth flows.
+type OAuthConfig struct {
+	// ClientID identifies the OAuth client registered for this MCP server.
+	ClientID string `json:"clientId,omitempty"`
+	// CallbackPort stores the optional local callback port used during browser auth.
+	CallbackPort *int `json:"callbackPort,omitempty"`
+	// AuthServerMetadataURL points at the OAuth authorization server metadata endpoint.
+	AuthServerMetadataURL string `json:"authServerMetadataUrl,omitempty"`
+	// XAA marks whether the server requires cross-app access semantics.
+	XAA *bool `json:"xaa,omitempty"`
 }

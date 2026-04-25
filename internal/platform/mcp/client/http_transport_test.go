@@ -73,6 +73,9 @@ func newHTTPTestServer(t *testing.T) *httptest.Server {
 		if got := r.Header.Get("X-Test"); got != "ok" {
 			t.Fatalf("X-Test header = %q, want ok", got)
 		}
+		if got := r.Header.Get("Accept"); got != "application/json, text/event-stream" {
+			t.Fatalf("Accept header = %q, want streamable HTTP accept", got)
+		}
 
 		var req JSONRPCRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

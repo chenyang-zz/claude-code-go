@@ -223,6 +223,43 @@ func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
 	}
 }
 
+// TestLoadMCPConfigsPreservesOAuthConfig verifies bootstrap keeps MCP oauth metadata intact.
+func TestLoadMCPConfigsPreservesOAuthConfig(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_MCP_SERVERS", `{
+		"proxy": {
+			"type": "http",
+			"url": "https://example.invalid/mcp",
+			"oauth": {
+				"clientId": "client-123",
+				"callbackPort": 4321,
+				"authServerMetadataUrl": "https://auth.example.invalid/.well-known/oauth-authorization-server",
+				"xaa": true
+			}
+		}
+	}`)
+
+	configs := loadMCPConfigs()
+	cfg, ok := configs["proxy"]
+	if !ok {
+		t.Fatal("loadMCPConfigs() missing proxy config")
+	}
+	if cfg.OAuth == nil {
+		t.Fatal("loadMCPConfigs() OAuth = nil, want oauth metadata")
+	}
+	if cfg.OAuth.ClientID != "client-123" {
+		t.Fatalf("OAuth.ClientID = %q, want client-123", cfg.OAuth.ClientID)
+	}
+	if cfg.OAuth.CallbackPort == nil || *cfg.OAuth.CallbackPort != 4321 {
+		t.Fatalf("OAuth.CallbackPort = %#v, want 4321", cfg.OAuth.CallbackPort)
+	}
+	if cfg.OAuth.AuthServerMetadataURL != "https://auth.example.invalid/.well-known/oauth-authorization-server" {
+		t.Fatalf("OAuth.AuthServerMetadataURL = %q, want auth metadata url", cfg.OAuth.AuthServerMetadataURL)
+	}
+	if cfg.OAuth.XAA == nil || !*cfg.OAuth.XAA {
+		t.Fatalf("OAuth.XAA = %#v, want true", cfg.OAuth.XAA)
+	}
+}
+
 // TestNewAppWithDependenciesLoadsConfig verifies bootstrap wires the runner from resolved config and selected engine.
 func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	loader := stubLoader{

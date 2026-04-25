@@ -425,6 +425,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	mcpConfigs := loadMCPConfigs()
 	if len(mcpConfigs) > 0 {
 		registry := mcpregistry.NewServerRegistry()
+		registry.SetAuthToken(cfg.AuthToken)
 		registry.LoadConfigs(mcpConfigs)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*1000000000) // 30s
 		registry.ConnectAll(ctx)

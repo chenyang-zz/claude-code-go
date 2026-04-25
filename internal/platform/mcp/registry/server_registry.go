@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ type ServerStatus string
 
 const (
 	StatusConnected ServerStatus = "connected"
+	StatusNeedsAuth ServerStatus = "needs-auth"
 	StatusFailed    ServerStatus = "failed"
 	StatusDisabled  ServerStatus = "disabled"
 )
@@ -55,12 +57,24 @@ const snapshotRefreshTimeout = 5 * time.Second
 // ServerRegistry manages the lifecycle of configured MCP servers.
 type ServerRegistry struct {
 	entries []Entry
-	mu      sync.RWMutex
+	// authToken stores the Claude auth token injected by bootstrap for claude.ai proxy servers.
+	authToken string
+	mu        sync.RWMutex
 }
 
 // NewServerRegistry creates an empty registry.
 func NewServerRegistry() *ServerRegistry {
 	return &ServerRegistry{}
+}
+
+// SetAuthToken records the process-level Claude auth token used by claude.ai proxy servers.
+func (r *ServerRegistry) SetAuthToken(token string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.authToken = strings.TrimSpace(token)
 }
 
 // LoadConfigs populates the registry from a raw settings map.
@@ -100,11 +114,12 @@ func (r *ServerRegistry) ConnectAll(ctx context.Context) {
 func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	r.mu.RLock()
 	entry := r.entries[idx]
+	authToken := r.authToken
 	r.mu.RUnlock()
 
-	transport, err := newTransportForEntry(ctx, entry)
+	transport, err := newTransportForEntry(ctx, entry, authToken)
 	if err != nil {
-		r.updateStatus(idx, StatusFailed, fmt.Sprintf("transport: %v", err))
+		r.updateStatus(idx, statusForConnectionError(err), fmt.Sprintf("transport: %v", err))
 		return
 	}
 
@@ -121,7 +136,7 @@ func (r *ServerRegistry) connectOne(ctx context.Context, idx int) {
 	})
 	if err != nil {
 		_ = c.Close()
-		r.updateStatus(idx, StatusFailed, fmt.Sprintf("initialize: %v", err))
+		r.updateStatus(idx, statusForConnectionError(err), fmt.Sprintf("initialize: %v", err))
 		return
 	}
 
@@ -194,9 +209,9 @@ func (r *ServerRegistry) refreshConnectedSnapshots(ctx context.Context, idx int)
 }
 
 // newTransportForEntry creates the appropriate MCP transport for one server config.
-// stdio remains the default for backwards compatibility; sse/ws now route through
-// the new remote transport bridge.
-func newTransportForEntry(ctx context.Context, entry Entry) (client.Transport, error) {
+// stdio remains the default for backwards compatibility; sse/ws/http and claude.ai
+// proxy now route through the remote transport bridge.
+func newTransportForEntry(ctx context.Context, entry Entry, authToken string) (client.Transport, error) {
 	switch entry.Config.Type {
 	case "", "stdio":
 		return client.NewStdioClientTransport(
@@ -210,11 +225,37 @@ func newTransportForEntry(ctx context.Context, entry Entry) (client.Transport, e
 		return client.NewWebSocketClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
 	case "http":
 		return client.NewHTTPClientTransport(ctx, entry.Config.URL, entry.Config.Headers)
-	case "claudeai-proxy", "sdk":
+	case "claudeai-proxy":
+		if strings.TrimSpace(authToken) == "" {
+			return nil, fmt.Errorf("authentication required: missing claude.ai auth token")
+		}
+		headers := make(map[string]string, len(entry.Config.Headers)+1)
+		for key, value := range entry.Config.Headers {
+			headers[key] = value
+		}
+		headers["Authorization"] = "Bearer " + strings.TrimSpace(authToken)
+		return client.NewHTTPClientTransport(ctx, entry.Config.URL, headers)
+	case "sdk":
 		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)
 	default:
 		return nil, fmt.Errorf("unsupported transport type %q", entry.Config.Type)
 	}
+}
+
+// statusForConnectionError maps transport and initialize failures to the most
+// precise registry status available to the Go host.
+func statusForConnectionError(err error) ServerStatus {
+	if err == nil {
+		return StatusFailed
+	}
+	lower := strings.ToLower(err.Error())
+	if strings.Contains(lower, "authentication") ||
+		strings.Contains(lower, "unauthorized") ||
+		strings.Contains(lower, "401") ||
+		strings.Contains(lower, "token expired") {
+		return StatusNeedsAuth
+	}
+	return StatusFailed
 }
 
 // refreshToolsSnapshot refreshes the tools snapshot for one connected entry.
