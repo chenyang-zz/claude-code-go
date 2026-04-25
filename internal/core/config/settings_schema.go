@@ -157,6 +157,24 @@ func SettingsSchemaDocument() map[string]any {
 				"description":          "Hook configuration mapped by event name",
 				"properties":           map[string]any{},
 			},
+			"allowManagedHooksOnly": map[string]any{
+				"type":        "boolean",
+				"description": "When true (and set in managed settings), only hooks from managed settings run",
+			},
+			"allowedHttpHookUrls": map[string]any{
+				"type":        "array",
+				"description": "Allowlist of URL patterns that HTTP hooks may target",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
+			"httpHookAllowedEnvVars": map[string]any{
+				"type":        "array",
+				"description": "Allowlist of environment variables HTTP hooks may interpolate into headers",
+				"items": map[string]any{
+					"type": "string",
+				},
+			},
 			"disableAllHooks": map[string]any{
 				"type":        "boolean",
 				"description": "Disable all hook execution",
@@ -241,6 +259,14 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			issues = append(issues, validatePermissionsField(objectValue[key])...)
 		case "hooks":
 			issues = append(issues, validateHooksField(key, objectValue[key])...)
+		case "allowManagedHooksOnly":
+			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
+		case "allowedHttpHookUrls", "httpHookAllowedEnvVars":
+			if issue, ok := validateStringArrayEntriesField(key, objectValue[key]); ok {
+				issues = append(issues, issue)
+			}
 		case "disableAllHooks":
 			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
@@ -354,6 +380,27 @@ func validateBooleanField(path string, value any) (ValidationIssue, bool) {
 		Path:    path,
 		Message: fmt.Sprintf("Expected boolean, but received %s", jsonTypeName(value)),
 	}, true
+}
+
+// validateStringArrayEntriesField verifies a top-level array of strings field.
+func validateStringArrayEntriesField(path string, value any) (ValidationIssue, bool) {
+	entries, ok := value.([]any)
+	if !ok {
+		return ValidationIssue{
+			Path:    path,
+			Message: fmt.Sprintf("Expected array, but received %s", jsonTypeName(value)),
+		}, true
+	}
+	for idx, entry := range entries {
+		if _, ok := entry.(string); ok {
+			continue
+		}
+		return ValidationIssue{
+			Path:    fmt.Sprintf("%s.%d", path, idx),
+			Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(entry)),
+		}, true
+	}
+	return ValidationIssue{}, false
 }
 
 // validateObjectField verifies a top-level object field without constraining nested values.

@@ -724,6 +724,54 @@ func TestToolInvokeRejectsInvalidSettingsEditsWithEnv(t *testing.T) {
 	}
 }
 
+// TestToolInvokeAcceptsAddingHooksPolicyFieldsToValidSettings verifies FileEditTool accepts hooks policy fields once the schema is aligned.
+func TestToolInvokeAcceptsAddingHooksPolicyFieldsToValidSettings(t *testing.T) {
+	projectDir := t.TempDir()
+	settingsDir := filepath.Join(projectDir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	filePath := filepath.Join(settingsDir, "settings.json")
+	mustWriteFile(t, filePath, "{\n  \"model\": \"sonnet\"\n}\n")
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	policy, err := newAllowWritePolicy(projectDir)
+	if err != nil {
+		t.Fatalf("newAllowWritePolicy() error = %v", err)
+	}
+
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path":  ".claude/settings.json",
+			"old_string": "\"sonnet\"",
+			"new_string": "\"sonnet\",\n  \"allowManagedHooksOnly\": true,\n  \"allowedHttpHookUrls\": [\"https://hooks.example.com/*\"],\n  \"httpHookAllowedEnvVars\": [\"MY_TOKEN\"]\n",
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+			ReadState: coretool.ReadStateSnapshot{
+				Files: map[string]coretool.ReadState{
+					filePath: {
+						ReadAt:          time.Unix(100, 0),
+						ObservedModTime: info.ModTime(),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q, want hooks policy fields to be accepted after code changes", result.Error)
+	}
+}
+
 // TestToolInvokeAllowsRepairingAlreadyInvalidSettings verifies edits can proceed when the original settings file is already invalid.
 func TestToolInvokeAllowsRepairingAlreadyInvalidSettings(t *testing.T) {
 	projectDir := t.TempDir()

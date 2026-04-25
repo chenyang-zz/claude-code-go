@@ -509,6 +509,37 @@ func TestFileLoaderLoadCoercesSettingsEnvValues(t *testing.T) {
 	}
 }
 
+// TestFileLoaderLoadPreservesHooksPolicyFields verifies hooks-related policy fields survive loader parsing.
+func TestFileLoaderLoadPreservesHooksPolicyFields(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "settings.json"), []byte(`{"allowManagedHooksOnly":true,"allowedHttpHookUrls":["https://hooks.example.com/*"],"httpHookAllowedEnvVars":["MY_TOKEN"]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !cfg.HasAllowManagedHooksOnlySetting || !cfg.AllowManagedHooksOnly {
+		t.Fatalf("Load() allowManagedHooksOnly = %v (has=%v), want true with explicit setting", cfg.AllowManagedHooksOnly, cfg.HasAllowManagedHooksOnlySetting)
+	}
+	if !cfg.HasAllowedHttpHookUrls || len(cfg.AllowedHttpHookUrls) != 1 || cfg.AllowedHttpHookUrls[0] != "https://hooks.example.com/*" {
+		t.Fatalf("Load() allowedHttpHookUrls = %#v (has=%v), want one hooks URL", cfg.AllowedHttpHookUrls, cfg.HasAllowedHttpHookUrls)
+	}
+	if !cfg.HasHttpHookAllowedEnvVars || len(cfg.HttpHookAllowedEnvVars) != 1 || cfg.HttpHookAllowedEnvVars[0] != "MY_TOKEN" {
+		t.Fatalf("Load() httpHookAllowedEnvVars = %#v (has=%v), want one env var", cfg.HttpHookAllowedEnvVars, cfg.HasHttpHookAllowedEnvVars)
+	}
+}
+
 // TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv verifies trusted `--settings` env entries still merge after on-disk settings.
 func TestFileLoaderLoadFlagSettingsEnvOverridesDiskEnv(t *testing.T) {
 	tempDir := t.TempDir()

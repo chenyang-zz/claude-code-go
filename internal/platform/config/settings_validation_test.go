@@ -49,6 +49,17 @@ func TestValidateSettingsContentAcceptsExpandedFields(t *testing.T) {
 	}
 }
 
+// TestValidateSettingsContentAcceptsHooksPolicyFields verifies the hooks-related settings subset is schema-validated.
+func TestValidateSettingsContentAcceptsHooksPolicyFields(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"allowManagedHooksOnly\": true,\n  \"allowedHttpHookUrls\": [\"https://hooks.example.com/*\"],\n  \"httpHookAllowedEnvVars\": [\"MY_TOKEN\"]\n}\n")
+	if !result.IsValid {
+		t.Fatalf("ValidateSettingsContent() valid = false, error = %q", result.Error)
+	}
+	if !strings.Contains(result.FullSchema, "\"allowManagedHooksOnly\"") || !strings.Contains(result.FullSchema, "\"allowedHttpHookUrls\"") || !strings.Contains(result.FullSchema, "\"httpHookAllowedEnvVars\"") {
+		t.Fatalf("ValidateSettingsContent() fullSchema = %q, want hooks policy fields schema", result.FullSchema)
+	}
+}
+
 // TestValidateSettingsContentAcceptsEnvField verifies settings env is part of the supported schema subset.
 func TestValidateSettingsContentAcceptsEnvField(t *testing.T) {
 	result := ValidateSettingsContent("{\n  \"env\": {\n    \"COUNT\": 3,\n    \"ENABLED\": true,\n    \"NAME\": \"claude\"\n  }\n}\n")

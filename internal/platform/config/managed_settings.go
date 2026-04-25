@@ -154,6 +154,9 @@ func hasLoadedSettingsValues(cfg coreconfig.Config) bool {
 		cfg.OAuthAccount.EmailAddress != "" ||
 		cfg.OAuthAccount.OrganizationUUID != "" ||
 		cfg.OAuthAccount.OrganizationName != "" ||
+		cfg.HasAllowManagedHooksOnlySetting ||
+		cfg.HasAllowedHttpHookUrls ||
+		cfg.HasHttpHookAllowedEnvVars ||
 		len(cfg.Permissions.Allow) > 0 ||
 		len(cfg.Permissions.Deny) > 0 ||
 		len(cfg.Permissions.Ask) > 0 ||

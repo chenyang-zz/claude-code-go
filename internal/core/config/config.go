@@ -76,6 +76,18 @@ type Config struct {
 	Permissions PermissionConfig
 	// Hooks stores the hook configuration loaded from settings, keyed by event name.
 	Hooks hook.HooksConfig
+	// AllowManagedHooksOnly restricts hook execution to managed settings when explicitly configured.
+	AllowManagedHooksOnly bool
+	// HasAllowManagedHooksOnlySetting reports whether AllowManagedHooksOnly was explicitly set by settings.
+	HasAllowManagedHooksOnlySetting bool
+	// AllowedHttpHookUrls stores the allowlist of URL patterns that HTTP hooks may target.
+	AllowedHttpHookUrls []string
+	// HasAllowedHttpHookUrls reports whether AllowedHttpHookUrls was explicitly configured.
+	HasAllowedHttpHookUrls bool
+	// HttpHookAllowedEnvVars stores the allowlist of environment variables HTTP hook headers may interpolate.
+	HttpHookAllowedEnvVars []string
+	// HasHttpHookAllowedEnvVars reports whether HttpHookAllowedEnvVars was explicitly configured.
+	HasHttpHookAllowedEnvVars bool
 	// DisableAllHooks disables all hook execution when set via policy settings.
 	DisableAllHooks bool
 	// OutputFormat selects the output rendering mode (e.g. "console" or "stream-json").

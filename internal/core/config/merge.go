@@ -82,6 +82,18 @@ func Merge(base, override Config) Config {
 	}
 	base.Permissions = mergePermissionConfig(base.Permissions, override.Permissions)
 	base.Hooks = hook.MergeHooksConfig(base.Hooks, override.Hooks)
+	if override.HasAllowManagedHooksOnlySetting {
+		base.AllowManagedHooksOnly = override.AllowManagedHooksOnly
+		base.HasAllowManagedHooksOnlySetting = true
+	}
+	if override.HasAllowedHttpHookUrls {
+		base.AllowedHttpHookUrls = append([]string(nil), override.AllowedHttpHookUrls...)
+		base.HasAllowedHttpHookUrls = true
+	}
+	if override.HasHttpHookAllowedEnvVars {
+		base.HttpHookAllowedEnvVars = append([]string(nil), override.HttpHookAllowedEnvVars...)
+		base.HasHttpHookAllowedEnvVars = true
+	}
 	if override.DisableAllHooks {
 		base.DisableAllHooks = true
 	}

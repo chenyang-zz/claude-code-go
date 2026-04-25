@@ -32,15 +32,18 @@ type FileLoader struct {
 }
 
 type settingsFile struct {
-	Model         string         `json:"model"`
-	EffortLevel   *string        `json:"effortLevel"`
-	FastMode      *bool          `json:"fastMode"`
-	Theme         string         `json:"theme"`
-	EditorMode    string         `json:"editorMode"`
-	Provider      string         `json:"provider"`
-	SessionDBPath string         `json:"sessionDbPath"`
-	Env           map[string]any `json:"env"`
-	OAuthAccount  struct {
+	Model                  string         `json:"model"`
+	EffortLevel            *string        `json:"effortLevel"`
+	FastMode               *bool          `json:"fastMode"`
+	Theme                  string         `json:"theme"`
+	EditorMode             string         `json:"editorMode"`
+	Provider               string         `json:"provider"`
+	SessionDBPath          string         `json:"sessionDbPath"`
+	Env                    map[string]any `json:"env"`
+	AllowManagedHooksOnly  *bool          `json:"allowManagedHooksOnly"`
+	AllowedHttpHookUrls    []string       `json:"allowedHttpHookUrls"`
+	HttpHookAllowedEnvVars []string       `json:"httpHookAllowedEnvVars"`
+	OAuthAccount           struct {
 		AccountUUID      string `json:"accountUuid"`
 		EmailAddress     string `json:"emailAddress"`
 		OrganizationUUID string `json:"organizationUuid"`
@@ -370,8 +373,14 @@ func parseSettingsConfig(data []byte, source string, settingSource SettingSource
 			AdditionalDirectoryEntries:   directoryEntries,
 			DisableBypassPermissionsMode: parsed.Permissions.DisableBypassPermissionsMode,
 		},
-		Hooks:           hooksCfg,
-		DisableAllHooks: parsed.DisableAllHooks,
+		Hooks:                           hooksCfg,
+		AllowManagedHooksOnly:           parsed.AllowManagedHooksOnly != nil && *parsed.AllowManagedHooksOnly,
+		HasAllowManagedHooksOnlySetting: parsed.AllowManagedHooksOnly != nil,
+		AllowedHttpHookUrls:             append([]string(nil), parsed.AllowedHttpHookUrls...),
+		HasAllowedHttpHookUrls:          parsed.AllowedHttpHookUrls != nil,
+		HttpHookAllowedEnvVars:          append([]string(nil), parsed.HttpHookAllowedEnvVars...),
+		HasHttpHookAllowedEnvVars:       parsed.HttpHookAllowedEnvVars != nil,
+		DisableAllHooks:                 parsed.DisableAllHooks,
 	}, nil
 }
 
