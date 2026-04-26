@@ -32,8 +32,13 @@ func (c HelpCommand) Execute(ctx context.Context, args command.Args) (command.Re
 	lines := []string{
 		"Available commands:",
 	}
+	visibleCount := 0
 	for _, registered := range c.Registry.List() {
 		meta := registered.Metadata()
+		if meta.Hidden {
+			continue
+		}
+		visibleCount++
 		lines = append(lines, fmt.Sprintf("/%s - %s", meta.Name, meta.Description))
 		if len(meta.Aliases) > 0 {
 			aliases := make([]string, 0, len(meta.Aliases))
@@ -49,7 +54,7 @@ func (c HelpCommand) Execute(ctx context.Context, args command.Args) (command.Re
 	lines = append(lines, "Send plain text without a leading slash to start a normal prompt.")
 
 	logger.DebugCF("commands", "rendered help command output", map[string]any{
-		"command_count": len(c.Registry.List()),
+		"visible_command_count": visibleCount,
 	})
 
 	return command.Result{

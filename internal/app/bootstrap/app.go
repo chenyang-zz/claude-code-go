@@ -326,6 +326,21 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.TagCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.ColorCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.PassesCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.RateLimitOptionsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.SandboxCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.StickersCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.PrivacySettingsCommand{}); err != nil {
 		return nil, err
 	}

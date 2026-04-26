@@ -12,6 +12,8 @@ type Metadata struct {
 	Description string
 	// Usage documents the minimum stable invocation form.
 	Usage string
+	// Hidden suppresses the command from /help while keeping it executable via direct slash invocation.
+	Hidden bool
 }
 
 // Result captures the minimum side effects a slash command can request from the REPL.

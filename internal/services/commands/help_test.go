@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -289,6 +290,42 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Register(tag) error = %v", err)
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "color",
+		Description: "Set the prompt bar color for this session",
+		Usage:       "/color <color|default>",
+	}}); err != nil {
+		t.Fatalf("Register(color) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "passes",
+		Description: "Share a free week of Claude Code with friends",
+		Usage:       "/passes",
+	}}); err != nil {
+		t.Fatalf("Register(passes) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "rate-limit-options",
+		Description: "Show options when rate limit is reached",
+		Usage:       "/rate-limit-options",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(rate-limit-options) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "sandbox",
+		Description: "Configure sandbox settings",
+		Usage:       "/sandbox [exclude <command-pattern>]",
+	}}); err != nil {
+		t.Fatalf("Register(sandbox) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "stickers",
+		Description: "Order Claude Code stickers",
+		Usage:       "/stickers",
+	}}); err != nil {
+		t.Fatalf("Register(stickers) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "privacy-settings",
 		Description: "View and update your privacy settings",
 		Usage:       "/privacy-settings",
@@ -443,8 +480,11 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/ide - Manage IDE integrations and show status\n  Usage: /ide [open]\n/init - Initialize a new CLAUDE.md file with codebase documentation\n/install-github-app - Set up Claude GitHub Actions for a repository\n/install-slack-app - Install the Claude Slack app\n/remote-env - Configure the default remote environment for teleport sessions\n/desktop - Continue the current session in Claude Desktop\n  Aliases: /app\n/mobile - Show QR code to download the Claude mobile app\n  Aliases: /ios, /android\n/feedback - Submit feedback about Claude Code\n  Aliases: /bug\n  Usage: /feedback [report]\n/exit - Exit the REPL\n  Aliases: /quit\n/install - Install Claude Code native build\n  Usage: /install [options]\n/context - Show current context usage\n/review - Review a pull request\n  Usage: /review [pr-number]\n/rewind - Restore the code and/or conversation to a previous point\n  Aliases: /checkpoint\n/skills - List available skills\n/tag - Toggle a searchable tag on the current session\n  Usage: /tag <tag-name>\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/ide - Manage IDE integrations and show status\n  Usage: /ide [open]\n/init - Initialize a new CLAUDE.md file with codebase documentation\n/install-github-app - Set up Claude GitHub Actions for a repository\n/install-slack-app - Install the Claude Slack app\n/remote-env - Configure the default remote environment for teleport sessions\n/desktop - Continue the current session in Claude Desktop\n  Aliases: /app\n/mobile - Show QR code to download the Claude mobile app\n  Aliases: /ios, /android\n/feedback - Submit feedback about Claude Code\n  Aliases: /bug\n  Usage: /feedback [report]\n/exit - Exit the REPL\n  Aliases: /quit\n/install - Install Claude Code native build\n  Usage: /install [options]\n/context - Show current context usage\n/review - Review a pull request\n  Usage: /review [pr-number]\n/rewind - Restore the code and/or conversation to a previous point\n  Aliases: /checkpoint\n/skills - List available skills\n/tag - Toggle a searchable tag on the current session\n  Usage: /tag <tag-name>\n/color - Set the prompt bar color for this session\n  Usage: /color <color|default>\n/passes - Share a free week of Claude Code with friends\n/sandbox - Configure sandbox settings\n  Usage: /sandbox [exclude <command-pattern>]\n/stickers - Order Claude Code stickers\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
+	}
+	if strings.Contains(result.Output, "/rate-limit-options -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /rate-limit-options command: %q", result.Output)
 	}
 }
