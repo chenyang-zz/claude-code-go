@@ -170,6 +170,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		cfg = coreconfig.Merge(cfg, flagCfg)
 	}
 	cfg.LoadedSettingSources = append([]string(nil), loadedSettingSources...)
+	cfg.ManagedSettingsDir = l.managedSettingsDir()
 	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")))
 
 	envLookup := l.runtimeEnvLookup(cfg.Env)

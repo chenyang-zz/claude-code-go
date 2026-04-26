@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -42,6 +43,10 @@ func (m *mockRegistry) Remove(agentType string) bool {
 }
 
 func TestRegisterBuiltInAgents_RegistersAll(t *testing.T) {
+	// Enable all feature flags so all agents are registered.
+	t.Setenv("CLAUDE_FEATURE_BUILTIN_EXPLORE_PLAN_AGENTS", "1")
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+
 	reg := &mockRegistry{}
 	if err := RegisterBuiltInAgents(reg); err != nil {
 		t.Fatalf("RegisterBuiltInAgents failed: %v", err)
@@ -85,7 +90,44 @@ func TestRegisterBuiltInAgents_RegistersAll(t *testing.T) {
 	}
 }
 
+func TestRegisterBuiltInAgents_DefaultRegistersOnlyUnconditional(t *testing.T) {
+	// Ensure feature flags are NOT set.
+	os.Unsetenv("CLAUDE_FEATURE_BUILTIN_EXPLORE_PLAN_AGENTS")
+	os.Unsetenv("CLAUDE_FEATURE_VERIFICATION_AGENT")
+
+	reg := &mockRegistry{}
+	if err := RegisterBuiltInAgents(reg); err != nil {
+		t.Fatalf("RegisterBuiltInAgents failed: %v", err)
+	}
+
+	wantTypes := map[string]bool{
+		"general-purpose":   false,
+		"statusline-setup":  false,
+		"claude-code-guide": false,
+	}
+
+	if len(reg.defs) != len(wantTypes) {
+		t.Fatalf("registered %d agents, want %d", len(reg.defs), len(wantTypes))
+	}
+
+	for _, def := range reg.defs {
+		if _, ok := wantTypes[def.AgentType]; !ok {
+			t.Errorf("unexpected agent type registered: %q", def.AgentType)
+			continue
+		}
+		wantTypes[def.AgentType] = true
+	}
+
+	for agentType, found := range wantTypes {
+		if !found {
+			t.Errorf("agent %q was not registered", agentType)
+		}
+	}
+}
+
 func TestRegisterBuiltInAgents_ExploreHasCorrectFields(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_BUILTIN_EXPLORE_PLAN_AGENTS", "1")
+
 	reg := &mockRegistry{}
 	if err := RegisterBuiltInAgents(reg); err != nil {
 		t.Fatalf("RegisterBuiltInAgents failed: %v", err)
@@ -136,6 +178,8 @@ func TestRegisterBuiltInAgents_GeneralPurposeHasCorrectFields(t *testing.T) {
 }
 
 func TestRegisterBuiltInAgents_PlanHasCorrectFields(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_BUILTIN_EXPLORE_PLAN_AGENTS", "1")
+
 	reg := &mockRegistry{}
 	if err := RegisterBuiltInAgents(reg); err != nil {
 		t.Fatalf("RegisterBuiltInAgents failed: %v", err)
@@ -158,6 +202,8 @@ func TestRegisterBuiltInAgents_PlanHasCorrectFields(t *testing.T) {
 }
 
 func TestRegisterBuiltInAgents_VerificationHasCorrectFields(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_VERIFICATION_AGENT", "1")
+
 	reg := &mockRegistry{}
 	if err := RegisterBuiltInAgents(reg); err != nil {
 		t.Fatalf("RegisterBuiltInAgents failed: %v", err)

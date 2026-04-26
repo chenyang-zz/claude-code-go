@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
@@ -23,6 +24,8 @@ type TeamStatusProvider interface {
 type AgentsCommand struct {
 	// StatusProvider supplies the current team summary for read-only rendering.
 	StatusProvider TeamStatusProvider
+	// Registry provides access to registered agent definitions for listing.
+	Registry agent.Registry
 }
 
 // Metadata returns the canonical slash descriptor for /agents.
@@ -36,39 +39,46 @@ func (c AgentsCommand) Metadata() command.Metadata {
 
 // Execute reports the stable /agents fallback supported by the current Go host.
 func (c AgentsCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
-	_ = ctx
 	_ = args
 
-	if c.StatusProvider == nil {
+	var output string
+	if c.StatusProvider != nil {
+		status, err := c.StatusProvider.CurrentTeamStatus(ctx)
+		if err != nil {
+			logger.DebugCF("commands", "failed to load agents command status", map[string]any{
+				"error": err.Error(),
+			})
+			output = agentsCommandFallback
+		} else if status != nil {
+			output = renderAgentsOutput(status)
+			logger.DebugCF("commands", "rendered agents command output", map[string]any{
+				"agent_configuration_available": true,
+				"team_name":                     status.TeamName,
+				"member_count":                  len(status.Members),
+			})
+		}
+	}
+
+	// Append agent definitions listing when registry is available.
+	if c.Registry != nil {
+		defs := c.Registry.List()
+		if len(defs) > 0 {
+			sort.Slice(defs, func(i, j int) bool {
+				return defs[i].AgentType < defs[j].AgentType
+			})
+			if output != "" {
+				output += "\n\n"
+			}
+			output += renderAgentDefinitions(defs)
+		}
+	}
+
+	if output == "" {
+		output = agentsCommandFallback
 		logger.DebugCF("commands", "rendered agents command fallback output", map[string]any{
 			"agent_configuration_available": false,
 		})
-		return command.Result{
-			Output: agentsCommandFallback,
-		}, nil
 	}
-
-	status, err := c.StatusProvider.CurrentTeamStatus(ctx)
-	if err != nil {
-		logger.DebugCF("commands", "failed to load agents command status", map[string]any{
-			"error": err.Error(),
-		})
-		return command.Result{
-			Output: agentsCommandFallback,
-		}, nil
-	}
-	if status == nil {
-		return command.Result{
-			Output: "No team configuration found.\nAgent status summary is not available in this session.",
-		}, nil
-	}
-
-	output := renderAgentsOutput(status)
-	logger.DebugCF("commands", "rendered agents command fallback output", map[string]any{
-		"agent_configuration_available": true,
-		"team_name":                     status.TeamName,
-		"member_count":                  len(status.Members),
-	})
 
 	return command.Result{
 		Output: output,
@@ -110,4 +120,21 @@ func renderAgentStatusLine(status agent.Status) string {
 		line += fmt.Sprintf(" [%s]", strings.Join(status.CurrentTasks, ", "))
 	}
 	return line
+}
+
+// renderAgentDefinitions formats registered agent definitions with color markers.
+func renderAgentDefinitions(defs []agent.Definition) string {
+	if len(defs) == 0 {
+		return ""
+	}
+	var lines []string
+	lines = append(lines, "Registered agents:")
+	for _, def := range defs {
+		line := fmt.Sprintf("- %s: %s", def.AgentType, def.WhenToUse)
+		if def.Color != "" {
+			line += fmt.Sprintf(" [color: %s]", def.Color)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }

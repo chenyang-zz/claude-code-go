@@ -19,6 +19,12 @@ const (
 	// When enabled, completing the last task in a 3+ item list triggers a nudge
 	// to spawn a verification agent if no verification step was present.
 	FlagVerificationAgent = "VERIFICATION_AGENT"
+	// FlagBuiltinExplorePlanAgents gates the Explore and Plan built-in agents.
+	// When enabled, these agents are registered in the built-in agent registry.
+	FlagBuiltinExplorePlanAgents = "BUILTIN_EXPLORE_PLAN_AGENTS"
+	// FlagCoordinatorMode gates the coordinator mode agents.
+	// When enabled, coordinator-specific agents are registered.
+	FlagCoordinatorMode = "COORDINATOR_MODE"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

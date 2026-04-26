@@ -14,6 +14,8 @@ type AgentInfo struct {
 	AgentType string
 	// WhenToUse describes when this agent should be invoked.
 	WhenToUse string
+	// Color is the display color for this agent, if set.
+	Color string
 }
 
 // SessionConfigSnapshot captures the minimal session configuration visible to guide agent prompts.

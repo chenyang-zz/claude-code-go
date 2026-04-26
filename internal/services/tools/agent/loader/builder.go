@@ -64,17 +64,17 @@ func BuildDefinitionFromFrontmatter(
 
 	// Tools: nil means all tools, [] means no tools, ["*"] means all tools (nil).
 	if v, ok := fm["tools"]; ok {
-		def.Tools = parseAgentTools(v)
+		def.Tools = ParseAgentTools(v)
 	}
 
 	// DisallowedTools: same parsing semantics as tools.
 	if v, ok := fm["disallowedTools"]; ok {
-		def.DisallowedTools = parseAgentTools(v)
+		def.DisallowedTools = ParseAgentTools(v)
 	}
 
 	// Skills: comma-separated string or YAML list.
 	if v, ok := fm["skills"]; ok {
-		def.Skills = parseSkillList(v)
+		def.Skills = ParseSkillList(v)
 	}
 
 	// Model: trim whitespace; preserve "inherit" verbatim.
@@ -89,7 +89,7 @@ func BuildDefinitionFromFrontmatter(
 
 	// Effort: string level or integer. Invalid values are silently ignored.
 	if v, ok := fm["effort"]; ok {
-		if effort := parseEffort(v); effort != "" {
+		if effort := ParseEffort(v); effort != "" {
 			def.Effort = effort
 		}
 	}
@@ -103,14 +103,14 @@ func BuildDefinitionFromFrontmatter(
 
 	// MaxTurns: positive integer. Invalid values are silently ignored.
 	if v, ok := fm["maxTurns"]; ok {
-		if n := parsePositiveInt(v); n > 0 {
+		if n := ParsePositiveInt(v); n > 0 {
 			def.MaxTurns = n
 		}
 	}
 
 	// Background: only true for literal true or "true" string.
 	if v, ok := fm["background"]; ok {
-		def.Background = parseBool(v)
+		def.Background = ParseBool(v)
 	}
 
 	// Memory: validate against known scopes.
@@ -134,21 +134,21 @@ func BuildDefinitionFromFrontmatter(
 
 	// Color: validate against known color names.
 	if v := getString(fm, "color"); v != "" {
-		if c := parseAgentColor(v); c != "" {
+		if c := ParseAgentColor(v); c != "" {
 			def.Color = c
 		}
 	}
 
 	// MCPServers: parse array of server references or inline definitions.
 	if v, ok := fm["mcpServers"]; ok {
-		if servers := parseAgentMCPServers(v); len(servers) > 0 {
+		if servers := ParseAgentMCPServers(v); len(servers) > 0 {
 			def.MCPServers = servers
 		}
 	}
 
 	// Hooks: parse session-scoped hooks.
 	if v, ok := fm["hooks"]; ok {
-		if hooksCfg := parseAgentHooks(v); hooksCfg != nil {
+		if hooksCfg := ParseAgentHooks(v); hooksCfg != nil {
 			def.Hooks = hooksCfg
 		}
 	}
@@ -170,14 +170,14 @@ func getString(fm map[string]any, key string) string {
 	return s
 }
 
-// parseAgentTools parses the tools or disallowedTools frontmatter value.
+// ParseAgentTools parses the tools or disallowedTools value.
 //
 // Semantics aligned with TypeScript parseAgentToolsFromFrontmatter:
 //   - nil / missing → nil (all tools available)
 //   - empty string or empty array → [] (no tools)
 //   - contains "*" → nil (all tools available)
 //   - otherwise → string slice of tool names
-func parseAgentTools(v any) []string {
+func ParseAgentTools(v any) []string {
 	if v == nil {
 		return nil
 	}
@@ -209,9 +209,9 @@ func parseAgentTools(v any) []string {
 	return items
 }
 
-// parseSkillList parses the skills frontmatter value.
-// Supports comma-separated string or YAML string array.
-func parseSkillList(v any) []string {
+// ParseSkillList parses the skills value.
+// Supports comma-separated string or string array.
+func ParseSkillList(v any) []string {
 	if v == nil {
 		return nil
 	}
@@ -243,10 +243,10 @@ func parseSkillList(v any) []string {
 	}
 }
 
-// parseEffort validates and normalizes an effort value from frontmatter.
+// ParseEffort validates and normalizes an effort value.
 // Accepts known level strings or positive integers.
 // Returns empty string for invalid values.
-func parseEffort(v any) string {
+func ParseEffort(v any) string {
 	if s, ok := v.(string); ok {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -277,9 +277,9 @@ func parseEffort(v any) string {
 	return ""
 }
 
-// parsePositiveInt parses a positive integer from frontmatter.
+// ParsePositiveInt parses a positive integer.
 // Returns 0 for missing, zero, negative, or non-numeric values.
-func parsePositiveInt(v any) int {
+func ParsePositiveInt(v any) int {
 	switch val := v.(type) {
 	case int:
 		if val > 0 {
@@ -305,9 +305,9 @@ var validAgentColors = []string{
 	"purple", "orange", "pink", "cyan",
 }
 
-// parseAgentColor validates an agent color value from frontmatter.
+// ParseAgentColor validates an agent color value.
 // Returns the color name if it is in the valid set, otherwise empty string.
-func parseAgentColor(v string) string {
+func ParseAgentColor(v string) string {
 	v = strings.TrimSpace(strings.ToLower(v))
 	if slices.Contains(validAgentColors, v) {
 		return v
@@ -315,19 +315,15 @@ func parseAgentColor(v string) string {
 	return ""
 }
 
-// parseAgentMCPServers parses the mcpServers frontmatter value.
+// ParseAgentMCPServers parses the mcpServers value.
 //
-// Expected frontmatter structure (YAML):
-//   mcpServers:
-//     - slack                    # reference by name
-//     - my-server:               # inline definition
-//         type: stdio
-//         command: npx
-//         args: ["-y", "@modelcontextprotocol/server-filesystem"]
+// Expected structure:
+//   ["slack"]                    # reference by name
+//   [{"my-server": {...}}]       # inline definition
 //
 // Returns nil for non-array input or when all elements are invalid.
 // Invalid individual elements are silently skipped.
-func parseAgentMCPServers(v any) []agent.AgentMCPServerSpec {
+func ParseAgentMCPServers(v any) []agent.AgentMCPServerSpec {
 	arr, ok := v.([]any)
 	if !ok {
 		return nil
@@ -368,18 +364,17 @@ func parseAgentMCPServers(v any) []agent.AgentMCPServerSpec {
 	return result
 }
 
-// parseAgentHooks parses the hooks frontmatter value into a HooksConfig.
+// ParseAgentHooks parses the hooks value into a HooksConfig.
 //
-// Expected frontmatter structure (YAML):
-//   hooks:
-//     PreToolUse:
-//       - matcher: Bash
-//         hooks:
-//           - type: command
-//             command: echo "before tool"
+// Expected structure:
+//   {
+//     "PreToolUse": [
+//       { "matcher": "Bash", "hooks": [{"type": "command", "command": "echo"}] }
+//     ]
+//   }
 //
 // Returns nil for missing or invalid input.
-func parseAgentHooks(v any) hook.HooksConfig {
+func ParseAgentHooks(v any) hook.HooksConfig {
 	if v == nil {
 		return nil
 	}
@@ -404,10 +399,10 @@ func parseAgentHooks(v any) hook.HooksConfig {
 	return cfg
 }
 
-// parseBool parses a boolean frontmatter value.
+// ParseBool parses a boolean value.
 // Only returns true for literal true or "true" string (case-insensitive).
 // All other values (including "false", false, nil, strings) return false.
-func parseBool(v any) bool {
+func ParseBool(v any) bool {
 	if b, ok := v.(bool); ok {
 		return b
 	}

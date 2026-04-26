@@ -134,7 +134,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		localSettingsStore = platformconfig.NewLocalSettingsStore(fileLoader.CWD)
 	}
 
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore)
+	agentRegistry := resolveAgentRegistry(cfg)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore, agentRegistry)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +164,7 @@ func configureConsoleLogging(outputFormat string) {
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, agentRegistry agent.Registry) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -354,6 +355,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}
 	if err := registry.Register(servicecommands.AgentsCommand{
 		StatusProvider: platformteam.NewReader(cfg.HomeDir, taskStore),
+		Registry:       agentRegistry,
 	}); err != nil {
 		return nil, err
 	}
@@ -568,6 +570,7 @@ func buildSessionConfigSnapshot(cfg coreconfig.Config, agentRegistry agent.Regis
 				snapshot.CustomAgents = append(snapshot.CustomAgents, coretool.AgentInfo{
 					AgentType: def.AgentType,
 					WhenToUse: def.WhenToUse,
+					Color:     def.Color,
 				})
 			}
 		}
@@ -706,9 +709,10 @@ func applyOpenAIAdvancedDefaults(r *engine.Runtime) {
 
 // resolveAgentRegistry returns the agent registry used by the engine runtime.
 // It creates an in-memory registry, registers built-in agents, and loads custom
-// agents from user and project directories. Agents are loaded in priority order
-// (built-in → user → project) so that later sources override earlier ones when
-// names collide, matching TypeScript getActiveAgentsFromList.
+// agents from user, project, local, and managed directories. Agents are loaded
+// in priority order (built-in → user → project → local → managed) so that later
+// sources override earlier ones when names collide, matching TypeScript
+// getActiveAgentsFromList.
 func resolveAgentRegistry(cfg coreconfig.Config) agent.Registry {
 	registry := agent.NewInMemoryRegistry()
 
@@ -756,6 +760,56 @@ func resolveAgentRegistry(cfg coreconfig.Config) agent.Registry {
 			registry.Remove(def.AgentType)
 			if regErr := registry.Register(def); regErr != nil {
 				logger.WarnCF("bootstrap", "failed to register project agent", map[string]any{
+					"agent": def.AgentType,
+					"error": regErr.Error(),
+				})
+			}
+		}
+	}
+
+	// Load local-scoped agents if the source is enabled.
+	// Local agents share the same physical directory as project agents
+	// (.claude/agents/) but use source "localSettings" for priority tracking.
+	if isAgentSourceEnabled("localSettings", cfg.LoadedSettingSources) {
+		localAgents, loadErrors, err := loader.LoadLocalAgents(cfg.ProjectPath)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load local agents", map[string]any{"error": err.Error()})
+		}
+		for _, loadErr := range loadErrors {
+			logger.WarnCF("bootstrap", "local agent load error", map[string]any{
+				"path":  loadErr.Path,
+				"error": loadErr.Error,
+			})
+		}
+		for _, def := range localAgents {
+			registry.Remove(def.AgentType)
+			if regErr := registry.Register(def); regErr != nil {
+				logger.WarnCF("bootstrap", "failed to register local agent", map[string]any{
+					"agent": def.AgentType,
+					"error": regErr.Error(),
+				})
+			}
+		}
+	}
+
+	// Load managed (policySettings) agents if the source is enabled.
+	// Managed agents have the highest priority and are loaded last so they
+	// override all other sources, matching TypeScript behavior.
+	if isAgentSourceEnabled("policySettings", cfg.LoadedSettingSources) {
+		managedAgents, loadErrors, err := loader.LoadManagedAgents(cfg.ManagedSettingsDir)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load managed agents", map[string]any{"error": err.Error()})
+		}
+		for _, loadErr := range loadErrors {
+			logger.WarnCF("bootstrap", "managed agent load error", map[string]any{
+				"path":  loadErr.Path,
+				"error": loadErr.Error,
+			})
+		}
+		for _, def := range managedAgents {
+			registry.Remove(def.AgentType)
+			if regErr := registry.Register(def); regErr != nil {
+				logger.WarnCF("bootstrap", "failed to register managed agent", map[string]any{
 					"agent": def.AgentType,
 					"error": regErr.Error(),
 				})

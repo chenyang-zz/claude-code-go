@@ -550,7 +550,7 @@ func TestParseAgentColor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
-			got := parseAgentColor(tc.input)
+			got := ParseAgentColor(tc.input)
 			assert.Equal(t, tc.expected, got)
 		})
 	}
@@ -598,7 +598,7 @@ func TestParseAgentMCPServers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseAgentMCPServers(tc.input)
+			got := ParseAgentMCPServers(tc.input)
 			assert.Equal(t, tc.expected, got)
 		})
 	}
@@ -633,7 +633,7 @@ func TestParseAgentHooks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseAgentHooks(tc.input)
+			got := ParseAgentHooks(tc.input)
 			if tc.expected {
 				assert.NotNil(t, got)
 			} else {

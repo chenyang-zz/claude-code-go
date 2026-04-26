@@ -10,6 +10,23 @@ import (
 	platformteam "github.com/sheepzhao/claude-code-go/internal/platform/team"
 )
 
+// fakeAgentRegistry is a test double for agent.Registry.
+type fakeAgentRegistry struct {
+	defs []agent.Definition
+}
+
+func (f fakeAgentRegistry) Register(def agent.Definition) error { return nil }
+func (f fakeAgentRegistry) Get(agentType string) (agent.Definition, bool) {
+	for _, d := range f.defs {
+		if d.AgentType == agentType {
+			return d, true
+		}
+	}
+	return agent.Definition{}, false
+}
+func (f fakeAgentRegistry) List() []agent.Definition { return f.defs }
+func (f fakeAgentRegistry) Remove(agentType string) bool { return false }
+
 // TestAgentsCommandMetadata verifies /agents is exposed with the expected canonical descriptor.
 func TestAgentsCommandMetadata(t *testing.T) {
 	meta := AgentsCommand{}.Metadata()
@@ -76,6 +93,102 @@ func TestAgentsCommandExecuteWithProvider(t *testing.T) {
 		if !strings.Contains(result.Output, want) {
 			t.Fatalf("Execute() output missing %q:\n%s", want, result.Output)
 		}
+	}
+}
+
+// TestAgentsCommandExecuteWithRegistry verifies /agents renders registered agents with colors.
+func TestAgentsCommandExecuteWithRegistry(t *testing.T) {
+	cmd := AgentsCommand{
+		Registry: fakeAgentRegistry{
+			defs: []agent.Definition{
+				{AgentType: "explore", WhenToUse: "Explore codebase", Color: "blue"},
+				{AgentType: "plan", WhenToUse: "Plan implementation", Color: "purple"},
+				{AgentType: "review", WhenToUse: "Review code", Color: ""},
+			},
+		},
+	}
+
+	result, err := cmd.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"Registered agents:",
+		"explore: Explore codebase [color: blue]",
+		"plan: Plan implementation [color: purple]",
+		"review: Review code",
+	} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("Execute() output missing %q:\n%s", want, result.Output)
+		}
+	}
+}
+
+// TestAgentsCommandExecuteWithProviderAndRegistry verifies /agents renders both team status and agent definitions.
+func TestAgentsCommandExecuteWithProviderAndRegistry(t *testing.T) {
+	cmd := AgentsCommand{
+		StatusProvider: fakeTeamStatusProvider{
+			status: &platformteam.Status{
+				TeamName: "alpha-team",
+				Members: []agent.Status{
+					{AgentID: "agent-1", Name: "researcher", AgentType: "research", Status: agent.StatusIdle},
+				},
+			},
+		},
+		Registry: fakeAgentRegistry{
+			defs: []agent.Definition{
+				{AgentType: "research", WhenToUse: "Research tasks", Color: "green"},
+			},
+		},
+	}
+
+	result, err := cmd.Execute(context.Background(), command.Args{})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"Agent status summary:",
+		"Team: alpha-team",
+		"researcher (research): idle",
+		"Registered agents:",
+		"research: Research tasks [color: green]",
+	} {
+		if !strings.Contains(result.Output, want) {
+			t.Fatalf("Execute() output missing %q:\n%s", want, result.Output)
+		}
+	}
+}
+
+// TestRenderAgentDefinitions verifies the agent definition rendering helper.
+func TestRenderAgentDefinitions(t *testing.T) {
+	defs := []agent.Definition{
+		{AgentType: "explore", WhenToUse: "Explore codebase", Color: "blue"},
+		{AgentType: "review", WhenToUse: "Review code", Color: ""},
+	}
+
+	output := renderAgentDefinitions(defs)
+	for _, want := range []string{
+		"Registered agents:",
+		"explore: Explore codebase [color: blue]",
+		"review: Review code",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("renderAgentDefinitions() missing %q:\n%s", want, output)
+		}
+	}
+}
+
+// TestRenderAgentDefinitionsEmpty verifies empty registry produces no output.
+func TestRenderAgentDefinitionsEmpty(t *testing.T) {
+	output := renderAgentDefinitions(nil)
+	if output != "" {
+		t.Fatalf("renderAgentDefinitions(nil) = %q, want empty string", output)
+	}
+	output = renderAgentDefinitions([]agent.Definition{})
+	if output != "" {
+		t.Fatalf("renderAgentDefinitions([]) = %q, want empty string", output)
 	}
 }
 

@@ -40,6 +40,8 @@ type Config struct {
 	APIBaseURL string
 	// LoadedSettingSources lists the migrated settings layers that actually participated in config loading.
 	LoadedSettingSources []string
+	// ManagedSettingsDir stores the resolved managed settings root directory used for policy-scoped agent loading.
+	ManagedSettingsDir string
 	// PolicySettings stores the minimum managed-settings source metadata surfaced by `/status`.
 	PolicySettings PolicySettingsConfig
 	// APIKeySource stores the environment key that supplied the effective API key when one is configured.
