@@ -73,6 +73,8 @@ type UseContext struct {
 	Invoker string
 	// ReadState stores the latest read snapshots that later write tools may consult.
 	ReadState ReadStateSnapshot
+	// SessionConfig carries the session-level configuration snapshot for dynamic prompt rendering.
+	SessionConfig SessionConfigSnapshot
 }
 
 // LookupReadState returns the recorded read state for one file path from the invocation context.

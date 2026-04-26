@@ -121,6 +121,9 @@ func (t *Tool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) 
 	})
 
 	runner := NewRunner(t.parentRuntime, t.registry)
+	if t.parentRuntime != nil {
+		runner.SessionConfig = t.parentRuntime.SessionConfig
+	}
 	output, err := runner.Run(ctx, input)
 	if err != nil {
 		logger.WarnCF("agent.tool", "agent run failed", map[string]any{

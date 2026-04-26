@@ -423,17 +423,18 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	}
 
 	// Connect MCP servers and register their tools into the workspace registry.
+	var mcpServerRegistry *mcpregistry.ServerRegistry
 	mcpConfigs := loadMCPConfigs()
 	if len(mcpConfigs) > 0 {
-		registry := mcpregistry.NewServerRegistry()
-		registry.SetAuthToken(cfg.AuthToken)
-		registry.LoadConfigs(mcpConfigs)
+		mcpServerRegistry = mcpregistry.NewServerRegistry()
+		mcpServerRegistry.SetAuthToken(cfg.AuthToken)
+		mcpServerRegistry.LoadConfigs(mcpConfigs)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*1000000000) // 30s
-		registry.ConnectAll(ctx)
+		mcpServerRegistry.ConnectAll(ctx)
 		cancel()
 
-		mcpregistry.SetLastRegistry(registry)
-		for _, entry := range registry.Connected() {
+		mcpregistry.SetLastRegistry(mcpServerRegistry)
+		for _, entry := range mcpServerRegistry.Connected() {
 			toolsResult, err := entry.Client.ListTools(context.Background())
 			if err != nil {
 				logger.WarnCF("bootstrap", "mcp listTools failed", map[string]any{
@@ -453,8 +454,8 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				}
 			}
 		}
-		registerMCPAuthTools(modules.Tools, registry)
-		for _, entry := range registry.Connected() {
+		registerMCPAuthTools(modules.Tools, mcpServerRegistry)
+		for _, entry := range mcpServerRegistry.Connected() {
 			if err := mcpbridge.RegisterElicitationHandlers(entry.Client, entry.Name, hookRunner, cfg.Hooks, cfg.DisableAllHooks); err != nil {
 				logger.WarnCF("bootstrap", "failed to register mcp elicitation handlers", map[string]any{
 					"server": entry.Name,
@@ -491,6 +492,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = agentRegistry
+		runtime.SessionConfig = buildSessionConfigSnapshot(cfg, agentRegistry, mcpServerRegistry)
 		configureMainThreadAgent(runtime, cfg, agentRegistry)
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
@@ -533,6 +535,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		applyOpenAIAdvancedDefaults(runtime)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = agentRegistry
+		runtime.SessionConfig = buildSessionConfigSnapshot(cfg, agentRegistry, mcpServerRegistry)
 		configureMainThreadAgent(runtime, cfg, agentRegistry)
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
@@ -550,6 +553,95 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	default:
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// buildSessionConfigSnapshot assembles the current session configuration visible to guide agents.
+func buildSessionConfigSnapshot(cfg coreconfig.Config, agentRegistry agent.Registry, mcpRegistry *mcpregistry.ServerRegistry) coretool.SessionConfigSnapshot {
+	var snapshot coretool.SessionConfigSnapshot
+
+	// Custom agents: source != "built-in"
+	if agentRegistry != nil {
+		for _, def := range agentRegistry.List() {
+			if def.Source != "built-in" {
+				snapshot.CustomAgents = append(snapshot.CustomAgents, coretool.AgentInfo{
+					AgentType: def.AgentType,
+					WhenToUse: def.WhenToUse,
+				})
+			}
+		}
+	}
+
+	// MCP servers: connected entries only
+	if mcpRegistry != nil {
+		for _, entry := range mcpRegistry.Connected() {
+			snapshot.MCPServers = append(snapshot.MCPServers, entry.Name)
+		}
+	}
+
+	// User settings: expose a filtered, non-sensitive subset.
+	snapshot.UserSettings = filterSettingsForSnapshot(cfg)
+
+	return snapshot
+}
+
+// filterSettingsForSnapshot returns a safe subset of runtime configuration for guide agent prompts.
+func filterSettingsForSnapshot(cfg coreconfig.Config) map[string]any {
+	safe := map[string]any{
+		"model":                    cfg.Model,
+		"provider":                 cfg.Provider,
+		"effortLevel":              cfg.EffortLevel,
+		"theme":                    cfg.Theme,
+		"editorMode":               cfg.EditorMode,
+		"approvalMode":             cfg.ApprovalMode,
+		"outputFormat":             cfg.OutputFormat,
+		"outputStyle":              cfg.OutputStyle,
+		"language":                 cfg.Language,
+		"fastMode":                 cfg.FastMode,
+		"enablePromptCaching":      cfg.EnablePromptCaching,
+		"autoUpdatesChannel":       cfg.AutoUpdatesChannel,
+		"plansDirectory":           cfg.PlansDirectory,
+		"skipWebFetchPreflight":    cfg.SkipWebFetchPreflight,
+		"disableAllHooks":          cfg.DisableAllHooks,
+		"allowManagedHooksOnly":    cfg.AllowManagedHooksOnly,
+		"allowedHttpHookUrls":      cfg.AllowedHttpHookUrls,
+		"httpHookAllowedEnvVars":   cfg.HttpHookAllowedEnvVars,
+		"channelsEnabled":          cfg.ChannelsEnabled,
+		"claudeMdExcludes":         cfg.ClaudeMdExcludes,
+		"additionalDirectories":    cfg.Permissions.AdditionalDirectories,
+		"loadedSettingSources":     cfg.LoadedSettingSources,
+		"policySettings": map[string]any{
+			"origin":     cfg.PolicySettings.Origin,
+			"hasBaseFile": cfg.PolicySettings.HasBaseFile,
+			"hasDropIns":  cfg.PolicySettings.HasDropIns,
+		},
+	}
+
+	if cfg.Agent != "" {
+		safe["agent"] = cfg.Agent
+	}
+	if cfg.RemoteSession.Enabled {
+		safe["remoteSession"] = map[string]any{
+			"enabled": cfg.RemoteSession.Enabled,
+			"url":     cfg.RemoteSession.URL,
+		}
+	}
+	if len(cfg.EnabledPlugins) > 0 {
+		safe["enabledPlugins"] = cfg.EnabledPlugins
+	}
+	if len(cfg.Sandbox) > 0 {
+		safe["sandbox"] = cfg.Sandbox
+	}
+	if cfg.StatusLine.Type != "" {
+		safe["statusLine"] = cfg.StatusLine
+	}
+	if len(cfg.SSHConfigs) > 0 {
+		safe["sshConfigs"] = cfg.SSHConfigs
+	}
+	if cfg.MinimumVersion != "" {
+		safe["minimumVersion"] = cfg.MinimumVersion
+	}
+
+	return safe
 }
 
 // newPromptBuilder creates a PromptBuilder with the standard system prompt sections.

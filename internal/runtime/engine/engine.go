@@ -141,6 +141,9 @@ type Runtime struct {
 	// MainThreadAgentType stores the selected main-thread agent type from settings.
 	MainThreadAgentType string
 
+	// SessionConfig carries the current session configuration snapshot for dynamic prompt rendering.
+	SessionConfig coretool.SessionConfigSnapshot
+
 	// PromptBuilder generates the system prompt injected into each model request.
 	// When nil, the System field is left empty.
 	PromptBuilder *prompts.PromptBuilder

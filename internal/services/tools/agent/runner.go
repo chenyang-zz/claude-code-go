@@ -9,6 +9,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -22,6 +23,8 @@ type Runner struct {
 	ParentRuntime *engine.Runtime
 	// Registry holds available agent definitions.
 	Registry agent.Registry
+	// SessionConfig carries the current session configuration snapshot for dynamic prompt rendering.
+	SessionConfig coretool.SessionConfigSnapshot
 }
 
 // NewRunner creates an agent runner wired to the given runtime and registry.
@@ -52,7 +55,7 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	})
 
 	// 2. Build system prompt
-	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd})
+	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd, SessionConfig: r.SessionConfig})
 
 	// 3. Filter tools based on disallowed list
 	filteredTools := filterToolCatalog(r.ParentRuntime.ToolCatalog, def.DisallowedTools)
@@ -72,7 +75,7 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	// 6. Build and run request
 	req := conversation.RunRequest{
 		SessionID: fmt.Sprintf("agent-%s-%d", def.AgentType, time.Now().Unix()),
-		Input:     input.Prompt,
+		Messages:  buildAgentMessages(def.InitialPrompt, input.Prompt),
 		CWD:       input.Cwd,
 		System:    systemPrompt,
 	}
@@ -105,6 +108,28 @@ func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseCon
 		return strings.TrimSpace(def.SystemPrompt)
 	}
 	return ""
+}
+
+// buildAgentMessages builds the agent request message sequence for one task.
+// When an initial prompt is configured, it is prepended as the first user turn
+// so the actual task prompt remains intact as the next message.
+func buildAgentMessages(initialPrompt string, prompt string) []message.Message {
+	messages := make([]message.Message, 0, 2)
+	if strings.TrimSpace(initialPrompt) != "" {
+		messages = append(messages, message.Message{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart(initialPrompt),
+			},
+		})
+	}
+	messages = append(messages, message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(prompt),
+		},
+	})
+	return messages
 }
 
 // selectModel chooses the model for the agent run.

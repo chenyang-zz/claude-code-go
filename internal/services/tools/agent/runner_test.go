@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -188,5 +189,53 @@ func TestBuildSystemPromptUsesStaticPrompt(t *testing.T) {
 	}, coretool.UseContext{})
 	if got != "You are a custom agent." {
 		t.Errorf("buildSystemPrompt() = %q, want static system prompt", got)
+	}
+}
+
+func TestBuildAgentMessages(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialPrompt string
+		prompt        string
+		wantTexts     []string
+	}{
+		{
+			name:          "prepends initial prompt before task prompt",
+			initialPrompt: "Read the attached files first.",
+			prompt:        "Summarize the implementation plan.",
+			wantTexts:     []string{"Read the attached files first.", "Summarize the implementation plan."},
+		},
+		{
+			name:          "skips blank initial prompt",
+			initialPrompt: "   ",
+			prompt:        "Summarize the implementation plan.",
+			wantTexts:     []string{"Summarize the implementation plan."},
+		},
+		{
+			name:          "keeps existing path when initial prompt is empty",
+			initialPrompt: "",
+			prompt:        "Summarize the implementation plan.",
+			wantTexts:     []string{"Summarize the implementation plan."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildAgentMessages(tt.initialPrompt, tt.prompt)
+			if len(got) != len(tt.wantTexts) {
+				t.Fatalf("buildAgentMessages() len = %d, want %d", len(got), len(tt.wantTexts))
+			}
+			for i, wantText := range tt.wantTexts {
+				if got[i].Role != message.RoleUser {
+					t.Fatalf("message[%d].Role = %q, want %q", i, got[i].Role, message.RoleUser)
+				}
+				if len(got[i].Content) != 1 {
+					t.Fatalf("message[%d].Content len = %d, want 1", i, len(got[i].Content))
+				}
+				if got[i].Content[0].Text != wantText {
+					t.Errorf("message[%d].Content[0].Text = %q, want %q", i, got[i].Content[0].Text, wantText)
+				}
+			}
+		})
 	}
 }

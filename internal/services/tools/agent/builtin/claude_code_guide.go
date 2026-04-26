@@ -1,6 +1,10 @@
 package builtin
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 )
@@ -27,8 +31,56 @@ var ClaudeCodeGuideAgentDefinition = agent.BuiltInAgentDefinition{
 type ClaudeCodeGuideSystemPromptProvider struct{}
 
 // GetSystemPrompt returns the claude-code-guide agent's system prompt.
+// When a non-empty session configuration snapshot is present, a dynamic
+// "User's Current Configuration" section is appended.
 func (ClaudeCodeGuideSystemPromptProvider) GetSystemPrompt(toolCtx tool.UseContext) string {
-	return claudeCodeGuideSystemPrompt
+	if toolCtx.SessionConfig.IsEmpty() {
+		return claudeCodeGuideSystemPrompt
+	}
+	return claudeCodeGuideSystemPrompt + "\n\n" + renderCurrentConfiguration(toolCtx.SessionConfig)
+}
+
+// renderCurrentConfiguration builds the dynamic configuration matrix for the guide agent.
+func renderCurrentConfiguration(cfg tool.SessionConfigSnapshot) string {
+	var b strings.Builder
+	b.WriteString("## User's Current Configuration\n")
+
+	if len(cfg.CustomSkills) > 0 {
+		b.WriteString("\n### Custom skills\n")
+		for _, s := range cfg.CustomSkills {
+			b.WriteString(fmt.Sprintf("- /%s: %s\n", s.Name, s.Description))
+		}
+	}
+
+	if len(cfg.CustomAgents) > 0 {
+		b.WriteString("\n### Custom agents\n")
+		for _, a := range cfg.CustomAgents {
+			b.WriteString(fmt.Sprintf("- %s: %s\n", a.AgentType, a.WhenToUse))
+		}
+	}
+
+	if len(cfg.MCPServers) > 0 {
+		b.WriteString("\n### MCP servers\n")
+		for _, name := range cfg.MCPServers {
+			b.WriteString(fmt.Sprintf("- %s\n", name))
+		}
+	}
+
+	if len(cfg.PluginSkills) > 0 {
+		b.WriteString("\n### Plugin skills\n")
+		for _, s := range cfg.PluginSkills {
+			b.WriteString(fmt.Sprintf("- /%s: %s\n", s.Name, s.Description))
+		}
+	}
+
+	if len(cfg.UserSettings) > 0 {
+		b.WriteString("\n### User settings.json\n")
+		settingsJSON, _ := json.MarshalIndent(cfg.UserSettings, "", "  ")
+		b.WriteString(string(settingsJSON))
+		b.WriteString("\n")
+	}
+
+	return b.String()
 }
 
 // claudeCodeGuideWhenToUse describes when the claude-code-guide agent should be invoked.
