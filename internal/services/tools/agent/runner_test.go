@@ -129,23 +129,23 @@ func TestResolveMaxTurns(t *testing.T) {
 	runner := NewRunner(parent, nil)
 
 	tests := []struct {
-		name     string
-		def      agent.Definition
+		name      string
+		def       agent.Definition
 		wantTurns int
 	}{
 		{
-			name:     "uses agent max turns",
-			def:      agent.Definition{MaxTurns: 5},
+			name:      "uses agent max turns",
+			def:       agent.Definition{MaxTurns: 5},
 			wantTurns: 5,
 		},
 		{
-			name:     "falls back to parent max turns",
-			def:      agent.Definition{MaxTurns: 0},
+			name:      "falls back to parent max turns",
+			def:       agent.Definition{MaxTurns: 0},
 			wantTurns: 12,
 		},
 		{
-			name:     "falls back to default when parent is nil",
-			def:      agent.Definition{MaxTurns: 0},
+			name:      "falls back to default when parent is nil",
+			def:       agent.Definition{MaxTurns: 0},
 			wantTurns: 12,
 		},
 	}
@@ -176,5 +176,17 @@ func TestBuildSystemPrompt(t *testing.T) {
 	got := runner.buildSystemPrompt(agent.Definition{}, coretool.UseContext{})
 	if got != "" {
 		t.Errorf("buildSystemPrompt() = %q, want empty string", got)
+	}
+}
+
+func TestBuildSystemPromptUsesStaticPrompt(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	runner := NewRunner(parent, nil)
+
+	got := runner.buildSystemPrompt(agent.Definition{
+		SystemPrompt: "You are a custom agent.",
+	}, coretool.UseContext{})
+	if got != "You are a custom agent." {
+		t.Errorf("buildSystemPrompt() = %q, want static system prompt", got)
 	}
 }

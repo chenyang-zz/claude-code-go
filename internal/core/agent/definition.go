@@ -45,6 +45,9 @@ type Definition struct {
 	Filename string
 	// BaseDir is the directory where the agent definition was loaded from.
 	BaseDir string
+	// SystemPrompt stores a static system prompt for custom agents.
+	// Built-in agents usually leave this empty and use SystemPromptProvider instead.
+	SystemPrompt string
 	// InitialPrompt is prepended to the first user turn.
 	InitialPrompt string
 	// CriticalSystemReminder is a short message re-injected at every user turn.

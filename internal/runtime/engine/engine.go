@@ -138,6 +138,9 @@ type Runtime struct {
 	// When nil, agent tool lookups fall back to a default empty registry.
 	AgentRegistry agent.Registry
 
+	// MainThreadAgentType stores the selected main-thread agent type from settings.
+	MainThreadAgentType string
+
 	// PromptBuilder generates the system prompt injected into each model request.
 	// When nil, the System field is left empty.
 	PromptBuilder *prompts.PromptBuilder
@@ -222,6 +225,62 @@ func buildInitialHistory(req conversation.RunRequest) (conversation.History, err
 			},
 		},
 	}, nil
+}
+
+// resolveSystemPrompt resolves the effective system prompt for one engine turn.
+// It applies the explicit request override first, then any selected main-thread
+// agent prompt, and finally falls back to the configured prompt builder.
+func (e *Runtime) resolveSystemPrompt(ctx context.Context, sessionID, cwd, explicit string) string {
+	resolved := strings.TrimSpace(explicit)
+	if resolved != "" {
+		return resolved
+	}
+
+	if agentPrompt := e.resolveMainThreadAgentPrompt(cwd); agentPrompt != "" {
+		return agentPrompt
+	}
+
+	if e.PromptBuilder == nil {
+		return ""
+	}
+
+	builtCtx := prompts.WithRuntimeContext(ctx, prompts.RuntimeContext{
+		EnabledToolNames: buildEnabledToolNameSet(e.ToolCatalog),
+		WorkingDir:       cwd,
+		SessionID:        sessionID,
+	})
+	built, err := e.PromptBuilder.Build(builtCtx)
+	if err != nil {
+		logger.WarnCF("engine", "failed to build system prompt", map[string]any{
+			"session_id": sessionID,
+			"error":      err.Error(),
+		})
+		return ""
+	}
+
+	return strings.TrimSpace(built)
+}
+
+// resolveMainThreadAgentPrompt resolves the selected main-thread agent prompt
+// when the runtime has been configured with a main-thread agent type.
+func (e *Runtime) resolveMainThreadAgentPrompt(cwd string) string {
+	agentType := strings.TrimSpace(e.MainThreadAgentType)
+	if agentType == "" || e.AgentRegistry == nil {
+		return ""
+	}
+
+	def, ok := e.AgentRegistry.Get(agentType)
+	if !ok {
+		logger.WarnCF("engine", "main-thread agent not found in registry", map[string]any{
+			"agent_type": agentType,
+		})
+		return ""
+	}
+
+	if def.SystemPromptProvider != nil {
+		return strings.TrimSpace(def.SystemPromptProvider.GetSystemPrompt(coretool.UseContext{WorkingDir: cwd}))
+	}
+	return strings.TrimSpace(def.SystemPrompt)
 }
 
 func parseTokenBudgetFromHistory(messages []message.Message) (int, bool) {
@@ -511,23 +570,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 			Tools:               e.ToolCatalog,
 			EnablePromptCaching: e.EnablePromptCaching,
 		}
-		resolvedSystemPrompt := strings.TrimSpace(systemPrompt)
-		if resolvedSystemPrompt == "" && e.PromptBuilder != nil {
-			builtCtx := prompts.WithRuntimeContext(ctx, prompts.RuntimeContext{
-				EnabledToolNames: buildEnabledToolNameSet(e.ToolCatalog),
-				WorkingDir:       cwd,
-				SessionID:        sessionID,
-			})
-			built, err := e.PromptBuilder.Build(builtCtx)
-			if err != nil {
-				logger.WarnCF("engine", "failed to build system prompt", map[string]any{
-					"session_id": sessionID,
-					"error":      err.Error(),
-				})
-			} else {
-				resolvedSystemPrompt = strings.TrimSpace(built)
-			}
-		}
+		resolvedSystemPrompt := e.resolveSystemPrompt(ctx, sessionID, cwd, systemPrompt)
 		if resolvedSystemPrompt != "" {
 			streamReq.System = resolvedSystemPrompt
 		}

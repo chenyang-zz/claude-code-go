@@ -17,6 +17,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	coretask "github.com/sheepzhao/claude-code-go/internal/core/task"
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
@@ -452,6 +453,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				}
 			}
 		}
+		registerMCPAuthTools(modules.Tools, registry)
 		for _, entry := range registry.Connected() {
 			if err := mcpbridge.RegisterElicitationHandlers(entry.Client, entry.Name, hookRunner, cfg.Hooks, cfg.DisableAllHooks); err != nil {
 				logger.WarnCF("bootstrap", "failed to register mcp elicitation handlers", map[string]any{
@@ -489,6 +491,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = agentRegistry
+		configureMainThreadAgent(runtime, cfg, agentRegistry)
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
@@ -530,6 +533,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		applyOpenAIAdvancedDefaults(runtime)
 		runtime.PromptBuilder = promptBuilder
 		runtime.AgentRegistry = agentRegistry
+		configureMainThreadAgent(runtime, cfg, agentRegistry)
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
@@ -551,6 +555,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 // newPromptBuilder creates a PromptBuilder with the standard system prompt sections.
 func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.PromptBuilder {
 	return prompts.NewPromptBuilder(
+		prompts.CoordinatorSection{},
 		prompts.IdentitySection{},
 		prompts.EnvironmentSection{Model: cfg.Model},
 		prompts.PermissionSection{},
@@ -607,6 +612,44 @@ func resolveAgentRegistry() agent.Registry {
 		logger.WarnCF("bootstrap", "failed to register built-in agents", map[string]any{"error": err.Error()})
 	}
 	return registry
+}
+
+// configureMainThreadAgent wires the selected main-thread agent into runtime state.
+func configureMainThreadAgent(runtime *engine.Runtime, cfg coreconfig.Config, registry agent.Registry) {
+	if runtime == nil {
+		return
+	}
+
+	agentType := strings.TrimSpace(cfg.Agent)
+	runtime.MainThreadAgentType = agentType
+	if agentType == "" || registry == nil {
+		return
+	}
+	if _, ok := registry.Get(agentType); !ok {
+		logger.WarnCF("bootstrap", "main-thread agent not found in registry", map[string]any{
+			"agent_type": agentType,
+		})
+	}
+}
+
+// registerMCPAuthTools exposes pseudo auth tools for MCP servers that need manual authentication.
+func registerMCPAuthTools(toolRegistry coretool.Registry, registry *mcpregistry.ServerRegistry) {
+	if toolRegistry == nil || registry == nil {
+		return
+	}
+
+	for _, entry := range registry.List() {
+		if entry.Status != mcpregistry.StatusNeedsAuth {
+			continue
+		}
+		authTool := mcpproxy.NewAuthTool(entry.Name, entry.Config)
+		if err := toolRegistry.Register(authTool); err != nil {
+			logger.WarnCF("bootstrap", "mcp auth tool registration failed", map[string]any{
+				"server": entry.Name,
+				"error":  err.Error(),
+			})
+		}
+	}
 }
 
 // loadMCPConfigs reads MCP server configurations from the CLAUDE_CODE_MCP_SERVERS

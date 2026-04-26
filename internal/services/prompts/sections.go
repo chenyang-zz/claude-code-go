@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 )
 
 // IdentitySection provides the core identity and role description.
@@ -16,10 +18,14 @@ type IdentitySection struct{}
 func (s IdentitySection) Name() string { return "identity" }
 
 // IsVolatile reports whether this section must be recomputed every turn.
-func (s IdentitySection) IsVolatile() bool { return false }
+func (s IdentitySection) IsVolatile() bool { return true }
 
 // Compute generates the identity section content.
 func (s IdentitySection) Compute(ctx context.Context) (string, error) {
+	if coordinator.IsCoordinatorMode() {
+		return "", nil
+	}
+
 	return `You are claude-code-go, an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 All text you output outside of tool use is displayed to the user. Output text to communicate with the user. You can use Github-flavored markdown for formatting, and will be rendered in a monospace font using the CommonMark specification.

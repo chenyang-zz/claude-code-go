@@ -87,10 +87,10 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	output := r.collectOutput(stream, def.AgentType, start)
 
 	logger.DebugCF("agent.runner", "agent run completed", map[string]any{
-		"agent_type":    def.AgentType,
-		"duration_ms":   output.TotalDurationMs,
-		"tool_uses":     output.TotalToolUseCount,
-		"total_tokens":  output.TotalTokens,
+		"agent_type":   def.AgentType,
+		"duration_ms":  output.TotalDurationMs,
+		"tool_uses":    output.TotalToolUseCount,
+		"total_tokens": output.TotalTokens,
 	})
 
 	return output, nil
@@ -100,6 +100,9 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseContext) string {
 	if def.SystemPromptProvider != nil {
 		return def.SystemPromptProvider.GetSystemPrompt(toolCtx)
+	}
+	if strings.TrimSpace(def.SystemPrompt) != "" {
+		return strings.TrimSpace(def.SystemPrompt)
 	}
 	return ""
 }

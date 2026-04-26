@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
@@ -19,6 +20,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 )
 
 type fakeModelClient struct {
@@ -77,6 +79,28 @@ func (s *fakeApprovalService) Decide(ctx context.Context, req approval.Request) 
 	s.requests = append(s.requests, req)
 	return s.response, nil
 }
+
+type mockAgentPromptProvider struct {
+	prompt string
+}
+
+func (p mockAgentPromptProvider) GetSystemPrompt(toolCtx tool.UseContext) string {
+	_ = toolCtx
+	return p.prompt
+}
+
+type staticPromptSection struct {
+	content string
+}
+
+func (s staticPromptSection) Name() string { return "static" }
+
+func (s staticPromptSection) Compute(ctx context.Context) (string, error) {
+	_ = ctx
+	return s.content, nil
+}
+
+func (s staticPromptSection) IsVolatile() bool { return false }
 
 type fakeStopHookRunner struct {
 	results     []hook.HookResult
@@ -170,6 +194,52 @@ func TestRuntimeRunBuildsUserMessage(t *testing.T) {
 	msg := client.requests[0].Messages[0]
 	if msg.Role != message.RoleUser || len(msg.Content) != 1 || msg.Content[0].Text != "hello world" {
 		t.Fatalf("Stream() request message = %#v, want one user text message", msg)
+	}
+}
+
+func TestResolveSystemPromptUsesSelectedAgentPrompt(t *testing.T) {
+	registry := agent.NewInMemoryRegistry()
+	if err := registry.Register(agent.Definition{
+		AgentType:    "custom-agent",
+		SystemPrompt: "You are a custom agent.",
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	runtime := &Runtime{
+		AgentRegistry:       registry,
+		MainThreadAgentType: "custom-agent",
+		PromptBuilder:       prompts.NewPromptBuilder(staticPromptSection{content: "default prompt"}),
+		ToolCatalog:         []model.ToolDefinition{{Name: "Read"}},
+		EnablePromptCaching: true,
+	}
+
+	got := runtime.resolveSystemPrompt(context.Background(), "session-1", "/repo", "")
+	if got != "You are a custom agent." {
+		t.Fatalf("resolveSystemPrompt() = %q, want selected agent prompt", got)
+	}
+}
+
+func TestResolveSystemPromptFallsBackToPromptBuilder(t *testing.T) {
+	runtime := &Runtime{
+		PromptBuilder: prompts.NewPromptBuilder(staticPromptSection{content: "default prompt"}),
+	}
+
+	got := runtime.resolveSystemPrompt(context.Background(), "session-1", "/repo", "")
+	if got != "default prompt" {
+		t.Fatalf("resolveSystemPrompt() = %q, want default prompt", got)
+	}
+}
+
+func TestResolveSystemPromptFallsBackWhenSelectedAgentMissing(t *testing.T) {
+	runtime := &Runtime{
+		MainThreadAgentType: "missing-agent",
+		PromptBuilder:       prompts.NewPromptBuilder(staticPromptSection{content: "default prompt"}),
+	}
+
+	got := runtime.resolveSystemPrompt(context.Background(), "session-1", "/repo", "")
+	if got != "default prompt" {
+		t.Fatalf("resolveSystemPrompt() = %q, want default prompt for missing agent", got)
 	}
 }
 
@@ -2232,7 +2302,7 @@ func TestRuntimeRun_TaskBudgetRemainingUsesSummaryRequestUsage(t *testing.T) {
 				return newModelStream(
 					model.Event{Type: model.EventTypeTextDelta, Text: "answer"},
 					model.Event{
-						Type: model.EventTypeDone,
+						Type:  model.EventTypeDone,
 						Usage: &model.Usage{OutputTokens: 950_000},
 					},
 				), nil
@@ -2794,16 +2864,16 @@ func TestRuntimeRun_PostToolUseFailureHookMarksInterrupt(t *testing.T) {
 
 // mockGatedTool is a tool that can report itself as disabled.
 type mockGatedTool struct {
-	name      string
-	schema    tool.InputSchema
-	enabled   bool
+	name    string
+	schema  tool.InputSchema
+	enabled bool
 }
 
-func (m *mockGatedTool) Name() string              { return m.name }
-func (m *mockGatedTool) Description() string       { return "mock tool" }
+func (m *mockGatedTool) Name() string                  { return m.name }
+func (m *mockGatedTool) Description() string           { return "mock tool" }
 func (m *mockGatedTool) InputSchema() tool.InputSchema { return m.schema }
-func (m *mockGatedTool) IsReadOnly() bool          { return true }
-func (m *mockGatedTool) IsConcurrencySafe() bool   { return true }
+func (m *mockGatedTool) IsReadOnly() bool              { return true }
+func (m *mockGatedTool) IsConcurrencySafe() bool       { return true }
 func (m *mockGatedTool) Invoke(context.Context, tool.Call) (tool.Result, error) {
 	return tool.Result{}, nil
 }
