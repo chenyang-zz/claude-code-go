@@ -92,10 +92,33 @@ func fallbackDescription() string {
 	return "Launch a specialized agent to perform a task. Use this when you need to delegate work to a subagent."
 }
 
+// agentColorNames lists the valid color values recognized from agent definitions.
+// This mirrors the TypeScript AGENT_COLORS constant.
+var agentColorNames = map[string]struct{}{
+	"red":    {},
+	"blue":   {},
+	"green":  {},
+	"yellow": {},
+	"purple": {},
+	"orange": {},
+	"pink":   {},
+	"cyan":   {},
+}
+
+// isValidAgentColor reports whether the given color is a recognized agent color.
+func isValidAgentColor(color string) bool {
+	_, ok := agentColorNames[color]
+	return ok
+}
+
 // formatAgentLine formats a single agent definition as a markdown list item.
 // Format: "- {agentType}: {whenToUse} (Tools: {toolsDescription})"
+// When the agent has a valid Color, it is included as: "- {agentType}: {whenToUse} (Color: {color}, Tools: {toolsDescription})"
 func formatAgentLine(def agent.Definition) string {
 	toolsDesc := getToolsDescription(def.Tools, def.DisallowedTools)
+	if def.Color != "" && isValidAgentColor(def.Color) {
+		return fmt.Sprintf("- %s: %s (Color: %s, Tools: %s)", def.AgentType, def.WhenToUse, def.Color, toolsDesc)
+	}
 	return fmt.Sprintf("- %s: %s (Tools: %s)", def.AgentType, def.WhenToUse, toolsDesc)
 }
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -180,6 +181,166 @@ func TestBuildAgentMessages(t *testing.T) {
 // TestResolveAgentTools covers the full tool resolution logic including
 // allowlist, denylist, wildcard, MCP passthrough, and built-in/custom
 // default disallowed sets.
+func TestConvertStopToSubagentStop(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  hook.HooksConfig
+		want hook.HooksConfig
+	}{
+		{
+			name: "empty config",
+			cfg:  nil,
+			want: nil,
+		},
+		{
+			name: "no Stop event",
+			cfg: hook.HooksConfig{
+				hook.EventSessionStart: {{Matcher: "test"}},
+			},
+			want: hook.HooksConfig{
+				hook.EventSessionStart: {{Matcher: "test"}},
+			},
+		},
+		{
+			name: "Stop becomes SubagentStop",
+			cfg: hook.HooksConfig{
+				hook.EventStop: {{Matcher: "cleanup"}},
+			},
+			want: hook.HooksConfig{
+				hook.EventSubagentStop: {{Matcher: "cleanup"}},
+			},
+		},
+		{
+			name: "mixed events",
+			cfg: hook.HooksConfig{
+				hook.EventStop:          {{Matcher: "cleanup"}},
+				hook.EventSubagentStart: {{Matcher: "setup"}},
+				hook.EventSessionStart:  {{Matcher: "init"}},
+			},
+			want: hook.HooksConfig{
+				hook.EventSubagentStop:  {{Matcher: "cleanup"}},
+				hook.EventSubagentStart: {{Matcher: "setup"}},
+				hook.EventSessionStart:  {{Matcher: "init"}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := convertStopToSubagentStop(tt.cfg)
+			if len(got) != len(tt.want) {
+				t.Fatalf("convertStopToSubagentStop() len = %d, want %d", len(got), len(tt.want))
+			}
+			for event, wantMatchers := range tt.want {
+				gotMatchers, ok := got[event]
+				if !ok {
+					t.Errorf("missing event %q in result", event)
+					continue
+				}
+				if len(gotMatchers) != len(wantMatchers) {
+					t.Errorf("event %q: got %d matchers, want %d", event, len(gotMatchers), len(wantMatchers))
+					continue
+				}
+				for i := range wantMatchers {
+					if gotMatchers[i].Matcher != wantMatchers[i].Matcher {
+						t.Errorf("event %q matcher[%d] = %q, want %q", event, i, gotMatchers[i].Matcher, wantMatchers[i].Matcher)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestMergeAgentHooks_NoParent(t *testing.T) {
+	runner := NewRunner(nil, nil)
+	def := agent.Definition{
+		Hooks: hook.HooksConfig{
+			hook.EventStop: {{Matcher: "cleanup"}},
+		},
+	}
+	got := runner.mergeAgentHooks(def)
+	// When no parent, agent hooks are returned with Stop converted to SubagentStop
+	want := hook.HooksConfig{
+		hook.EventSubagentStop: {{Matcher: "cleanup"}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("mergeAgentHooks() len = %d, want %d", len(got), len(want))
+	}
+	for event, wantMatchers := range want {
+		gotMatchers, ok := got[event]
+		if !ok {
+			t.Fatalf("missing event %q", event)
+		}
+		if len(gotMatchers) != len(wantMatchers) {
+			t.Fatalf("event %q: got %d matchers, want %d", event, len(gotMatchers), len(wantMatchers))
+		}
+	}
+}
+
+func TestMergeAgentHooks_NoAgentHooks(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	parent.Hooks = hook.HooksConfig{
+		hook.EventSessionStart: {{Matcher: "init"}},
+	}
+	runner := NewRunner(parent, nil)
+	def := agent.Definition{}
+	got := runner.mergeAgentHooks(def)
+	// When agent has no hooks, parent hooks are used as-is
+	if len(got) != 1 {
+		t.Fatalf("mergeAgentHooks() len = %d, want 1", len(got))
+	}
+	if _, ok := got[hook.EventSessionStart]; !ok {
+		t.Errorf("expected EventSessionStart from parent, got events: %v", got)
+	}
+}
+
+func TestMergeAgentHooks_Merge(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	parent.Hooks = hook.HooksConfig{
+		hook.EventSessionStart: {{Matcher: "init"}},
+	}
+	runner := NewRunner(parent, nil)
+	def := agent.Definition{
+		Hooks: hook.HooksConfig{
+			hook.EventSubagentStart: {{Matcher: "setup"}},
+		},
+	}
+	got := runner.mergeAgentHooks(def)
+	// Both parent and agent events should be present
+	if len(got) != 2 {
+		t.Fatalf("mergeAgentHooks() len = %d, want 2", len(got))
+	}
+	if _, ok := got[hook.EventSessionStart]; !ok {
+		t.Errorf("missing EventSessionStart from parent")
+	}
+	if _, ok := got[hook.EventSubagentStart]; !ok {
+		t.Errorf("missing EventSubagentStart from agent")
+	}
+}
+
+func TestMergeAgentHooks_StopConversion(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	parent.Hooks = hook.HooksConfig{
+		hook.EventSessionStart: {{Matcher: "init"}},
+	}
+	runner := NewRunner(parent, nil)
+	def := agent.Definition{
+		Hooks: hook.HooksConfig{
+			hook.EventStop: {{Matcher: "cleanup"}},
+		},
+	}
+	got := runner.mergeAgentHooks(def)
+	// Stop should be converted to SubagentStop in the merged result
+	if _, ok := got[hook.EventStop]; ok {
+		t.Error("EventStop should not be present (converted to SubagentStop)")
+	}
+	if _, ok := got[hook.EventSubagentStop]; !ok {
+		t.Error("EventSubagentStop should be present")
+	}
+	if _, ok := got[hook.EventSessionStart]; !ok {
+		t.Error("EventSessionStart from parent should still be present")
+	}
+}
+
 func TestResolveAgentTools(t *testing.T) {
 	catalog := []model.ToolDefinition{
 		{Name: "Read"},

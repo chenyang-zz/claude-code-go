@@ -9,6 +9,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -71,6 +72,9 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	child.EnablePromptCaching = r.ParentRuntime.EnablePromptCaching
 	child.RetryPolicy = r.ParentRuntime.RetryPolicy
 	child.MaxConcurrentToolCalls = r.ParentRuntime.MaxConcurrentToolCalls
+	// Merge agent hooks with parent hooks; Stop hooks become SubagentStop in agent context.
+	child.Hooks = r.mergeAgentHooks(def)
+	child.HookRunner = r.ParentRuntime.HookRunner
 
 	// 6. Build and run request
 	req := conversation.RunRequest{
@@ -206,4 +210,38 @@ func (r *Runner) collectOutput(stream event.Stream, agentType string, start time
 		TotalTokens:       totalTokens,
 		Usage:             usage,
 	}
+}
+
+// mergeAgentHooks merges the agent's frontmatter hooks with the parent runtime's
+// hooks. For agent contexts, Stop hooks are converted to SubagentStop to match
+// the subagent lifecycle events, mirroring the TypeScript registerFrontmatterHooks
+// behavior where isAgent=true causes Stop hooks to be registered under SubagentStop.
+func (r *Runner) mergeAgentHooks(def agent.Definition) hook.HooksConfig {
+	if r.ParentRuntime == nil {
+		return convertStopToSubagentStop(def.Hooks)
+	}
+	agentHooks := def.Hooks
+	if len(agentHooks) == 0 {
+		return r.ParentRuntime.Hooks
+	}
+	agentHooks = convertStopToSubagentStop(agentHooks)
+	return hook.MergeHooksConfig(r.ParentRuntime.Hooks, agentHooks)
+}
+
+// convertStopToSubagentStop converts Stop event hooks to SubagentStop event hooks.
+// This ensures that agent-specific stop hooks fire on SubagentStop (the event
+// emitted when a subagent completes) rather than Stop (the main session event).
+func convertStopToSubagentStop(cfg hook.HooksConfig) hook.HooksConfig {
+	if len(cfg) == 0 {
+		return cfg
+	}
+	result := make(hook.HooksConfig, len(cfg))
+	for event, matchers := range cfg {
+		if event == hook.EventStop {
+			result[hook.EventSubagentStop] = matchers
+		} else {
+			result[event] = matchers
+		}
+	}
+	return result
 }

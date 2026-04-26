@@ -180,6 +180,93 @@ func TestFormatAgentLine(t *testing.T) {
 	}
 }
 
+func TestIsValidAgentColor(t *testing.T) {
+	tests := []struct {
+		name  string
+		color string
+		want  bool
+	}{
+		{"red is valid", "red", true},
+		{"blue is valid", "blue", true},
+		{"green is valid", "green", true},
+		{"yellow is valid", "yellow", true},
+		{"purple is valid", "purple", true},
+		{"orange is valid", "orange", true},
+		{"pink is valid", "pink", true},
+		{"cyan is valid", "cyan", true},
+		{"empty is invalid", "", false},
+		{"unknown is invalid", "magenta", false},
+		{"case sensitive", "Red", false},
+		{"random string", "foobar", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidAgentColor(tt.color)
+			if got != tt.want {
+				t.Errorf("isValidAgentColor(%q) = %v, want %v", tt.color, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatAgentLine_WithColor(t *testing.T) {
+	def := agent.Definition{
+		AgentType: "test",
+		WhenToUse: "Test agent",
+		Color:     "blue",
+		Tools:     []string{"Read", "Bash"},
+	}
+	got := formatAgentLine(def)
+	want := "- test: Test agent (Color: blue, Tools: Read, Bash)"
+	if got != want {
+		t.Errorf("formatAgentLine() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatAgentLine_WithInvalidColor(t *testing.T) {
+	def := agent.Definition{
+		AgentType: "test",
+		WhenToUse: "Test agent",
+		Color:     "magenta",
+		Tools:     []string{"Read"},
+	}
+	got := formatAgentLine(def)
+	want := "- test: Test agent (Tools: Read)"
+	if got != want {
+		t.Errorf("formatAgentLine() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatAgentLine_NoColor(t *testing.T) {
+	def := agent.Definition{
+		AgentType: "test",
+		WhenToUse: "Test agent",
+		Tools:     []string{"Read"},
+	}
+	got := formatAgentLine(def)
+	want := "- test: Test agent (Tools: Read)"
+	if got != want {
+		t.Errorf("formatAgentLine() = %q, want %q", got, want)
+	}
+}
+
+func TestDescriptor_Description_WithColor(t *testing.T) {
+	registry := agent.NewInMemoryRegistry()
+	_ = registry.Register(agent.Definition{
+		AgentType: "reviewer",
+		WhenToUse: "Code review specialist",
+		Color:     "purple",
+		Tools:     []string{"Read", "Bash"},
+	})
+
+	d := &Descriptor{Registry: registry}
+	got := d.Description()
+
+	if !strings.Contains(got, "(Color: purple, Tools: Read, Bash)") {
+		t.Errorf("expected color in description, got: %s", got)
+	}
+}
+
 func TestGetToolsDescription(t *testing.T) {
 	tests := []struct {
 		name            string
