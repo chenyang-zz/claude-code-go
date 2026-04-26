@@ -525,6 +525,39 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("hooks"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /hooks command")
 	}
+	if _, ok := app.Runner.Commands.Get("btw"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /btw command")
+	}
+	if _, ok := app.Runner.Commands.Get("chrome"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /chrome command")
+	}
+	if _, ok := app.Runner.Commands.Get("think-back"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /think-back command")
+	}
+	if _, ok := app.Runner.Commands.Get("thinkback-play"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /thinkback-play command")
+	}
+	if _, ok := app.Runner.Commands.Get("reload-plugins"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /reload-plugins command")
+	}
+	if _, ok := app.Runner.Commands.Get("advisor"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /advisor command")
+	}
+	if _, ok := app.Runner.Commands.Get("statusline"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /statusline command")
+	}
+	if _, ok := app.Runner.Commands.Get("ultrareview"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /ultrareview command")
+	}
+	if _, ok := app.Runner.Commands.Get("insights"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /insights command")
+	}
+	if _, ok := app.Runner.Commands.Get("remote-control"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /remote-control command")
+	}
+	if _, ok := app.Runner.Commands.Get("rc"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /rc alias")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -621,8 +654,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 65 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 65", len(cmds))
+	if len(cmds) != 75 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 75", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -1085,10 +1118,82 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() sixty-fourth metadata = %#v, want hooks metadata", got)
 	}
 	if got := cmds[64].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "btw",
+		Description: "Ask a quick side question without interrupting the main conversation",
+		Usage:       "/btw <question>",
+	}) {
+		t.Fatalf("newCommandRegistry() sixty-fifth metadata = %#v, want btw metadata", got)
+	}
+	if got := cmds[65].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "chrome",
+		Description: "Claude in Chrome (Beta) settings",
+		Usage:       "/chrome",
+	}) {
+		t.Fatalf("newCommandRegistry() sixty-sixth metadata = %#v, want chrome metadata", got)
+	}
+	if got := cmds[66].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "think-back",
+		Description: "Your 2025 Claude Code Year in Review",
+		Usage:       "/think-back",
+	}) {
+		t.Fatalf("newCommandRegistry() sixty-seventh metadata = %#v, want think-back metadata", got)
+	}
+	if got := cmds[67].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "thinkback-play",
+		Description: "Play the thinkback animation",
+		Usage:       "/thinkback-play",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() sixty-eighth metadata = %#v, want thinkback-play metadata", got)
+	}
+	if got := cmds[68].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "reload-plugins",
+		Description: "Activate pending plugin changes in the current session",
+		Usage:       "/reload-plugins",
+	}) {
+		t.Fatalf("newCommandRegistry() sixty-ninth metadata = %#v, want reload-plugins metadata", got)
+	}
+	if got := cmds[69].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "advisor",
+		Description: "Configure the advisor model",
+		Usage:       "/advisor [<model>|off]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventieth metadata = %#v, want advisor metadata", got)
+	}
+	if got := cmds[70].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "statusline",
+		Description: "Set up Claude Code's status line UI",
+		Usage:       "/statusline [prompt]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-first metadata = %#v, want statusline metadata", got)
+	}
+	if got := cmds[71].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "ultrareview",
+		Description: "Find and verify bugs in your branch using Claude Code on the web",
+		Usage:       "/ultrareview [pr-number]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-second metadata = %#v, want ultrareview metadata", got)
+	}
+	if got := cmds[72].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "insights",
+		Description: "Generate a report analyzing your Claude Code sessions",
+		Usage:       "/insights [--homespaces]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-third metadata = %#v, want insights metadata", got)
+	}
+	if got := cmds[73].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "remote-control",
+		Aliases:     []string{"rc"},
+		Description: "Connect this terminal for remote-control sessions",
+		Usage:       "/remote-control [name]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-fourth metadata = %#v, want remote-control metadata", got)
+	}
+	if got := cmds[74].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() sixty-fifth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() seventy-fifth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

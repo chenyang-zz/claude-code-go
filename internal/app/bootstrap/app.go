@@ -425,6 +425,36 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.HooksCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.BtwCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ChromeCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ThinkBackCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ThinkbackPlayCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ReloadPluginsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.AdvisorCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.StatuslineCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.UltrareviewCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InsightsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.RemoteControlCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
 		ProjectPath: dereferenceConfig(cfg).ProjectPath,
