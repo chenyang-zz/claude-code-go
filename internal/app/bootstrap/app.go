@@ -281,6 +281,21 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.VoiceCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.IdeCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InitCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InstallGitHubAppCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InstallSlackAppCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.RemoteEnvCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.PrivacySettingsCommand{}); err != nil {
 		return nil, err
 	}

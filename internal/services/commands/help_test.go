@@ -179,6 +179,41 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Register(voice) error = %v", err)
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "ide",
+		Description: "Manage IDE integrations and show status",
+		Usage:       "/ide [open]",
+	}}); err != nil {
+		t.Fatalf("Register(ide) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "init",
+		Description: "Initialize a new CLAUDE.md file with codebase documentation",
+		Usage:       "/init",
+	}}); err != nil {
+		t.Fatalf("Register(init) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "install-github-app",
+		Description: "Set up Claude GitHub Actions for a repository",
+		Usage:       "/install-github-app",
+	}}); err != nil {
+		t.Fatalf("Register(install-github-app) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "install-slack-app",
+		Description: "Install the Claude Slack app",
+		Usage:       "/install-slack-app",
+	}}); err != nil {
+		t.Fatalf("Register(install-slack-app) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "remote-env",
+		Description: "Configure the default remote environment for teleport sessions",
+		Usage:       "/remote-env",
+	}}); err != nil {
+		t.Fatalf("Register(remote-env) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "privacy-settings",
 		Description: "View and update your privacy settings",
 		Usage:       "/privacy-settings",
@@ -333,7 +368,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/ide - Manage IDE integrations and show status\n  Usage: /ide [open]\n/init - Initialize a new CLAUDE.md file with codebase documentation\n/install-github-app - Set up Claude GitHub Actions for a repository\n/install-slack-app - Install the Claude Slack app\n/remote-env - Configure the default remote environment for teleport sessions\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
