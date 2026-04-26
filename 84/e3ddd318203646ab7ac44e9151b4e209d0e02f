@@ -1,0 +1,84 @@
+go.mod
+  cf7902d20dbecc87 23
+internal/services/tools/file_edit/tool.go
+  cf7902d20dbecc87 94-102
+internal/services/tools/glob/tool.go
+  cf7902d20dbecc87 80-86
+internal/services/tools/file_read/tool.go
+  cf7902d20dbecc87 167-180
+internal/services/tools/file_read/tool_test.go
+  cf7902d20dbecc87 17-40
+internal/services/tools/agent/runner_test.go
+  1dcbd7e44df24cde 111,113-115,126-128,179-313
+internal/services/tools/glob/tool_test.go
+  cf7902d20dbecc87 9,18-37
+internal/services/tools/agent/loader/builder_test.go
+  cf7902d20dbecc87 1-330
+internal/services/tools/grep/tool.go
+  cf7902d20dbecc87 163-173
+internal/services/tools/agent/loader/builder.go
+  cf7902d20dbecc87 1-291
+internal/services/tools/file_edit/tool_test.go
+  cf7902d20dbecc87 17-37
+internal/services/tools/bash/tool_test.go
+  cf7902d20dbecc87 19-39
+internal/services/tools/bash/tool.go
+  cf7902d20dbecc87 164-189
+internal/services/tools/agent/loader/frontmatter_test.go
+  cf7902d20dbecc87 1-73
+internal/services/tools/agent/runner.go
+  1dcbd7e44df24cde 59-61,103-105,107,109-111,113-115
+internal/services/tools/agent/filter_test.go
+  1dcbd7e44df24cde 1-270
+internal/services/tools/agent/descriptor.go
+  1dcbd7e44df24cde 110-114,116
+internal/services/tools/grep/tool_test.go
+  cf7902d20dbecc87 17-37
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 42,471,701-704,706-707,711-733
+internal/services/tools/agent/filter.go
+  1dcbd7e44df24cde 1-219
+internal/services/tools/file_write/tool.go
+  cf7902d20dbecc87 76-83
+internal/services/tools/agent/loader/frontmatter.go
+  cf7902d20dbecc87 1-42
+internal/services/tools/file_write/tool_test.go
+  cf7902d20dbecc87 17-37
+internal/services/tools/agent/loader/loader.go
+  cf7902d20dbecc87 1-105
+internal/services/tools/agent/loader/loader_test.go
+  cf7902d20dbecc87 1-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "84e3ddd318203646ab7ac44e9151b4e209d0e02f",
+  "prompts": {
+    "1dcbd7e44df24cde": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b42ac7c6-d947-4771-91d3-0e21c95329ab",
+        "model": "kimi-for-coding"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 962,
+      "total_deletions": 417,
+      "accepted_lines": 654,
+      "overriden_lines": 0
+    },
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1264,
+      "total_deletions": 26,
+      "accepted_lines": 1248,
+      "overriden_lines": 0
+    }
+  }
+}
