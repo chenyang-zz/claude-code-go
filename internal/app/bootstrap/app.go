@@ -455,6 +455,21 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.RemoteControlCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.BridgeKickCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.CommitCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.CommitPushPRCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.HeapdumpCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.WebSetupCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
 		ProjectPath: dereferenceConfig(cfg).ProjectPath,

@@ -558,6 +558,21 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("rc"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /rc alias")
 	}
+	if _, ok := app.Runner.Commands.Get("bridge-kick"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /bridge-kick command")
+	}
+	if _, ok := app.Runner.Commands.Get("commit"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /commit command")
+	}
+	if _, ok := app.Runner.Commands.Get("commit-push-pr"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /commit-push-pr command")
+	}
+	if _, ok := app.Runner.Commands.Get("heapdump"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /heapdump command")
+	}
+	if _, ok := app.Runner.Commands.Get("web-setup"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /web-setup command")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -654,8 +669,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 75 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 75", len(cmds))
+	if len(cmds) != 80 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 80", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -1190,10 +1205,47 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() seventy-fourth metadata = %#v, want remote-control metadata", got)
 	}
 	if got := cmds[74].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "bridge-kick",
+		Description: "Inject bridge failure states for manual recovery testing",
+		Usage:       "/bridge-kick <subcommand>",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-fifth metadata = %#v, want bridge-kick metadata", got)
+	}
+	if got := cmds[75].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "commit",
+		Description: "Create a git commit",
+		Usage:       "/commit",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-sixth metadata = %#v, want commit metadata", got)
+	}
+	if got := cmds[76].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "commit-push-pr",
+		Description: "Commit, push, and open a PR",
+		Usage:       "/commit-push-pr [instructions]",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-seventh metadata = %#v, want commit-push-pr metadata", got)
+	}
+	if got := cmds[77].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "heapdump",
+		Description: "Dump the JS heap to ~/Desktop",
+		Usage:       "/heapdump",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-eighth metadata = %#v, want heapdump metadata", got)
+	}
+	if got := cmds[78].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "web-setup",
+		Description: "Setup Claude Code on the web (requires connecting your GitHub account)",
+		Usage:       "/web-setup",
+	}) {
+		t.Fatalf("newCommandRegistry() seventy-ninth metadata = %#v, want web-setup metadata", got)
+	}
+	if got := cmds[79].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() seventy-fifth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() eightieth metadata = %#v, want seed-sessions metadata", got)
 	}
 }
