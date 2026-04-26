@@ -12,7 +12,9 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -25,6 +27,11 @@ type Runner struct {
 	Registry agent.Registry
 	// SessionConfig carries the current session configuration snapshot for dynamic prompt rendering.
 	SessionConfig coretool.SessionConfigSnapshot
+	// ServerRegistry provides access to MCP servers for agent-specific dynamic connections.
+	ServerRegistry *mcpregistry.ServerRegistry
+	// ToolRegistry holds the parent runtime's tool registry, used to build a child registry
+	// that includes both parent tools and agent-specific MCP tools.
+	ToolRegistry coretool.Registry
 }
 
 // NewRunner creates an agent runner wired to the given runtime and registry.
@@ -61,11 +68,45 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	resolved := resolveAgentTools(def, r.ParentRuntime.ToolCatalog)
 	filteredTools := resolved.Tools
 
+	// 3.5 Initialize agent-specific MCP servers (additive to parent's servers).
+	mcpResult, mcpErr := r.initializeAgentMCPServers(ctx, def)
+	if mcpErr != nil {
+		logger.WarnCF("agent.runner", "failed to initialize agent MCP servers", map[string]any{
+			"agent_type": def.AgentType,
+			"error":      mcpErr.Error(),
+		})
+	}
+	defer mcpResult.cleanup()
+
+	// 3.6 Merge MCP tools with resolved tools, deduplicating by name.
+	// Parent tools take precedence (matching TS uniqBy behavior).
+	allToolDefs := mergeToolDefinitions(filteredTools, mcpResult.toolDefs)
+
+	// 3.7 Build child executor that includes both parent tools and agent MCP tools.
+	var childExecutor engine.ToolExecutor
+	if len(mcpResult.tools) > 0 && r.ToolRegistry != nil {
+		childRegistry := coretool.NewMemoryRegistry()
+		for _, t := range r.ToolRegistry.List() {
+			_ = childRegistry.Register(t)
+		}
+		for _, t := range mcpResult.tools {
+			if regErr := childRegistry.Register(t); regErr != nil {
+				logger.WarnCF("agent.runner", "failed to register agent MCP tool", map[string]any{
+					"tool":  t.Name(),
+					"error": regErr.Error(),
+				})
+			}
+		}
+		childExecutor = executor.NewToolExecutor(childRegistry)
+	} else {
+		childExecutor = r.ParentRuntime.Executor
+	}
+
 	// 4. Determine model (inherit from parent or use agent override)
 	modelName := r.selectModel(def)
 
-	// 5. Create child runtime with filtered tools
-	child := engine.New(r.ParentRuntime.Client, modelName, r.ParentRuntime.Executor, filteredTools...)
+	// 5. Create child runtime with merged tools and child executor
+	child := engine.New(r.ParentRuntime.Client, modelName, childExecutor, allToolDefs...)
 	// Copy key configuration from parent
 	child.MaxToolIterations = r.resolveMaxTurns(def)
 	child.ApprovalService = r.ParentRuntime.ApprovalService

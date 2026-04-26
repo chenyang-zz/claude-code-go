@@ -6,25 +6,30 @@ import (
 	"fmt"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
-	"github.com/sheepzhao/claude-code-go/internal/core/tool"
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-// Tool implements the tool.Tool interface for the Agent tool.
+// Tool implements the coretool.Tool interface for the Agent tool.
 // It dispatches agent requests to a Runner created on demand from the
 // configured registry and parent runtime.
 type Tool struct {
-	registry      agent.Registry
-	parentRuntime *engine.Runtime
-	descriptor    *Descriptor
+	registry       agent.Registry
+	parentRuntime  *engine.Runtime
+	serverRegistry *mcpregistry.ServerRegistry
+	toolRegistry   coretool.Registry
+	descriptor     *Descriptor
 }
 
 // NewTool creates an Agent tool wired to the given registry and parent runtime.
-func NewTool(registry agent.Registry, parentRuntime *engine.Runtime) *Tool {
+func NewTool(registry agent.Registry, parentRuntime *engine.Runtime, serverRegistry *mcpregistry.ServerRegistry, toolRegistry coretool.Registry) *Tool {
 	t := &Tool{
-		registry:      registry,
-		parentRuntime: parentRuntime,
+		registry:       registry,
+		parentRuntime:  parentRuntime,
+		serverRegistry: serverRegistry,
+		toolRegistry:   toolRegistry,
 	}
 	if registry != nil {
 		t.descriptor = &Descriptor{Registry: registry}
@@ -48,41 +53,41 @@ func (t *Tool) Description() string {
 }
 
 // InputSchema returns the JSON schema for the agent tool input.
-func (t *Tool) InputSchema() tool.InputSchema {
-	return tool.InputSchema{
-		Properties: map[string]tool.FieldSchema{
+func (t *Tool) InputSchema() coretool.InputSchema {
+	return coretool.InputSchema{
+		Properties: map[string]coretool.FieldSchema{
 			"description": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "A short (3-5 word) description of the task.",
 				Required:    true,
 			},
 			"prompt": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "The task for the agent to perform.",
 				Required:    true,
 			},
 			"subagent_type": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "The type of specialized agent to use (e.g., 'Explore').",
 				Required:    false,
 			},
 			"model": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "Optional model override for the agent.",
 				Required:    false,
 			},
 			"run_in_background": {
-				Type:        tool.ValueKindBoolean,
+				Type:        coretool.ValueKindBoolean,
 				Description: "Whether the agent should run in the background.",
 				Required:    false,
 			},
 			"name": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "Optional name for the spawned agent.",
 				Required:    false,
 			},
 			"cwd": {
-				Type:        tool.ValueKindString,
+				Type:        coretool.ValueKindString,
 				Description: "Optional working directory override for the agent.",
 				Required:    false,
 			},
@@ -102,17 +107,17 @@ func (t *Tool) IsConcurrencySafe() bool {
 }
 
 // Invoke executes the agent tool.
-func (t *Tool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) {
+func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result, error) {
 	if t.registry == nil {
-		return tool.Result{Error: "agent registry is not configured"}, nil
+		return coretool.Result{Error: "agent registry is not configured"}, nil
 	}
 	if t.parentRuntime == nil {
-		return tool.Result{Error: "agent parent runtime is not configured"}, nil
+		return coretool.Result{Error: "agent parent runtime is not configured"}, nil
 	}
 
-	input, err := tool.DecodeInput[Input](t.InputSchema(), call.Input)
+	input, err := coretool.DecodeInput[Input](t.InputSchema(), call.Input)
 	if err != nil {
-		return tool.Result{Error: fmt.Sprintf("invalid agent tool input: %v", err)}, nil
+		return coretool.Result{Error: fmt.Sprintf("invalid agent tool input: %v", err)}, nil
 	}
 
 	logger.DebugCF("agent.tool", "invoking agent", map[string]any{
@@ -124,18 +129,20 @@ func (t *Tool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) 
 	if t.parentRuntime != nil {
 		runner.SessionConfig = t.parentRuntime.SessionConfig
 	}
+	runner.ServerRegistry = t.serverRegistry
+	runner.ToolRegistry = t.toolRegistry
 	output, err := runner.Run(ctx, input)
 	if err != nil {
 		logger.WarnCF("agent.tool", "agent run failed", map[string]any{
 			"subagent_type": input.SubagentType,
 			"error":         err.Error(),
 		})
-		return tool.Result{Error: fmt.Sprintf("agent run failed: %v", err)}, nil
+		return coretool.Result{Error: fmt.Sprintf("agent run failed: %v", err)}, nil
 	}
 
 	resultJSON, marshalErr := json.Marshal(output)
 	if marshalErr != nil {
-		return tool.Result{Error: fmt.Sprintf("failed to marshal agent output: %v", marshalErr)}, nil
+		return coretool.Result{Error: fmt.Sprintf("failed to marshal agent output: %v", marshalErr)}, nil
 	}
 
 	logger.DebugCF("agent.tool", "agent run completed", map[string]any{
@@ -144,7 +151,7 @@ func (t *Tool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) 
 		"total_duration_ms": output.TotalDurationMs,
 	})
 
-	return tool.Result{
+	return coretool.Result{
 		Output: string(resultJSON),
 	}, nil
 }

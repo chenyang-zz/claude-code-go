@@ -360,6 +360,94 @@ func (r *ServerRegistry) updateStatus(idx int, status ServerStatus, errMsg strin
 	}
 }
 
+// GetEntry looks up an entry by server name.
+func (r *ServerRegistry) GetEntry(name string) (Entry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, e := range r.entries {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return Entry{}, false
+}
+
+// ConnectDynamicServer connects a single server dynamically and appends it to the registry.
+// Unlike ConnectAll, this returns the connected entry directly and is intended for
+// agent-specific MCP servers that are created at runtime.
+func (r *ServerRegistry) ConnectDynamicServer(ctx context.Context, name string, config client.ServerConfig) (*Entry, error) {
+	r.mu.RLock()
+	authToken := r.authToken
+	r.mu.RUnlock()
+
+	entry := Entry{Name: name, Config: config, Status: StatusDisabled}
+	transport, err := newTransportForEntry(ctx, entry, authToken)
+	if err != nil {
+		return nil, fmt.Errorf("transport: %w", err)
+	}
+
+	c := client.NewClient(transport)
+	result, err := c.Initialize(ctx, client.InitializeRequest{
+		ProtocolVersion: "2024-11-05",
+		Capabilities: client.ClientCapabilities{
+			Roots: map[string]any{},
+		},
+		ClientInfo: client.Implementation{
+			Name:    "claude-code-go",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("initialize: %w", err)
+	}
+
+	logger.DebugCF("mcp", "dynamic server connected", map[string]any{
+		"server":           entry.Name,
+		"protocol_version": result.ProtocolVersion,
+		"server_name":      result.ServerInfo.Name,
+	})
+
+	entry.Client = c
+	entry.Status = StatusConnected
+	entry.Capabilities = result.Capabilities
+	entry.Instructions = result.Instructions
+	entry.Error = ""
+
+	r.mu.Lock()
+	r.entries = append(r.entries, entry)
+	idx := len(r.entries) - 1
+	r.mu.Unlock()
+
+	r.registerNotificationHandlers(idx)
+	r.refreshConnectedSnapshots(ctx, idx)
+
+	// Re-read the entry from the registry so the returned snapshot includes
+	// the refreshed tool/resource/prompt lists.
+	r.mu.RLock()
+	entry = r.entries[idx]
+	r.mu.RUnlock()
+	return &entry, nil
+}
+
+// DisconnectServer closes and removes a dynamically connected server by name.
+// It is safe to call on entries that were connected via ConnectDynamicServer or LoadConfigs.
+func (r *ServerRegistry) DisconnectServer(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i, e := range r.entries {
+		if e.Name == name {
+			if e.Client != nil {
+				_ = e.Client.Close()
+			}
+			r.entries = append(r.entries[:i], r.entries[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("server %q not found in registry", name)
+}
+
 // CloseAll shuts down every active connection.
 func (r *ServerRegistry) CloseAll() {
 	r.mu.Lock()

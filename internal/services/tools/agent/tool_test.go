@@ -11,14 +11,14 @@ import (
 )
 
 func TestTool_Name(t *testing.T) {
-	tool := NewTool(nil, nil)
+	tool := NewTool(nil, nil, nil, nil)
 	if got := tool.Name(); got != "Agent" {
 		t.Errorf("Name() = %q, want %q", got, "Agent")
 	}
 }
 
 func TestTool_Description(t *testing.T) {
-	tool := NewTool(nil, nil)
+	tool := NewTool(nil, nil, nil, nil)
 	got := tool.Description()
 	if got == "" {
 		t.Error("Description() should not be empty")
@@ -36,7 +36,7 @@ func TestTool_Description_WithRegistry(t *testing.T) {
 		WhenToUse: "Search specialist",
 		Tools:     []string{"Read", "Bash"},
 	})
-	tool := NewTool(registry, nil)
+	tool := NewTool(registry, nil, nil, nil)
 	got := tool.Description()
 	if got == "" {
 		t.Error("Description() should not be empty")
@@ -51,21 +51,21 @@ func TestTool_Description_WithRegistry(t *testing.T) {
 }
 
 func TestTool_IsReadOnly(t *testing.T) {
-	tool := NewTool(nil, nil)
+	tool := NewTool(nil, nil, nil, nil)
 	if got := tool.IsReadOnly(); got != false {
 		t.Errorf("IsReadOnly() = %v, want false", got)
 	}
 }
 
 func TestTool_IsConcurrencySafe(t *testing.T) {
-	tool := NewTool(nil, nil)
+	tool := NewTool(nil, nil, nil, nil)
 	if got := tool.IsConcurrencySafe(); got != true {
 		t.Errorf("IsConcurrencySafe() = %v, want true", got)
 	}
 }
 
 func TestTool_InputSchema(t *testing.T) {
-	tool := NewTool(nil, nil)
+	tool := NewTool(nil, nil, nil, nil)
 	schema := tool.InputSchema()
 
 	requiredFields := []string{"description", "prompt"}
@@ -94,7 +94,7 @@ func TestTool_InputSchema(t *testing.T) {
 }
 
 func TestTool_Invoke_NilRegistry(t *testing.T) {
-	agentTool := NewTool(nil, nil)
+	agentTool := NewTool(nil, nil, nil, nil)
 	call := tool.Call{
 		Input: map[string]any{
 			"description": "test task",
@@ -112,7 +112,7 @@ func TestTool_Invoke_NilRegistry(t *testing.T) {
 
 func TestTool_Invoke_NilParentRuntime(t *testing.T) {
 	registry := agent.NewInMemoryRegistry()
-	agentTool := NewTool(registry, nil)
+	agentTool := NewTool(registry, nil, nil, nil)
 	call := tool.Call{
 		Input: map[string]any{
 			"description": "test task",
@@ -135,7 +135,7 @@ func TestTool_Invoke_InvalidInput(t *testing.T) {
 	// but for the invalid-input path the runtime is only checked for nil.
 	// Use a zero-value runtime; the decode failure should happen before runner.Run.
 	parentRuntime := &engine.Runtime{}
-	agentTool := NewTool(registry, parentRuntime)
+	agentTool := NewTool(registry, parentRuntime, nil, nil)
 
 	call := tool.Call{
 		Input: map[string]any{

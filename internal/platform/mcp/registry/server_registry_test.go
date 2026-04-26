@@ -439,6 +439,98 @@ func TestSetGetLastRegistry(t *testing.T) {
 	}
 }
 
+func TestServerRegistryGetEntry(t *testing.T) {
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"a": {Command: "echo"},
+		"b": {Command: "cat"},
+	})
+
+	entry, ok := r.GetEntry("a")
+	if !ok {
+		t.Fatal("expected to find entry 'a'")
+	}
+	if entry.Name != "a" {
+		t.Fatalf("name = %q, want 'a'", entry.Name)
+	}
+
+	_, ok = r.GetEntry("missing")
+	if ok {
+		t.Fatal("expected not to find 'missing'")
+	}
+}
+
+func TestServerRegistryConnectDynamicServer(t *testing.T) {
+	server := newRegistryHTTPServer(t)
+	defer server.Close()
+
+	r := NewServerRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	entry, err := r.ConnectDynamicServer(ctx, "dynamic-http", client.ServerConfig{
+		Type:    "http",
+		URL:     server.URL,
+		Headers: map[string]string{"X-Test": "ok"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectDynamicServer failed: %v", err)
+	}
+	if entry.Status != StatusConnected {
+		t.Fatalf("status = %q, want connected", entry.Status)
+	}
+	if len(entry.Tools) != 1 || entry.Tools[0].Name != "tool_one" {
+		t.Fatalf("tools = %#v", entry.Tools)
+	}
+
+	// Verify the entry is stored in the registry.
+	stored, ok := r.GetEntry("dynamic-http")
+	if !ok {
+		t.Fatal("dynamic-http not found in registry after connect")
+	}
+	if stored.Status != StatusConnected {
+		t.Fatalf("stored status = %q, want connected", stored.Status)
+	}
+}
+
+func TestServerRegistryDisconnectServer(t *testing.T) {
+	server := newRegistryHTTPServer(t)
+	defer server.Close()
+
+	r := NewServerRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := r.ConnectDynamicServer(ctx, "to-remove", client.ServerConfig{
+		Type:    "http",
+		URL:     server.URL,
+		Headers: map[string]string{"X-Test": "ok"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectDynamicServer failed: %v", err)
+	}
+
+	if _, ok := r.GetEntry("to-remove"); !ok {
+		t.Fatal("expected entry before disconnect")
+	}
+
+	if err := r.DisconnectServer("to-remove"); err != nil {
+		t.Fatalf("DisconnectServer failed: %v", err)
+	}
+
+	if _, ok := r.GetEntry("to-remove"); ok {
+		t.Fatal("expected entry to be removed after disconnect")
+	}
+}
+
+func TestServerRegistryDisconnectServer_NotFound(t *testing.T) {
+	r := NewServerRegistry()
+	err := r.DisconnectServer("missing")
+	if err == nil {
+		t.Fatal("expected error for missing server")
+	}
+}
+
 func newRegistryRemoteSSEServer(t *testing.T) *httptest.Server {
 	t.Helper()
 

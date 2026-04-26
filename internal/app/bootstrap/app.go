@@ -499,7 +499,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
-			agentTool := agenttool.NewTool(agentRegistry, runtime)
+			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
 				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
 			} else {
@@ -542,7 +542,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
-			agentTool := agenttool.NewTool(agentRegistry, runtime)
+			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
 				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
 			} else {
