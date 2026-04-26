@@ -9,25 +9,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadCustomAgents_MissingDir(t *testing.T) {
-	defs, errs, err := LoadCustomAgents(t.TempDir())
+func TestLoadProjectAgents_MissingDir(t *testing.T) {
+	defs, errs, err := LoadProjectAgents(t.TempDir())
 	require.NoError(t, err)
 	assert.Empty(t, defs)
 	assert.Empty(t, errs)
 }
 
-func TestLoadCustomAgents_EmptyDir(t *testing.T) {
+func TestLoadProjectAgents_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, defs)
 	assert.Empty(t, errs)
 }
 
-func TestLoadCustomAgents_SingleAgent(t *testing.T) {
+func TestLoadProjectAgents_SingleAgent(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -35,7 +35,7 @@ func TestLoadCustomAgents_SingleAgent(t *testing.T) {
 	content := "---\nname: search-agent\ndescription: A search specialist\n---\nYou are a search specialist."
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "search.md"), []byte(content), 0644))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, errs)
 	require.Len(t, defs, 1)
@@ -45,7 +45,7 @@ func TestLoadCustomAgents_SingleAgent(t *testing.T) {
 	assert.Equal(t, "You are a search specialist.", defs[0].SystemPrompt)
 }
 
-func TestLoadCustomAgents_MultipleAgents(t *testing.T) {
+func TestLoadProjectAgents_MultipleAgents(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -61,7 +61,7 @@ func TestLoadCustomAgents_MultipleAgents(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, errs)
 	require.Len(t, defs, 2)
@@ -74,7 +74,7 @@ func TestLoadCustomAgents_MultipleAgents(t *testing.T) {
 	assert.Contains(t, types, "agent-2")
 }
 
-func TestLoadCustomAgents_NonAgentMarkdown(t *testing.T) {
+func TestLoadProjectAgents_NonAgentMarkdown(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -86,13 +86,13 @@ func TestLoadCustomAgents_NonAgentMarkdown(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, defs)
 	assert.Empty(t, errs)
 }
 
-func TestLoadCustomAgents_InvalidAgent(t *testing.T) {
+func TestLoadProjectAgents_InvalidAgent(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -104,14 +104,14 @@ func TestLoadCustomAgents_InvalidAgent(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, defs)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error, "missing required 'description'")
 }
 
-func TestLoadCustomAgents_SingleFailureDoesNotBlockOthers(t *testing.T) {
+func TestLoadProjectAgents_SingleFailureDoesNotBlockOthers(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -127,7 +127,7 @@ func TestLoadCustomAgents_SingleFailureDoesNotBlockOthers(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	require.Len(t, defs, 1)
 	assert.Equal(t, "good-agent", defs[0].AgentType)
@@ -135,7 +135,7 @@ func TestLoadCustomAgents_SingleFailureDoesNotBlockOthers(t *testing.T) {
 	assert.Contains(t, errs[0].Error, "missing required 'description'")
 }
 
-func TestLoadCustomAgents_RecursiveSubdir(t *testing.T) {
+func TestLoadProjectAgents_RecursiveSubdir(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents", "sub")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -146,14 +146,14 @@ func TestLoadCustomAgents_RecursiveSubdir(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, errs)
 	require.Len(t, defs, 1)
 	assert.Equal(t, "nested-agent", defs[0].AgentType)
 }
 
-func TestLoadCustomAgents_NonMdFilesIgnored(t *testing.T) {
+func TestLoadProjectAgents_NonMdFilesIgnored(t *testing.T) {
 	dir := t.TempDir()
 	agentsDir := filepath.Join(dir, ".claude", "agents")
 	require.NoError(t, os.MkdirAll(agentsDir, 0755))
@@ -164,7 +164,7 @@ func TestLoadCustomAgents_NonMdFilesIgnored(t *testing.T) {
 		0644,
 	))
 
-	defs, errs, err := LoadCustomAgents(dir)
+	defs, errs, err := LoadProjectAgents(dir)
 	require.NoError(t, err)
 	assert.Empty(t, defs)
 	assert.Empty(t, errs)

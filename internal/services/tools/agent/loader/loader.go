@@ -15,15 +15,15 @@ type LoadError struct {
 	Error string
 }
 
-// LoadCustomAgents discovers and loads custom agent definitions from the
-// project's .claude/agents directory.
+// LoadProjectAgents discovers and loads project-scoped agent definitions from
+// the project's .claude/agents directory.
 //
 // It walks the directory recursively, reads every .md file, extracts YAML
 // frontmatter, and builds an agent.Definition. Files that fail to parse are
 // recorded in the returned error slice but do not abort the overall load.
 //
 // The returned source for every loaded agent is "projectSettings".
-func LoadCustomAgents(projectDir string) ([]agent.Definition, []LoadError, error) {
+func LoadProjectAgents(projectDir string) ([]agent.Definition, []LoadError, error) {
 	agentsDir := filepath.Join(projectDir, ".claude", "agents")
 
 	// Check existence. Missing directory is not an error — just no custom agents.
@@ -58,7 +58,7 @@ func LoadCustomAgents(projectDir string) ([]agent.Definition, []LoadError, error
 	var loadErrors []LoadError
 
 	for _, filePath := range files {
-		def, err := loadAgentFile(filePath, agentsDir)
+		def, err := loadAgentFile(filePath, agentsDir, "projectSettings")
 		if err != nil {
 			loadErrors = append(loadErrors, LoadError{
 				Path:  filePath,
@@ -77,10 +77,71 @@ func LoadCustomAgents(projectDir string) ([]agent.Definition, []LoadError, error
 	return defs, loadErrors, nil
 }
 
+// LoadUserAgents discovers and loads custom agent definitions from the
+// user's ~/.claude/agents directory.
+//
+// It walks the directory recursively, reads every .md file, extracts YAML
+// frontmatter, and builds an agent.Definition. Files that fail to parse are
+// recorded in the returned error slice but do not abort the overall load.
+//
+// The returned source for every loaded agent is "userSettings".
+func LoadUserAgents(homeDir string) ([]agent.Definition, []LoadError, error) {
+	agentsDir := filepath.Join(homeDir, ".claude", "agents")
+
+	// Check existence. Missing directory is not an error — just no user agents.
+	info, err := os.Stat(agentsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to stat user agents directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, nil, fmt.Errorf("user agents path is not a directory: %s", agentsDir)
+	}
+
+	var files []string
+	// Walk recursively to find all .md files.
+	err = filepath.WalkDir(agentsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			// Permission errors on individual files are logged but don't stop the walk.
+			return nil
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".md") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to walk user agents directory: %w", err)
+	}
+
+	var defs []agent.Definition
+	var loadErrors []LoadError
+
+	for _, filePath := range files {
+		def, err := loadAgentFile(filePath, agentsDir, "userSettings")
+		if err != nil {
+			loadErrors = append(loadErrors, LoadError{
+				Path:  filePath,
+				Error: err.Error(),
+			})
+			continue
+		}
+		// Skip files that don't look like agent definitions (no name in frontmatter).
+		if def.AgentType == "" {
+			continue
+		}
+		defs = append(defs, def)
+	}
+
+	return defs, loadErrors, nil
+}
+
 // loadAgentFile reads a single markdown file and converts it to an agent.Definition.
 // Files without a 'name' field in frontmatter are treated as non-agent markdown
 // and return an empty definition without error, allowing silent skipping.
-func loadAgentFile(filePath string, baseDir string) (agent.Definition, error) {
+func loadAgentFile(filePath string, baseDir string, source string) (agent.Definition, error) {
 	raw, err := os.ReadFile(filePath)
 	if err != nil {
 		return agent.Definition{}, fmt.Errorf("failed to read file: %w", err)
@@ -96,7 +157,7 @@ func loadAgentFile(filePath string, baseDir string) (agent.Definition, error) {
 		return agent.Definition{}, nil
 	}
 
-	def, err := BuildDefinitionFromFrontmatter(filePath, baseDir, fm, content, "projectSettings")
+	def, err := BuildDefinitionFromFrontmatter(filePath, baseDir, fm, content, source)
 	if err != nil {
 		return agent.Definition{}, err
 	}
