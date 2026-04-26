@@ -387,6 +387,54 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("remote-env"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /remote-env command")
 	}
+	if _, ok := app.Runner.Commands.Get("desktop"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /desktop command")
+	}
+	if _, ok := app.Runner.Commands.Get("app"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /app alias")
+	}
+	if _, ok := app.Runner.Commands.Get("mobile"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /mobile command")
+	}
+	if _, ok := app.Runner.Commands.Get("ios"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /ios alias")
+	}
+	if _, ok := app.Runner.Commands.Get("android"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /android alias")
+	}
+	if _, ok := app.Runner.Commands.Get("feedback"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /feedback command")
+	}
+	if _, ok := app.Runner.Commands.Get("bug"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /bug alias")
+	}
+	if _, ok := app.Runner.Commands.Get("exit"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /exit command")
+	}
+	if _, ok := app.Runner.Commands.Get("quit"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /quit alias")
+	}
+	if _, ok := app.Runner.Commands.Get("install"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /install command")
+	}
+	if _, ok := app.Runner.Commands.Get("context"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /context command")
+	}
+	if _, ok := app.Runner.Commands.Get("review"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /review command")
+	}
+	if _, ok := app.Runner.Commands.Get("rewind"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /rewind command")
+	}
+	if _, ok := app.Runner.Commands.Get("checkpoint"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /checkpoint alias")
+	}
+	if _, ok := app.Runner.Commands.Get("skills"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /skills command")
+	}
+	if _, ok := app.Runner.Commands.Get("tag"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /tag command")
+	}
 	if _, ok := app.Runner.Commands.Get("privacy-settings"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /privacy-settings command")
 	}
@@ -558,8 +606,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 50 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 50", len(cmds))
+	if len(cmds) != 60 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 60", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -755,166 +803,241 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() twenty-seventh metadata = %#v, want remote-env metadata", got)
 	}
 	if got := cmds[27].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "desktop",
+		Aliases:     []string{"app"},
+		Description: "Continue the current session in Claude Desktop",
+		Usage:       "/desktop",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-eighth metadata = %#v, want desktop metadata", got)
+	}
+	if got := cmds[28].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "mobile",
+		Aliases:     []string{"ios", "android"},
+		Description: "Show QR code to download the Claude mobile app",
+		Usage:       "/mobile",
+	}) {
+		t.Fatalf("newCommandRegistry() twenty-ninth metadata = %#v, want mobile metadata", got)
+	}
+	if got := cmds[29].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "feedback",
+		Aliases:     []string{"bug"},
+		Description: "Submit feedback about Claude Code",
+		Usage:       "/feedback [report]",
+	}) {
+		t.Fatalf("newCommandRegistry() thirtieth metadata = %#v, want feedback metadata", got)
+	}
+	if got := cmds[30].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "exit",
+		Aliases:     []string{"quit"},
+		Description: "Exit the REPL",
+		Usage:       "/exit",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-first metadata = %#v, want exit metadata", got)
+	}
+	if got := cmds[31].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "install",
+		Description: "Install Claude Code native build",
+		Usage:       "/install [options]",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-second metadata = %#v, want install metadata", got)
+	}
+	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "context",
+		Description: "Show current context usage",
+		Usage:       "/context",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-third metadata = %#v, want context metadata", got)
+	}
+	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "review",
+		Description: "Review a pull request",
+		Usage:       "/review [pr-number]",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-fourth metadata = %#v, want review metadata", got)
+	}
+	if got := cmds[34].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "rewind",
+		Aliases:     []string{"checkpoint"},
+		Description: "Restore the code and/or conversation to a previous point",
+		Usage:       "/rewind",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-fifth metadata = %#v, want rewind metadata", got)
+	}
+	if got := cmds[35].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "skills",
+		Description: "List available skills",
+		Usage:       "/skills",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-sixth metadata = %#v, want skills metadata", got)
+	}
+	if got := cmds[36].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "tag",
+		Description: "Toggle a searchable tag on the current session",
+		Usage:       "/tag <tag-name>",
+	}) {
+		t.Fatalf("newCommandRegistry() thirty-seventh metadata = %#v, want tag metadata", got)
+	}
+	if got := cmds[37].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "privacy-settings",
 		Description: "View and update your privacy settings",
 		Usage:       "/privacy-settings",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-eighth metadata = %#v, want privacy-settings metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-eighth metadata = %#v, want privacy-settings metadata", got)
 	}
-	if got := cmds[28].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[38].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "plan",
 		Description: "Enable plan mode or view the current session plan",
 		Usage:       "/plan [open|<description>]",
 	}) {
-		t.Fatalf("newCommandRegistry() twenty-ninth metadata = %#v, want plan metadata", got)
+		t.Fatalf("newCommandRegistry() thirty-ninth metadata = %#v, want plan metadata", got)
 	}
-	if got := cmds[29].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[39].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "tasks",
 		Aliases:     []string{"bashes"},
 		Description: "List and manage background tasks",
 		Usage:       "/tasks",
 	}) {
-		t.Fatalf("newCommandRegistry() thirtieth metadata = %#v, want tasks metadata", got)
+		t.Fatalf("newCommandRegistry() fortieth metadata = %#v, want tasks metadata", got)
 	}
-	if got := cmds[30].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[40].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "diff",
 		Description: "View uncommitted changes and per-turn diffs",
 		Usage:       "/diff",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-first metadata = %#v, want diff metadata", got)
+		t.Fatalf("newCommandRegistry() forty-first metadata = %#v, want diff metadata", got)
 	}
-	if got := cmds[31].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[41].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "files",
 		Description: "List all files currently in context",
 		Usage:       "/files",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-second metadata = %#v, want files metadata", got)
+		t.Fatalf("newCommandRegistry() forty-second metadata = %#v, want files metadata", got)
 	}
-	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[42].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "copy",
 		Description: "Copy Claude's last response to clipboard (or /copy N for the Nth-latest)",
 		Usage:       "/copy [N]",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-third metadata = %#v, want copy metadata", got)
+		t.Fatalf("newCommandRegistry() forty-third metadata = %#v, want copy metadata", got)
 	}
-	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[43].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "export",
 		Description: "Export the current conversation to a file or clipboard",
 		Usage:       "/export [filename]",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-fourth metadata = %#v, want export metadata", got)
+		t.Fatalf("newCommandRegistry() forty-fourth metadata = %#v, want export metadata", got)
 	}
-	if got := cmds[34].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[44].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "version",
 		Description: "Print the version this session is running (not what autoupdate downloaded)",
 		Usage:       "/version",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-fifth metadata = %#v, want version metadata", got)
+		t.Fatalf("newCommandRegistry() forty-fifth metadata = %#v, want version metadata", got)
 	}
-	if got := cmds[35].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[45].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "release-notes",
 		Description: "View release notes",
 		Usage:       "/release-notes",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-sixth metadata = %#v, want release-notes metadata", got)
+		t.Fatalf("newCommandRegistry() forty-sixth metadata = %#v, want release-notes metadata", got)
 	}
-	if got := cmds[36].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[46].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "upgrade",
 		Description: "Upgrade to Max for higher rate limits and more Opus",
 		Usage:       "/upgrade",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-seventh metadata = %#v, want upgrade metadata", got)
+		t.Fatalf("newCommandRegistry() forty-seventh metadata = %#v, want upgrade metadata", got)
 	}
-	if got := cmds[37].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[47].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "usage",
 		Description: "Show plan usage limits",
 		Usage:       "/usage",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-eighth metadata = %#v, want usage metadata", got)
+		t.Fatalf("newCommandRegistry() forty-eighth metadata = %#v, want usage metadata", got)
 	}
-	if got := cmds[38].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[48].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "stats",
 		Description: "Show your Claude Code usage statistics and activity",
 		Usage:       "/stats",
 	}) {
-		t.Fatalf("newCommandRegistry() thirty-ninth metadata = %#v, want stats metadata", got)
+		t.Fatalf("newCommandRegistry() forty-ninth metadata = %#v, want stats metadata", got)
 	}
-	if got := cmds[39].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[49].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "extra-usage",
 		Description: "Configure extra usage to keep working when limits are hit",
 		Usage:       "/extra-usage",
 	}) {
-		t.Fatalf("newCommandRegistry() fortieth metadata = %#v, want extra-usage metadata", got)
+		t.Fatalf("newCommandRegistry() fiftieth metadata = %#v, want extra-usage metadata", got)
 	}
-	if got := cmds[40].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[50].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "theme",
 		Description: "Change the theme",
 		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-first metadata = %#v, want theme metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-first metadata = %#v, want theme metadata", got)
 	}
-	if got := cmds[41].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[51].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-second metadata = %#v, want vim metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-second metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[42].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[52].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "terminal-setup",
 		Description: "Install Shift+Enter key binding for newlines",
 		Usage:       "/terminal-setup",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-third metadata = %#v, want terminal-setup metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-third metadata = %#v, want terminal-setup metadata", got)
 	}
-	if got := cmds[43].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[53].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "keybindings",
 		Description: "Open or create your keybindings configuration file",
 		Usage:       "/keybindings",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-fourth metadata = %#v, want keybindings metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-fourth metadata = %#v, want keybindings metadata", got)
 	}
-	if got := cmds[44].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[54].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "pr-comments",
 		Description: "Get comments from a GitHub pull request",
 		Usage:       "/pr-comments",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-fifth metadata = %#v, want pr-comments metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-fifth metadata = %#v, want pr-comments metadata", got)
 	}
-	if got := cmds[45].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[55].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "security-review",
 		Description: "Complete a security review of the pending changes on the current branch",
 		Usage:       "/security-review",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-sixth metadata = %#v, want security-review metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-sixth metadata = %#v, want security-review metadata", got)
 	}
-	if got := cmds[46].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[56].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "agents",
 		Description: "Manage agent configurations",
 		Usage:       "/agents",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-seventh metadata = %#v, want agents metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-seventh metadata = %#v, want agents metadata", got)
 	}
-	if got := cmds[47].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[57].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "plugin",
 		Aliases:     []string{"plugins", "marketplace"},
 		Description: "Manage Claude Code plugins",
 		Usage:       "/plugin [subcommand]",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-eighth metadata = %#v, want plugin metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-eighth metadata = %#v, want plugin metadata", got)
 	}
-	if got := cmds[48].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[58].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "hooks",
 		Description: "View hook configurations for tool events",
 		Usage:       "/hooks",
 	}) {
-		t.Fatalf("newCommandRegistry() forty-ninth metadata = %#v, want hooks metadata", got)
+		t.Fatalf("newCommandRegistry() fifty-ninth metadata = %#v, want hooks metadata", got)
 	}
-	if got := cmds[49].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[59].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() fiftieth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() sixtieth metadata = %#v, want seed-sessions metadata", got)
 	}
 }

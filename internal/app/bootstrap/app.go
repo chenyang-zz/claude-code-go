@@ -296,6 +296,36 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.RemoteEnvCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.DesktopCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.MobileCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.FeedbackCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ExitCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InstallCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ContextCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ReviewCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.RewindCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.SkillsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.TagCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.PrivacySettingsCommand{}); err != nil {
 		return nil, err
 	}
@@ -607,30 +637,30 @@ func buildSessionConfigSnapshot(cfg coreconfig.Config, agentRegistry agent.Regis
 // filterSettingsForSnapshot returns a safe subset of runtime configuration for guide agent prompts.
 func filterSettingsForSnapshot(cfg coreconfig.Config) map[string]any {
 	safe := map[string]any{
-		"model":                    cfg.Model,
-		"provider":                 cfg.Provider,
-		"effortLevel":              cfg.EffortLevel,
-		"theme":                    cfg.Theme,
-		"editorMode":               cfg.EditorMode,
-		"approvalMode":             cfg.ApprovalMode,
-		"outputFormat":             cfg.OutputFormat,
-		"outputStyle":              cfg.OutputStyle,
-		"language":                 cfg.Language,
-		"fastMode":                 cfg.FastMode,
-		"enablePromptCaching":      cfg.EnablePromptCaching,
-		"autoUpdatesChannel":       cfg.AutoUpdatesChannel,
-		"plansDirectory":           cfg.PlansDirectory,
-		"skipWebFetchPreflight":    cfg.SkipWebFetchPreflight,
-		"disableAllHooks":          cfg.DisableAllHooks,
-		"allowManagedHooksOnly":    cfg.AllowManagedHooksOnly,
-		"allowedHttpHookUrls":      cfg.AllowedHttpHookUrls,
-		"httpHookAllowedEnvVars":   cfg.HttpHookAllowedEnvVars,
-		"channelsEnabled":          cfg.ChannelsEnabled,
-		"claudeMdExcludes":         cfg.ClaudeMdExcludes,
-		"additionalDirectories":    cfg.Permissions.AdditionalDirectories,
-		"loadedSettingSources":     cfg.LoadedSettingSources,
+		"model":                  cfg.Model,
+		"provider":               cfg.Provider,
+		"effortLevel":            cfg.EffortLevel,
+		"theme":                  cfg.Theme,
+		"editorMode":             cfg.EditorMode,
+		"approvalMode":           cfg.ApprovalMode,
+		"outputFormat":           cfg.OutputFormat,
+		"outputStyle":            cfg.OutputStyle,
+		"language":               cfg.Language,
+		"fastMode":               cfg.FastMode,
+		"enablePromptCaching":    cfg.EnablePromptCaching,
+		"autoUpdatesChannel":     cfg.AutoUpdatesChannel,
+		"plansDirectory":         cfg.PlansDirectory,
+		"skipWebFetchPreflight":  cfg.SkipWebFetchPreflight,
+		"disableAllHooks":        cfg.DisableAllHooks,
+		"allowManagedHooksOnly":  cfg.AllowManagedHooksOnly,
+		"allowedHttpHookUrls":    cfg.AllowedHttpHookUrls,
+		"httpHookAllowedEnvVars": cfg.HttpHookAllowedEnvVars,
+		"channelsEnabled":        cfg.ChannelsEnabled,
+		"claudeMdExcludes":       cfg.ClaudeMdExcludes,
+		"additionalDirectories":  cfg.Permissions.AdditionalDirectories,
+		"loadedSettingSources":   cfg.LoadedSettingSources,
 		"policySettings": map[string]any{
-			"origin":     cfg.PolicySettings.Origin,
+			"origin":      cfg.PolicySettings.Origin,
 			"hasBaseFile": cfg.PolicySettings.HasBaseFile,
 			"hasDropIns":  cfg.PolicySettings.HasDropIns,
 		},
