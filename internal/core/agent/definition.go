@@ -1,6 +1,9 @@
 package agent
 
-import "github.com/sheepzhao/claude-code-go/internal/core/tool"
+import (
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
+	"github.com/sheepzhao/claude-code-go/internal/core/tool"
+)
 
 // Definition holds the static configuration for an agent.
 // It is the Go-side equivalent of the TypeScript AgentDefinition union type
@@ -55,6 +58,38 @@ type Definition struct {
 	// SystemPromptProvider generates the system prompt for this agent.
 	// Built-in agents use this to provide dynamic prompts; custom agents may leave it nil.
 	SystemPromptProvider SystemPromptProvider
+
+	// Color is the display color for this agent.
+	// Valid values: "red", "blue", "green", "yellow", "purple", "orange", "pink", "cyan".
+	// Empty means no custom color is set.
+	Color string
+
+	// MCPServers declares MCP servers specific to this agent.
+	// Each entry is either a reference to an existing server by name, or an inline
+	// server definition. Only used by custom agents; built-in agents leave this nil.
+	MCPServers []AgentMCPServerSpec
+
+	// Hooks declares session-scoped hooks registered when this agent starts.
+	// Uses the same structure as global hooks configuration.
+	// Only used by custom agents; built-in agents leave this nil.
+	Hooks hook.HooksConfig
+}
+
+// AgentMCPServerSpec represents an MCP server declaration in an agent definition.
+// It supports two forms:
+//   1. A reference to an existing server by name (Name set, Config nil).
+//   2. An inline server definition (Name set to the server name, Config holds
+//      the raw configuration as a map).
+//
+// When Config is nil, the spec is a name-only reference.
+type AgentMCPServerSpec struct {
+	// Name is the server name. For references, this is the name of an existing
+	// server configured in settings. For inline definitions, this is the key
+	// from the frontmatter object.
+	Name string
+	// Config holds the raw server configuration for inline definitions.
+	// When nil, this spec is a reference to an existing server by name.
+	Config map[string]any
 }
 
 // SystemPromptProvider generates the system prompt for an agent.

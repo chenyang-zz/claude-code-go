@@ -3,6 +3,7 @@ package loader
 import (
 	"testing"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -327,4 +328,317 @@ func TestBuildDefinitionFromFrontmatter_Full(t *testing.T) {
 	assert.Equal(t, "worktree", def.Isolation)
 	assert.Equal(t, "Start here", def.InitialPrompt)
 	assert.Equal(t, "System prompt.", def.SystemPrompt)
+}
+
+func TestBuildDefinitionFromFrontmatter_Color(t *testing.T) {
+	cases := []struct {
+		value    string
+		expected string
+	}{
+		{"red", "red"},
+		{"BLUE", "blue"},
+		{"  green  ", "green"},
+		{"invalid", ""},
+		{"", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			fm := map[string]any{
+				"name":        "agent",
+				"description": "test",
+				"color":       tc.value,
+			}
+			def, err := BuildDefinitionFromFrontmatter("test.md", "/agents", fm, "", "projectSettings")
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, def.Color)
+		})
+	}
+}
+
+func TestBuildDefinitionFromFrontmatter_MCPServers(t *testing.T) {
+	cases := []struct {
+		name     string
+		value    any
+		expected []agent.AgentMCPServerSpec
+	}{
+		{
+			name:     "nil",
+			value:    nil,
+			expected: nil,
+		},
+		{
+			name:     "empty_array",
+			value:    []any{},
+			expected: nil,
+		},
+		{
+			name:  "reference_only",
+			value: []any{"slack", "github"},
+			expected: []agent.AgentMCPServerSpec{
+				{Name: "slack"},
+				{Name: "github"},
+			},
+		},
+		{
+			name: "inline_definition",
+			value: []any{
+				map[string]any{
+					"my-server": map[string]any{
+						"type":    "stdio",
+						"command": "npx",
+						"args":    []any{"-y", "@modelcontextprotocol/server-filesystem"},
+					},
+				},
+			},
+			expected: []agent.AgentMCPServerSpec{
+				{
+					Name: "my-server",
+					Config: map[string]any{
+						"type":    "stdio",
+						"command": "npx",
+						"args":    []any{"-y", "@modelcontextprotocol/server-filesystem"},
+					},
+				},
+			},
+		},
+		{
+			name:  "mixed",
+			value: []any{"slack", map[string]any{"inline": map[string]any{"type": "stdio", "command": "node"}}},
+			expected: []agent.AgentMCPServerSpec{
+				{Name: "slack"},
+				{Name: "inline", Config: map[string]any{"type": "stdio", "command": "node"}},
+			},
+		},
+		{
+			name:     "invalid_non_array",
+			value:    "not-an-array",
+			expected: nil,
+		},
+		{
+			name:     "invalid_elements_filtered",
+			value:    []any{123, "valid", map[string]any{}},
+			expected: []agent.AgentMCPServerSpec{{Name: "valid"}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm := map[string]any{
+				"name":        "agent",
+				"description": "test",
+			}
+			if tc.value != nil {
+				fm["mcpServers"] = tc.value
+			}
+			def, err := BuildDefinitionFromFrontmatter("test.md", "/agents", fm, "", "projectSettings")
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, def.MCPServers)
+		})
+	}
+}
+
+func TestBuildDefinitionFromFrontmatter_Hooks(t *testing.T) {
+	cases := []struct {
+		name     string
+		value    any
+		expected bool // whether Hooks should be non-nil
+	}{
+		{"nil", nil, false},
+		{"empty_map", map[string]any{}, false},
+		{
+			"valid_hooks",
+			map[string]any{
+				"Stop": []any{
+					map[string]any{
+						"hooks": []any{
+							map[string]any{"type": "command", "command": "echo done"},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"invalid_event_ignored",
+			map[string]any{
+				"UnknownEvent": []any{
+					map[string]any{
+						"hooks": []any{
+							map[string]any{"type": "command", "command": "echo done"},
+						},
+					},
+				},
+			},
+			false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm := map[string]any{
+				"name":        "agent",
+				"description": "test",
+			}
+			if tc.value != nil {
+				fm["hooks"] = tc.value
+			}
+			def, err := BuildDefinitionFromFrontmatter("test.md", "/agents", fm, "", "projectSettings")
+			require.NoError(t, err)
+			if tc.expected {
+				assert.NotNil(t, def.Hooks)
+			} else {
+				assert.Nil(t, def.Hooks)
+			}
+		})
+	}
+}
+
+func TestBuildDefinitionFromFrontmatter_AllNewFields(t *testing.T) {
+	fm := map[string]any{
+		"name":        "advanced-agent",
+		"description": "An agent with all new fields",
+		"color":       "purple",
+		"mcpServers": []any{
+			"slack",
+			map[string]any{
+				"custom-fs": map[string]any{
+					"type":    "stdio",
+					"command": "npx",
+				},
+			},
+		},
+		"hooks": map[string]any{
+			"Stop": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "echo stop"},
+					},
+				},
+			},
+		},
+	}
+	def, err := BuildDefinitionFromFrontmatter("test.md", "/agents", fm, "", "projectSettings")
+	require.NoError(t, err)
+	assert.Equal(t, "purple", def.Color)
+	assert.Len(t, def.MCPServers, 2)
+	assert.Equal(t, "slack", def.MCPServers[0].Name)
+	assert.Equal(t, "custom-fs", def.MCPServers[1].Name)
+	assert.NotNil(t, def.MCPServers[1].Config)
+	assert.NotNil(t, def.Hooks)
+	assert.True(t, def.Hooks.HasEvent("Stop"))
+}
+
+// Direct unit tests for new parser functions.
+
+func TestParseAgentColor(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"red", "red"},
+		{"BLUE", "blue"},
+		{"  Green  ", "green"},
+		{"yellow", "yellow"},
+		{"purple", "purple"},
+		{"orange", "orange"},
+		{"pink", "pink"},
+		{"cyan", "cyan"},
+		{"invalid", ""},
+		{"", ""},
+		{"redd", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := parseAgentColor(tc.input)
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
+
+func TestParseAgentMCPServers(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    any
+		expected []agent.AgentMCPServerSpec
+	}{
+		{"nil", nil, nil},
+		{"not_array", "string", nil},
+		{"empty_array", []any{}, nil},
+		{
+			"string_references",
+			[]any{"slack", "github"},
+			[]agent.AgentMCPServerSpec{{Name: "slack"}, {Name: "github"}},
+		},
+		{
+			"inline_definition",
+			[]any{map[string]any{"my-server": map[string]any{"type": "stdio", "command": "npx"}}},
+			[]agent.AgentMCPServerSpec{{Name: "my-server", Config: map[string]any{"type": "stdio", "command": "npx"}}},
+		},
+		{
+			"mixed",
+			[]any{"slack", map[string]any{"inline": map[string]any{"type": "stdio"}}},
+			[]agent.AgentMCPServerSpec{{Name: "slack"}, {Name: "inline", Config: map[string]any{"type": "stdio"}}},
+		},
+		{
+			"invalid_elements_filtered",
+			[]any{123, true, "valid", map[string]any{}},
+			[]agent.AgentMCPServerSpec{{Name: "valid"}},
+		},
+		{
+			"empty_string_skipped",
+			[]any{"", "valid"},
+			[]agent.AgentMCPServerSpec{{Name: "valid"}},
+		},
+		{
+			"multi_key_map_skipped",
+			[]any{map[string]any{"a": map[string]any{}, "b": map[string]any{}}},
+			nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAgentMCPServers(tc.input)
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
+
+func TestParseAgentHooks(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    any
+		expected bool // whether result should be non-nil
+	}{
+		{"nil", nil, false},
+		{"valid_command_hook", map[string]any{
+			"Stop": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "echo hello"},
+					},
+				},
+			},
+		}, true},
+		{"invalid_event_ignored", map[string]any{
+			"UnknownEvent": []any{
+				map[string]any{
+					"hooks": []any{
+						map[string]any{"type": "command", "command": "echo hello"},
+					},
+				},
+			},
+		}, false},
+		{"non_map", "not-a-map", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseAgentHooks(tc.input)
+			if tc.expected {
+				assert.NotNil(t, got)
+			} else {
+				assert.Nil(t, got)
+			}
+		})
+	}
 }

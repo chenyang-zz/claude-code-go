@@ -1,6 +1,7 @@
 package loader
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 )
 
 // validPermissionModes lists the valid permission mode values for agent definitions.
@@ -128,6 +130,27 @@ func BuildDefinitionFromFrontmatter(
 	// InitialPrompt: non-empty string after trimming.
 	if v := getString(fm, "initialPrompt"); v != "" {
 		def.InitialPrompt = strings.TrimSpace(v)
+	}
+
+	// Color: validate against known color names.
+	if v := getString(fm, "color"); v != "" {
+		if c := parseAgentColor(v); c != "" {
+			def.Color = c
+		}
+	}
+
+	// MCPServers: parse array of server references or inline definitions.
+	if v, ok := fm["mcpServers"]; ok {
+		if servers := parseAgentMCPServers(v); len(servers) > 0 {
+			def.MCPServers = servers
+		}
+	}
+
+	// Hooks: parse session-scoped hooks.
+	if v, ok := fm["hooks"]; ok {
+		if hooksCfg := parseAgentHooks(v); hooksCfg != nil {
+			def.Hooks = hooksCfg
+		}
 	}
 
 	return def, nil
@@ -274,6 +297,111 @@ func parsePositiveInt(v any) int {
 		}
 	}
 	return 0
+}
+
+// validAgentColors lists the known display color names for agents.
+var validAgentColors = []string{
+	"red", "blue", "green", "yellow",
+	"purple", "orange", "pink", "cyan",
+}
+
+// parseAgentColor validates an agent color value from frontmatter.
+// Returns the color name if it is in the valid set, otherwise empty string.
+func parseAgentColor(v string) string {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if slices.Contains(validAgentColors, v) {
+		return v
+	}
+	return ""
+}
+
+// parseAgentMCPServers parses the mcpServers frontmatter value.
+//
+// Expected frontmatter structure (YAML):
+//   mcpServers:
+//     - slack                    # reference by name
+//     - my-server:               # inline definition
+//         type: stdio
+//         command: npx
+//         args: ["-y", "@modelcontextprotocol/server-filesystem"]
+//
+// Returns nil for non-array input or when all elements are invalid.
+// Invalid individual elements are silently skipped.
+func parseAgentMCPServers(v any) []agent.AgentMCPServerSpec {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+
+	var result []agent.AgentMCPServerSpec
+	for _, item := range arr {
+		switch val := item.(type) {
+		case string:
+			if val = strings.TrimSpace(val); val != "" {
+				result = append(result, agent.AgentMCPServerSpec{Name: val})
+			}
+		case map[string]any:
+			// Inline definition: map should have exactly one key (server name)
+			// whose value is the server configuration.
+			if len(val) == 1 {
+				for name, config := range val {
+					name = strings.TrimSpace(name)
+					if name == "" {
+						continue
+					}
+					configMap, ok := config.(map[string]any)
+					if !ok {
+						continue
+					}
+					result = append(result, agent.AgentMCPServerSpec{
+						Name:   name,
+						Config: configMap,
+					})
+				}
+			}
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// parseAgentHooks parses the hooks frontmatter value into a HooksConfig.
+//
+// Expected frontmatter structure (YAML):
+//   hooks:
+//     PreToolUse:
+//       - matcher: Bash
+//         hooks:
+//           - type: command
+//             command: echo "before tool"
+//
+// Returns nil for missing or invalid input.
+func parseAgentHooks(v any) hook.HooksConfig {
+	if v == nil {
+		return nil
+	}
+
+	// The frontmatter value is a map[string]any from yaml.v3.
+	// We need to convert it to JSON so we can use hook.ParseHooksConfig.
+	rawJSON, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+
+	// Unmarshal into map[string]json.RawMessage first.
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawJSON, &rawMap); err != nil {
+		return nil
+	}
+
+	cfg, err := hook.ParseHooksConfig(rawMap)
+	if err != nil {
+		return nil
+	}
+	return cfg
 }
 
 // parseBool parses a boolean frontmatter value.
