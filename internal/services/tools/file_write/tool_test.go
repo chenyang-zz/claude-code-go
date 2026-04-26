@@ -14,6 +14,27 @@ import (
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 )
 
+// TestToolDescription verifies the FileWriteTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformfs.NewLocalFS(), nil)
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"Writes a file",
+		"Read tool first",
+		"Edit tool",
+		"documentation files",
+		"README files",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
+
 // TestToolInvokeCreatesFile verifies the first-batch FileWriteTool can create a new file and its parent directories.
 func TestToolInvokeCreatesFile(t *testing.T) {
 	projectDir := t.TempDir()

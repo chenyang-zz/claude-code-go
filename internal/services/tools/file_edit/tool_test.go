@@ -14,6 +14,27 @@ import (
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 )
 
+// TestToolDescription verifies the FileEditTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformfs.NewLocalFS(), nil)
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"exact string replacements",
+		"Read tool",
+		"old_string",
+		"replace_all",
+		"line number prefix",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
+
 // TestToolInvokeReplacesSingleOccurrence verifies the first-batch FileEditTool replaces one unique match in place.
 func TestToolInvokeReplacesSingleOccurrence(t *testing.T) {
 	projectDir := t.TempDir()

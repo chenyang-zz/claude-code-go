@@ -10,7 +10,6 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
-	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -57,8 +56,9 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	// 2. Build system prompt
 	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd, SessionConfig: r.SessionConfig})
 
-	// 3. Filter tools based on disallowed list
-	filteredTools := filterToolCatalog(r.ParentRuntime.ToolCatalog, def.DisallowedTools)
+	// 3. Resolve tools according to agent definition allowlist / denylist / defaults.
+	resolved := resolveAgentTools(def, r.ParentRuntime.ToolCatalog)
+	filteredTools := resolved.Tools
 
 	// 4. Determine model (inherit from parent or use agent override)
 	modelName := r.selectModel(def)
@@ -100,14 +100,19 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 }
 
 // buildSystemPrompt generates the system prompt for the given agent definition.
+// When a SystemPromptProvider or static SystemPrompt is configured, the prompt
+// is returned as-is with an appended "Available tools" note. Otherwise only the
+// tools note is returned.
 func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseContext) string {
+	var base string
 	if def.SystemPromptProvider != nil {
-		return def.SystemPromptProvider.GetSystemPrompt(toolCtx)
+		base = def.SystemPromptProvider.GetSystemPrompt(toolCtx)
+	} else if strings.TrimSpace(def.SystemPrompt) != "" {
+		base = strings.TrimSpace(def.SystemPrompt)
 	}
-	if strings.TrimSpace(def.SystemPrompt) != "" {
-		return strings.TrimSpace(def.SystemPrompt)
-	}
-	return ""
+
+	toolsNote := fmt.Sprintf("\n\nAvailable tools: %s", formatToolList(def))
+	return base + toolsNote
 }
 
 // buildAgentMessages builds the agent request message sequence for one task.
@@ -154,32 +159,6 @@ func (r *Runner) resolveMaxTurns(def agent.Definition) int {
 		return r.ParentRuntime.MaxToolIterations
 	}
 	return 8 // default
-}
-
-// filterToolCatalog removes tools whose names appear in the disallowed list.
-func filterToolCatalog(catalog []model.ToolDefinition, disallowed []string) []model.ToolDefinition {
-	if len(disallowed) == 0 {
-		return append([]model.ToolDefinition(nil), catalog...)
-	}
-
-	disallowedSet := make(map[string]struct{}, len(disallowed))
-	for _, name := range disallowed {
-		disallowedSet[name] = struct{}{}
-	}
-
-	filtered := make([]model.ToolDefinition, 0, len(catalog))
-	for _, tool := range catalog {
-		if _, ok := disallowedSet[tool.Name]; !ok {
-			filtered = append(filtered, tool)
-		}
-	}
-
-	logger.DebugCF("agent.runner", "filtered tools", map[string]any{
-		"before": len(catalog),
-		"after":  len(filtered),
-	})
-
-	return filtered
 }
 
 // collectOutput drains the event stream and builds the agent Output.

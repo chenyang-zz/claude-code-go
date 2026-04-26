@@ -16,6 +16,27 @@ import (
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 )
 
+// TestToolDescription verifies the BashTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{}))
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"bash command",
+		"timeout",
+		"run_in_background",
+		"git commands",
+		"sleep",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
+
 // TestToolInvokeSuccess verifies the Bash tool executes one allowed foreground command and returns stable text output.
 func TestToolInvokeSuccess(t *testing.T) {
 	tool := NewTool(platformshell.NewExecutor(), platformshell.NewPermissionChecker(coreconfig.PermissionConfig{

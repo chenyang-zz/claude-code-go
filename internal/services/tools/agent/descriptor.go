@@ -107,8 +107,13 @@ func formatAgentLine(def agent.Definition) string {
 //   - Allowlist only: comma-separated tool names
 //   - Denylist only: "All tools except X, Y, Z"
 //   - Neither: "All tools"
+// isWildcardAllowlist reports whether the allowlist is a wildcard (nil or ["*"]).
+func isWildcardAllowlist(tools []string) bool {
+	return tools == nil || (len(tools) == 1 && tools[0] == "*")
+}
+
 func getToolsDescription(tools, disallowedTools []string) string {
-	hasAllowlist := len(tools) > 0
+	hasAllowlist := len(tools) > 0 && !isWildcardAllowlist(tools)
 	hasDenylist := len(disallowedTools) > 0
 
 	if hasAllowlist && hasDenylist {

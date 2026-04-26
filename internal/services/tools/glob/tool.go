@@ -77,7 +77,13 @@ func (t *Tool) Name() string {
 
 // Description returns the summary exposed to callers and tests.
 func (t *Tool) Description() string {
-	return "Fast file pattern matching tool that returns matching file paths sorted by modification time."
+	return `Fast file pattern matching tool that works with any codebase size.
+
+Usage:
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time
+- Use this tool when you need to find files by name patterns
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the Agent tool instead`
 }
 
 // InputSchema returns the GlobTool input contract exposed to model providers.

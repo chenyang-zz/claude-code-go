@@ -39,6 +39,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
@@ -467,7 +468,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 	toolCatalog := engine.DescribeTools(modules.Tools)
 	toolExecutor := executor.NewToolExecutor(modules.Tools)
-	agentRegistry := resolveAgentRegistry()
+	agentRegistry := resolveAgentRegistry(cfg.ProjectPath)
 	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
@@ -697,12 +698,39 @@ func applyOpenAIAdvancedDefaults(r *engine.Runtime) {
 }
 
 // resolveAgentRegistry returns the agent registry used by the engine runtime.
-// It creates an in-memory registry and registers all built-in agents.
-func resolveAgentRegistry() agent.Registry {
+// It creates an in-memory registry, registers built-in agents, and loads custom
+// agents from the project's .claude/agents directory. Custom agents override
+// built-in agents when names collide, matching TypeScript getActiveAgentsFromList.
+func resolveAgentRegistry(projectDir string) agent.Registry {
 	registry := agent.NewInMemoryRegistry()
+
+	// Register built-in agents first.
 	if err := builtin.RegisterBuiltInAgents(registry); err != nil {
 		logger.WarnCF("bootstrap", "failed to register built-in agents", map[string]any{"error": err.Error()})
 	}
+
+	// Load and register custom agents from the project directory.
+	customAgents, loadErrors, err := loader.LoadCustomAgents(projectDir)
+	if err != nil {
+		logger.WarnCF("bootstrap", "failed to load custom agents", map[string]any{"error": err.Error()})
+	}
+	for _, loadErr := range loadErrors {
+		logger.WarnCF("bootstrap", "custom agent load error", map[string]any{
+			"path":  loadErr.Path,
+			"error": loadErr.Error,
+		})
+	}
+	for _, def := range customAgents {
+		// Remove existing built-in with same name so custom takes precedence.
+		registry.Remove(def.AgentType)
+		if regErr := registry.Register(def); regErr != nil {
+			logger.WarnCF("bootstrap", "failed to register custom agent", map[string]any{
+				"agent": def.AgentType,
+				"error": regErr.Error(),
+			})
+		}
+	}
+
 	return registry
 }
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,26 @@ import (
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 )
+
+// TestToolDescription verifies the GlobTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformfs.NewLocalFS(), nil)
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"glob patterns",
+		"**/*.js",
+		"modification time",
+		"Agent tool",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
 
 // TestToolInvokeMatchesFiles verifies the first-batch GlobTool path search, ordering, and truncation shape.
 func TestToolInvokeMatchesFiles(t *testing.T) {

@@ -14,6 +14,30 @@ import (
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 )
 
+// TestToolDescription verifies the FileReadTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformfs.NewLocalFS(), nil)
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"Reads a file from the local filesystem",
+		"absolute path",
+		"cat -n format",
+		"images",
+		"PDF",
+		"Jupyter notebooks",
+		"Bash tool",
+		"screenshots",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
+
 // TestToolInvokeReadsTextFile verifies the first-batch FileReadTool returns numbered text lines and structured metadata.
 func TestToolInvokeReadsTextFile(t *testing.T) {
 	projectDir := t.TempDir()

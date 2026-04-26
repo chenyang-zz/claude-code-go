@@ -14,6 +14,27 @@ import (
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 )
 
+// TestToolDescription verifies the GrepTool description contains the key guidance migrated from the TypeScript prompt.
+func TestToolDescription(t *testing.T) {
+	tool := NewTool(platformfs.NewLocalFS(), nil)
+	desc := tool.Description()
+	if desc == "" {
+		t.Fatal("Description() is empty")
+	}
+	mustContain := []string{
+		"ripgrep",
+		"regex",
+		"Output modes",
+		"multiline",
+		"Agent tool",
+	}
+	for _, substr := range mustContain {
+		if !strings.Contains(desc, substr) {
+			t.Errorf("Description() missing %q", substr)
+		}
+	}
+}
+
 // TestToolInvokeMatchesFiles verifies the first-batch GrepTool content search, glob filtering, and ordering.
 func TestToolInvokeMatchesFiles(t *testing.T) {
 	projectDir := t.TempDir()

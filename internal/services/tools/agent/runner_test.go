@@ -10,71 +10,6 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 )
 
-func TestFilterToolCatalog(t *testing.T) {
-	catalog := []model.ToolDefinition{
-		{Name: "Read"},
-		{Name: "Write"},
-		{Name: "Edit"},
-		{Name: "Glob"},
-		{Name: "Grep"},
-	}
-
-	tests := []struct {
-		name       string
-		disallowed []string
-		wantNames  []string
-	}{
-		{
-			name:       "no disallowed returns all",
-			disallowed: nil,
-			wantNames:  []string{"Read", "Write", "Edit", "Glob", "Grep"},
-		},
-		{
-			name:       "empty disallowed returns all",
-			disallowed: []string{},
-			wantNames:  []string{"Read", "Write", "Edit", "Glob", "Grep"},
-		},
-		{
-			name:       "filters single tool",
-			disallowed: []string{"Write"},
-			wantNames:  []string{"Read", "Edit", "Glob", "Grep"},
-		},
-		{
-			name:       "filters multiple tools",
-			disallowed: []string{"Write", "Edit", "Agent"},
-			wantNames:  []string{"Read", "Glob", "Grep"},
-		},
-		{
-			name:       "filters all tools",
-			disallowed: []string{"Read", "Write", "Edit", "Glob", "Grep"},
-			wantNames:  []string{},
-		},
-		{
-			name:       "ignores unknown disallowed",
-			disallowed: []string{"Unknown", "AlsoUnknown"},
-			wantNames:  []string{"Read", "Write", "Edit", "Glob", "Grep"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := filterToolCatalog(catalog, tt.disallowed)
-			if len(got) != len(tt.wantNames) {
-				t.Fatalf("expected %d tools, got %d", len(tt.wantNames), len(got))
-			}
-			for i, want := range tt.wantNames {
-				if got[i].Name != want {
-					t.Errorf("tool[%d] = %q, want %q", i, got[i].Name, want)
-				}
-			}
-			// Verify the original catalog is not mutated.
-			if len(catalog) != 5 {
-				t.Errorf("original catalog mutated: length %d, want 5", len(catalog))
-			}
-		})
-	}
-}
-
 func TestSelectModel(t *testing.T) {
 	parent := engine.New(nil, "parent-model", nil)
 	runner := NewRunner(parent, nil)
@@ -173,10 +108,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 	parent := engine.New(nil, "parent-model", nil)
 	runner := NewRunner(parent, nil)
 
-	// Definition without SystemPromptProvider returns empty string.
+	// Definition without SystemPromptProvider returns only the tools note.
 	got := runner.buildSystemPrompt(agent.Definition{}, coretool.UseContext{})
-	if got != "" {
-		t.Errorf("buildSystemPrompt() = %q, want empty string", got)
+	want := "\n\nAvailable tools: All tools"
+	if got != want {
+		t.Errorf("buildSystemPrompt() = %q, want %q", got, want)
 	}
 }
 
@@ -187,8 +123,9 @@ func TestBuildSystemPromptUsesStaticPrompt(t *testing.T) {
 	got := runner.buildSystemPrompt(agent.Definition{
 		SystemPrompt: "You are a custom agent.",
 	}, coretool.UseContext{})
-	if got != "You are a custom agent." {
-		t.Errorf("buildSystemPrompt() = %q, want static system prompt", got)
+	want := "You are a custom agent.\n\nAvailable tools: All tools"
+	if got != want {
+		t.Errorf("buildSystemPrompt() = %q, want %q", got, want)
 	}
 }
 
@@ -234,6 +171,141 @@ func TestBuildAgentMessages(t *testing.T) {
 				}
 				if got[i].Content[0].Text != wantText {
 					t.Errorf("message[%d].Content[0].Text = %q, want %q", i, got[i].Content[0].Text, wantText)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveAgentTools covers the full tool resolution logic including
+// allowlist, denylist, wildcard, MCP passthrough, and built-in/custom
+// default disallowed sets.
+func TestResolveAgentTools(t *testing.T) {
+	catalog := []model.ToolDefinition{
+		{Name: "Read"},
+		{Name: "Write"},
+		{Name: "Edit"},
+		{Name: "Glob"},
+		{Name: "Grep"},
+		{Name: "Agent"},
+		{Name: "TaskStop"},
+		{Name: "mcp__server1__tool1"},
+		{Name: "mcp__server2__tool2"},
+	}
+
+	tests := []struct {
+		name         string
+		def          agent.Definition
+		wantNames    []string
+		wantWildcard bool
+		wantInvalid  []string
+	}{
+		{
+			name:         "built-in with no restrictions gets all except defaults",
+			def:          agent.Definition{Source: "built-in"},
+			wantNames:    []string{"Read", "Write", "Edit", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: true,
+		},
+		{
+			name:         "custom with no restrictions gets all except defaults",
+			def:          agent.Definition{Source: "userSettings"},
+			wantNames:    []string{"Read", "Write", "Edit", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: true,
+		},
+		{
+			name:         "wildcard explicit",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"*"}},
+			wantNames:    []string{"Read", "Write", "Edit", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: true,
+		},
+		{
+			name:         "allowlist filters to specific tools",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Read", "Glob", "Grep"}},
+			wantNames:    []string{"Read", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "allowlist with disallowed removes from intersection",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Read", "Write", "Glob"}, DisallowedTools: []string{"Write"}},
+			wantNames:    []string{"Read", "Glob", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "denylist only removes from full catalog",
+			def:          agent.Definition{Source: "built-in", DisallowedTools: []string{"Write", "Edit"}},
+			wantNames:    []string{"Read", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: true,
+		},
+		{
+			name:         "MCP tools always pass through even with denylist",
+			def:          agent.Definition{Source: "built-in", DisallowedTools: []string{"mcp__server1__tool1"}},
+			wantNames:    []string{"Read", "Write", "Edit", "Glob", "Grep", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: true,
+		},
+		{
+			name:         "MCP tools pass through allowlist",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Read"}},
+			wantNames:    []string{"Read", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "Agent tool blocked for built-in by default",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Agent", "Read"}},
+			wantNames:    []string{"Read", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "TaskStop blocked for custom by default",
+			def:          agent.Definition{Source: "projectSettings", Tools: []string{"TaskStop", "Read"}},
+			wantNames:    []string{"Read", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "invalid tools in allowlist tracked",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Read", "NonExistent"}},
+			wantNames:    []string{"Read", "mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+			wantInvalid:  []string{"NonExistent"},
+		},
+		{
+			name:         "empty allowlist returns MCP tools only",
+			def:          agent.Definition{Source: "built-in", Tools: []string{}},
+			wantNames:    []string{"mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+		{
+			name:         "allowlist with only blocked tools returns MCP tools",
+			def:          agent.Definition{Source: "built-in", Tools: []string{"Agent"}},
+			wantNames:    []string{"mcp__server1__tool1", "mcp__server2__tool2"},
+			wantWildcard: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveAgentTools(tt.def, catalog)
+
+			if got.HasWildcard != tt.wantWildcard {
+				t.Errorf("HasWildcard = %v, want %v", got.HasWildcard, tt.wantWildcard)
+			}
+
+			if len(got.Tools) != len(tt.wantNames) {
+				t.Fatalf("expected %d tools, got %d: %v", len(tt.wantNames), len(got.Tools), toolNames(got.Tools))
+			}
+			for i, want := range tt.wantNames {
+				if got.Tools[i].Name != want {
+					t.Errorf("tool[%d] = %q, want %q", i, got.Tools[i].Name, want)
+				}
+			}
+
+			if len(tt.wantInvalid) > 0 {
+				if len(got.InvalidSpecs) != len(tt.wantInvalid) {
+					t.Errorf("invalid tools = %v, want %v", got.InvalidSpecs, tt.wantInvalid)
+				}
+				for i, want := range tt.wantInvalid {
+					if got.InvalidSpecs[i] != want {
+						t.Errorf("invalidTools[%d] = %q, want %q", i, got.InvalidSpecs[i], want)
+					}
 				}
 			}
 		})
