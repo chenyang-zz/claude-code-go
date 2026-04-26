@@ -15,6 +15,7 @@ import (
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/memory"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -61,8 +62,35 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		"model":      def.Model,
 	})
 
-	// 2. Build system prompt
-	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd, SessionConfig: r.SessionConfig})
+	// 2. Sync agent memory snapshot before building the prompt.
+	memoryScope := ""
+	if def.Memory != "" {
+		memoryScope = def.Memory
+		paths := &memory.Paths{CWD: input.Cwd}
+		scope := memory.AgentMemoryScope(memoryScope)
+		result, err := paths.CheckAgentMemorySnapshot(def.AgentType, scope)
+		if err == nil {
+			switch result.Action {
+			case "initialize":
+				if syncErr := paths.InitializeFromSnapshot(def.AgentType, scope, result.SnapshotTimestamp); syncErr != nil {
+					logger.WarnCF("agent.runner", "failed to initialize agent memory from snapshot", map[string]any{
+						"agent_type": def.AgentType,
+						"error":      syncErr.Error(),
+					})
+				}
+			case "prompt-update":
+				if syncErr := paths.ReplaceFromSnapshot(def.AgentType, scope, result.SnapshotTimestamp); syncErr != nil {
+					logger.WarnCF("agent.runner", "failed to replace agent memory from snapshot", map[string]any{
+						"agent_type": def.AgentType,
+						"error":      syncErr.Error(),
+					})
+				}
+			}
+		}
+	}
+
+	// 3. Build system prompt
+	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd, SessionConfig: r.SessionConfig}, memoryScope)
 
 	// 3. Resolve tools according to agent definition allowlist / denylist / defaults.
 	resolved := resolveAgentTools(def, r.ParentRuntime.ToolCatalog)
@@ -148,7 +176,11 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 // When a SystemPromptProvider or static SystemPrompt is configured, the prompt
 // is returned as-is with an appended "Available tools" note. Otherwise only the
 // tools note is returned.
-func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseContext) string {
+//
+// If memoryScope is non-empty, the agent's persistent memory prompt is loaded
+// and prepended to the base prompt so the agent receives its memory context
+// before task-specific instructions.
+func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseContext, memoryScope string) string {
 	var base string
 	if def.SystemPromptProvider != nil {
 		base = def.SystemPromptProvider.GetSystemPrompt(toolCtx)
@@ -156,7 +188,22 @@ func (r *Runner) buildSystemPrompt(def agent.Definition, toolCtx coretool.UseCon
 		base = strings.TrimSpace(def.SystemPrompt)
 	}
 
+	// Inject memory prompt when the agent declares a memory scope.
+	var memoryPrompt string
+	if memoryScope != "" {
+		paths := &memory.Paths{CWD: toolCtx.WorkingDir}
+		scope := memory.AgentMemoryScope(memoryScope)
+		memoryPrompt = memory.LoadAgentMemoryPrompt(def.AgentType, scope, paths)
+	}
+
 	toolsNote := fmt.Sprintf("\n\nAvailable tools: %s", formatToolList(def))
+
+	if memoryPrompt != "" {
+		if base != "" {
+			return memoryPrompt + "\n\n" + base + toolsNote
+		}
+		return memoryPrompt + toolsNote
+	}
 	return base + toolsNote
 }
 

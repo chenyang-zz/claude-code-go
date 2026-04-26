@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
@@ -9,6 +12,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/memory"
 )
 
 func TestSelectModel(t *testing.T) {
@@ -110,7 +114,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	runner := NewRunner(parent, nil)
 
 	// Definition without SystemPromptProvider returns only the tools note.
-	got := runner.buildSystemPrompt(agent.Definition{}, coretool.UseContext{})
+	got := runner.buildSystemPrompt(agent.Definition{}, coretool.UseContext{}, "")
 	want := "\n\nAvailable tools: All tools"
 	if got != want {
 		t.Errorf("buildSystemPrompt() = %q, want %q", got, want)
@@ -123,10 +127,63 @@ func TestBuildSystemPromptUsesStaticPrompt(t *testing.T) {
 
 	got := runner.buildSystemPrompt(agent.Definition{
 		SystemPrompt: "You are a custom agent.",
-	}, coretool.UseContext{})
+	}, coretool.UseContext{}, "")
 	want := "You are a custom agent.\n\nAvailable tools: All tools"
 	if got != want {
 		t.Errorf("buildSystemPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildSystemPromptWithMemory(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	runner := NewRunner(parent, nil)
+
+	dir := t.TempDir()
+	paths := &memory.Paths{CWD: dir, MemoryBaseDir: filepath.Join(dir, "home", ".claude")}
+
+	// Create a MEMORY.md for the agent.
+	memDir := paths.GetAgentMemoryDir("test-agent", memory.ScopeProject)
+	_ = memory.EnsureAgentMemoryDir(memDir)
+	_ = os.WriteFile(paths.GetAgentMemoryEntrypoint("test-agent", memory.ScopeProject), []byte("- [Role](role.md) — user is a developer"), 0644)
+
+	got := runner.buildSystemPrompt(agent.Definition{
+		AgentType: "test-agent",
+		SystemPrompt: "You are a test agent.",
+	}, coretool.UseContext{WorkingDir: dir}, "project")
+
+	if !strings.Contains(got, "Persistent Agent Memory") {
+		t.Error("prompt should contain memory section title")
+	}
+	if !strings.Contains(got, "project-scope") {
+		t.Error("prompt should contain project scope note")
+	}
+	if !strings.Contains(got, "You are a test agent.") {
+		t.Error("prompt should still contain base system prompt")
+	}
+	if !strings.Contains(got, "Available tools:") {
+		t.Error("prompt should contain tools note")
+	}
+}
+
+func TestBuildSystemPromptWithMemoryNoBasePrompt(t *testing.T) {
+	parent := engine.New(nil, "parent-model", nil)
+	runner := NewRunner(parent, nil)
+
+	dir := t.TempDir()
+	paths := &memory.Paths{CWD: dir, MemoryBaseDir: filepath.Join(dir, "home", ".claude")}
+	memDir := paths.GetAgentMemoryDir("mem-agent", memory.ScopeUser)
+	_ = memory.EnsureAgentMemoryDir(memDir)
+	_ = os.WriteFile(paths.GetAgentMemoryEntrypoint("mem-agent", memory.ScopeUser), []byte("user memory"), 0644)
+
+	got := runner.buildSystemPrompt(agent.Definition{
+		AgentType: "mem-agent",
+	}, coretool.UseContext{WorkingDir: dir}, "user")
+
+	if !strings.Contains(got, "Persistent Agent Memory") {
+		t.Error("prompt should contain memory section")
+	}
+	if !strings.Contains(got, "Available tools:") {
+		t.Error("prompt should contain tools note even without base prompt")
 	}
 }
 
