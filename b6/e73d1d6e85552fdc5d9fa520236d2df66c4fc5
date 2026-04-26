@@ -1,0 +1,51 @@
+internal/services/tools/agent/builtin/registry.go
+  cf7902d20dbecc87 5,17-23,25,29-33,35
+internal/services/tools/agent/loader/loader_managed_test.go
+  cf7902d20dbecc87 1-90
+internal/services/tools/agent/loader/builder_test.go
+  cf7902d20dbecc87 553,601,636
+internal/services/commands/agents.go
+  cf7902d20dbecc87 6,27-28,44-59,62-73,76-81,124-139
+internal/app/bootstrap/app_test.go
+  cf7902d20dbecc87 540
+internal/services/tools/agent/loader/builder.go
+  cf7902d20dbecc87 67,72,77,92,106,113,137,144,151,173,180,212-214,246,249,280,282,308,310,318,320-322,326,367,369-374,377,402,405
+internal/services/commands/agents_test.go
+  cf7902d20dbecc87 13-29,99-191
+internal/services/tools/agent/loader/json_loader.go
+  cf7902d20dbecc87 1-252
+internal/services/tools/agent/builtin/registry_test.go
+  cf7902d20dbecc87 4,46-49,93-127,129-130,181-182,205-206
+internal/services/tools/agent/loader/loader.go
+  cf7902d20dbecc87 28,41-42,44-74,80,83,99,106
+internal/platform/config/fileloader.go
+  cf7902d20dbecc87 173
+internal/services/tools/agent/loader/json_loader_test.go
+  cf7902d20dbecc87 1-597
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 137-138,167,358,573,712-715,769-812
+internal/core/config/config.go
+  cf7902d20dbecc87 43-44
+internal/core/tool/session_config.go
+  cf7902d20dbecc87 17-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b6e73d1d6e85552fdc5d9fa520236d2df66c4fc5",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 1315,
+      "total_deletions": 145,
+      "accepted_lines": 1307,
+      "overriden_lines": 0
+    }
+  }
+}
