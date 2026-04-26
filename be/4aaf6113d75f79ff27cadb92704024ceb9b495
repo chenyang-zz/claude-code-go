@@ -1,0 +1,55 @@
+internal/services/prompts/glob_prompt.go
+  cf7902d20dbecc87 1-23
+internal/services/tools/agent/descriptor.go
+  cf7902d20dbecc87 95-113,116,119-121
+internal/services/prompts/file_read_prompt.go
+  cf7902d20dbecc87 1-31
+internal/services/prompts/bash_prompt.go
+  cf7902d20dbecc87 1-43
+internal/services/prompts/glob_prompt_test.go
+  cf7902d20dbecc87 1-44
+internal/services/prompts/file_write_prompt.go
+  cf7902d20dbecc87 1-25
+internal/services/tools/agent/descriptor_test.go
+  cf7902d20dbecc87 183-269
+internal/services/prompts/file_edit_prompt_test.go
+  cf7902d20dbecc87 1-47
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 657-662
+internal/services/tools/agent/runner_test.go
+  cf7902d20dbecc87 7,184-343
+internal/services/prompts/file_write_prompt_test.go
+  cf7902d20dbecc87 1-46
+internal/services/prompts/bash_prompt_test.go
+  cf7902d20dbecc87 1-54
+internal/services/tools/agent/runner.go
+  cf7902d20dbecc87 12,75-77,214-247
+internal/services/prompts/file_edit_prompt.go
+  cf7902d20dbecc87 1-26
+internal/services/prompts/grep_prompt.go
+  cf7902d20dbecc87 1-27
+internal/services/prompts/grep_prompt_test.go
+  cf7902d20dbecc87 1-48
+internal/services/prompts/file_read_prompt_test.go
+  cf7902d20dbecc87 1-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "be4aaf6113d75f79ff27cadb92704024ceb9b495",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 780,
+      "total_deletions": 1,
+      "accepted_lines": 779,
+      "overriden_lines": 0
+    }
+  }
+}
