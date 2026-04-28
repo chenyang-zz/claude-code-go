@@ -507,7 +507,14 @@ func TestTool_Invoke_RunInBackgroundCanBeStopped(t *testing.T) {
 	if stopped.Status != coresession.BackgroundTaskStatusStopped {
 		t.Fatalf("stopped status = %q, want stopped", stopped.Status)
 	}
-	if _, ok := taskStore.Get(taskID); ok {
-		t.Fatalf("task %q should be removed after stop", taskID)
+	snapshot, ok := taskStore.Get(taskID)
+	if !ok {
+		t.Fatalf("task %q should remain queryable after stop", taskID)
+	}
+	if snapshot.Status != coresession.BackgroundTaskStatusStopped {
+		t.Fatalf("stored task status = %q, want stopped", snapshot.Status)
+	}
+	if snapshot.ControlsAvailable {
+		t.Fatalf("stored task controls_available = true, want false")
 	}
 }

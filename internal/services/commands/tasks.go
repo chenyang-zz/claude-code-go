@@ -11,15 +11,17 @@ import (
 )
 
 const (
-	tasksCommandEmptyState = "No background tasks are running.\nBackground task controls are not available in Claude Code Go yet."
-	tasksCommandNoControl  = "Task listing is available, but stop/resume controls are not migrated yet."
-	tasksCommandStopReady  = "Controls: stop available for local bash tasks."
+	tasksCommandEmptyState = "No background tasks are running."
+	tasksCommandNoControl  = "Controls: no stoppable background tasks right now."
+	tasksCommandStopReady  = "Controls: stop available via /tasks stop <task-id>."
 )
 
 // BackgroundTaskSnapshotLister exposes the minimum runtime task snapshot source consumed by `/tasks`.
 type BackgroundTaskSnapshotLister interface {
 	// List returns the currently visible runtime background tasks.
 	List() []coresession.BackgroundTaskSnapshot
+	// Stop requests termination of one running background task.
+	Stop(id string) (coresession.BackgroundTaskSnapshot, error)
 }
 
 // TasksCommand exposes the minimum text-only /tasks behavior before background-task UI and task management exist in the Go host.
@@ -34,14 +36,16 @@ func (c TasksCommand) Metadata() command.Metadata {
 		Name:        "tasks",
 		Aliases:     []string{"bashes"},
 		Description: "List and manage background tasks",
-		Usage:       "/tasks",
+		Usage:       "/tasks | /tasks stop <task-id>",
 	}
 }
 
 // Execute reports the stable /tasks fallback supported by the current Go host.
 func (c TasksCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	_ = ctx
-	_ = args
+	if len(args.Raw) > 0 && args.Raw[0] == "stop" {
+		return c.executeStop(args.Raw)
+	}
 
 	tasks := c.listTasks()
 	output := renderTasksOutput(tasks)
@@ -55,6 +59,43 @@ func (c TasksCommand) Execute(ctx context.Context, args command.Args) (command.R
 	return command.Result{
 		Output: output,
 	}, nil
+}
+
+// executeStop stops one background task by ID through the shared task store.
+func (c TasksCommand) executeStop(rawArgs []string) (command.Result, error) {
+	if c.TaskStore == nil {
+		logger.DebugCF("commands", "tasks stop skipped: task store unavailable", nil)
+		return command.Result{Output: "Background task store is unavailable."}, nil
+	}
+	if len(rawArgs) != 2 {
+		logger.DebugCF("commands", "tasks stop rejected: invalid usage", map[string]any{
+			"raw_args_count": len(rawArgs),
+		})
+		return command.Result{Output: "Usage: /tasks stop <task-id>"}, nil
+	}
+	taskID := strings.TrimSpace(rawArgs[1])
+	if taskID == "" {
+		logger.DebugCF("commands", "tasks stop rejected: empty task id", nil)
+		return command.Result{Output: "Usage: /tasks stop <task-id>"}, nil
+	}
+	snapshot, err := c.TaskStore.Stop(taskID)
+	if err != nil {
+		logger.DebugCF("commands", "tasks stop failed", map[string]any{
+			"task_id": taskID,
+			"error":   err.Error(),
+		})
+		return command.Result{Output: fmt.Sprintf("Failed to stop task %s: %v", taskID, err)}, nil
+	}
+	logger.DebugCF("commands", "tasks stop succeeded", map[string]any{
+		"task_id":   snapshot.ID,
+		"task_type": snapshot.Type,
+		"status":    string(snapshot.Status),
+	})
+	summary := strings.TrimSpace(snapshot.Summary)
+	if summary == "" {
+		return command.Result{Output: fmt.Sprintf("Stopped background task: %s", snapshot.ID)}, nil
+	}
+	return command.Result{Output: fmt.Sprintf("Stopped background task: %s (%s)", snapshot.ID, summary)}, nil
 }
 
 // listTasks returns the shared runtime task snapshots when available.
@@ -96,13 +137,14 @@ func renderTaskLine(task coresession.BackgroundTaskSnapshot) string {
 
 // tasksControlsAvailable reports whether every visible task currently supports control actions.
 func tasksControlsAvailable(tasks []coresession.BackgroundTaskSnapshot) bool {
-	if len(tasks) == 0 {
-		return false
-	}
 	for _, task := range tasks {
 		if !task.ControlsAvailable {
-			return false
+			continue
+		}
+		switch task.Status {
+		case coresession.BackgroundTaskStatusRunning, coresession.BackgroundTaskStatusPending:
+			return true
 		}
 	}
-	return true
+	return false
 }

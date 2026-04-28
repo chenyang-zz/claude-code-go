@@ -92,7 +92,34 @@ func TestBackgroundTaskStoreRegisterUpdateAndStop(t *testing.T) {
 	if !stopper.stopped {
 		t.Fatal("Stop() did not call stopper")
 	}
-	if got := store.List(); len(got) != 0 {
-		t.Fatalf("List() len after Stop = %d, want 0", len(got))
+	gotAfterStop := store.List()
+	if len(gotAfterStop) != 1 {
+		t.Fatalf("List() len after Stop = %d, want 1", len(gotAfterStop))
+	}
+	if gotAfterStop[0].Status != coresession.BackgroundTaskStatusStopped {
+		t.Fatalf("List()[0].Status after Stop = %q, want %q", gotAfterStop[0].Status, coresession.BackgroundTaskStatusStopped)
+	}
+	if gotAfterStop[0].ControlsAvailable {
+		t.Fatal("List()[0].ControlsAvailable after Stop = true, want false")
+	}
+}
+
+// TestBackgroundTaskStoreStopTwiceRejected verifies a stopped task cannot be stopped repeatedly.
+func TestBackgroundTaskStoreStopTwiceRejected(t *testing.T) {
+	store := NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "bash",
+		Status:            coresession.BackgroundTaskStatusRunning,
+		Summary:           "npm run dev",
+		ControlsAvailable: true,
+	}, &recordingStopper{})
+
+	if _, err := store.Stop("task-1"); err != nil {
+		t.Fatalf("first Stop() error = %v", err)
+	}
+
+	if _, err := store.Stop("task-1"); err == nil {
+		t.Fatal("second Stop() error = nil, want cannot-be-stopped error")
 	}
 }

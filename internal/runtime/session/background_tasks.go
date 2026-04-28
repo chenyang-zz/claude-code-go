@@ -149,7 +149,7 @@ func (s *BackgroundTaskStore) Remove(id string) {
 	})
 }
 
-// Stop requests termination of one running background task and removes it from the active task list.
+// Stop requests termination of one running background task and keeps the stopped snapshot visible for follow-up queries.
 func (s *BackgroundTaskStore) Stop(id string) (coresession.BackgroundTaskSnapshot, error) {
 	if s == nil || id == "" {
 		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("task_id is required")
@@ -171,8 +171,8 @@ func (s *BackgroundTaskStore) Stop(id string) (coresession.BackgroundTaskSnapsho
 
 	stopped := entry.snapshot
 	stopped.Status = coresession.BackgroundTaskStatusStopped
+	stopped.ControlsAvailable = false
 	s.Update(stopped)
-	s.Remove(id)
 
 	return stopped, nil
 }

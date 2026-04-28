@@ -1063,7 +1063,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		Name:        "tasks",
 		Aliases:     []string{"bashes"},
 		Description: "List and manage background tasks",
-		Usage:       "/tasks",
+		Usage:       "/tasks | /tasks stop <task-id>",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-fifth metadata = %#v, want tasks metadata", got)
 	}
