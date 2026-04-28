@@ -15,6 +15,16 @@ func (s *recordingStopper) Stop() error {
 	return nil
 }
 
+type resumableStopper struct {
+	recordingStopper
+	resumedMessage string
+}
+
+func (s *resumableStopper) Resume(message string) error {
+	s.resumedMessage = message
+	return nil
+}
+
 // TestBackgroundTaskStoreReplaceAndList verifies the runtime store returns detached snapshots.
 func TestBackgroundTaskStoreReplaceAndList(t *testing.T) {
 	store := NewBackgroundTaskStore()
@@ -121,5 +131,80 @@ func TestBackgroundTaskStoreStopTwiceRejected(t *testing.T) {
 
 	if _, err := store.Stop("task-1"); err == nil {
 		t.Fatal("second Stop() error = nil, want cannot-be-stopped error")
+	}
+}
+
+// TestBackgroundTaskStoreResume validates the minimum resume precondition and lifecycle state transition.
+func TestBackgroundTaskStoreResume(t *testing.T) {
+	store := NewBackgroundTaskStore()
+	stopper := &resumableStopper{}
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "agent",
+		Status:            coresession.BackgroundTaskStatusStopped,
+		Summary:           "review draft",
+		ControlsAvailable: false,
+	}, stopper)
+
+	resumed, err := store.Resume("task-1", "continue")
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if resumed.Status != coresession.BackgroundTaskStatusRunning {
+		t.Fatalf("Resume() status = %q, want %q", resumed.Status, coresession.BackgroundTaskStatusRunning)
+	}
+	if !resumed.ControlsAvailable {
+		t.Fatal("Resume() ControlsAvailable = false, want true")
+	}
+	if stopper.resumedMessage != "continue" {
+		t.Fatalf("Resume() message = %q, want continue", stopper.resumedMessage)
+	}
+}
+
+// TestBackgroundTaskStoreResumeRejectsNonStopped verifies resume is gated to stopped agent tasks.
+func TestBackgroundTaskStoreResumeRejectsNonStopped(t *testing.T) {
+	store := NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "agent",
+		Status:            coresession.BackgroundTaskStatusRunning,
+		Summary:           "review draft",
+		ControlsAvailable: true,
+	}, &recordingStopper{})
+
+	if _, err := store.Resume("task-1", "continue"); err == nil {
+		t.Fatal("Resume() error = nil, want non-stopped error")
+	}
+}
+
+// TestBackgroundTaskStoreResumeRejectsNonAgent verifies resume currently only supports agent tasks.
+func TestBackgroundTaskStoreResumeRejectsNonAgent(t *testing.T) {
+	store := NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "bash",
+		Status:            coresession.BackgroundTaskStatusStopped,
+		Summary:           "npm run dev",
+		ControlsAvailable: false,
+	}, &recordingStopper{})
+
+	if _, err := store.Resume("task-1", "continue"); err == nil {
+		t.Fatal("Resume() error = nil, want non-agent error")
+	}
+}
+
+// TestBackgroundTaskStoreResumeRequiresResumer verifies resume fails when task controller lacks Resume capability.
+func TestBackgroundTaskStoreResumeRequiresResumer(t *testing.T) {
+	store := NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "agent",
+		Status:            coresession.BackgroundTaskStatusStopped,
+		Summary:           "review draft",
+		ControlsAvailable: false,
+	}, &recordingStopper{})
+
+	if _, err := store.Resume("task-1", "continue"); err == nil {
+		t.Fatal("Resume() error = nil, want cannot-be-resumed error")
 	}
 }

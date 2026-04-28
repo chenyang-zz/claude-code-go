@@ -22,8 +22,8 @@ func TestTasksCommandMetadata(t *testing.T) {
 	if meta.Description != "List and manage background tasks" {
 		t.Fatalf("Metadata().Description = %q, want tasks description", meta.Description)
 	}
-	if meta.Usage != "/tasks | /tasks stop <task-id>" {
-		t.Fatalf("Metadata().Usage = %q, want /tasks | /tasks stop <task-id>", meta.Usage)
+	if meta.Usage != "/tasks | /tasks stop <task-id> | /tasks resume <task-id> [message]" {
+		t.Fatalf("Metadata().Usage = %q, want /tasks | /tasks stop <task-id> | /tasks resume <task-id> [message]", meta.Usage)
 	}
 }
 
@@ -171,6 +171,137 @@ func TestTasksCommandExecuteStopFailure(t *testing.T) {
 	}
 }
 
+func TestTasksCommandExecuteResumeUnavailable(t *testing.T) {
+	result, err := TasksCommand{TaskStore: &stubNoResumeStore{}}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-1"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Background task resume is unavailable." {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+}
+
+func TestTasksCommandExecuteResumeUsage(t *testing.T) {
+	store := &stubResumeStore{}
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Usage: /tasks resume <task-id> [message]" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+}
+
+func TestTasksCommandExecuteResumeSuccess(t *testing.T) {
+	store := &stubResumeStore{
+		snapshot: coresession.BackgroundTaskSnapshot{
+			ID:      "task-7",
+			Type:    "agent",
+			Status:  coresession.BackgroundTaskStatusRunning,
+			Summary: "review draft",
+		},
+	}
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-7", "please", "continue"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Resumed background task: task-7 (review draft)" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+	if store.resumedTaskID != "task-7" {
+		t.Fatalf("resumed task id = %q, want task-7", store.resumedTaskID)
+	}
+	if store.resumedMessage != "please continue" {
+		t.Fatalf("resumed message = %q, want %q", store.resumedMessage, "please continue")
+	}
+}
+
+func TestTasksCommandExecuteResumeFailure(t *testing.T) {
+	store := &stubResumeStore{err: errors.New("boom")}
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-2"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Failed to resume task task-2: boom" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+}
+
+func TestTasksCommandExecuteResumeWithRuntimeStoreSuccess(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	stopper := &recordingResumeStopper{}
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "agent",
+		Status:            coresession.BackgroundTaskStatusStopped,
+		Summary:           "review draft",
+		ControlsAvailable: false,
+	}, stopper)
+
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-1", "continue", "please"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Resumed background task: task-1 (review draft)" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+	if stopper.resumedMessage != "continue please" {
+		t.Fatalf("resume message = %q, want %q", stopper.resumedMessage, "continue please")
+	}
+}
+
+func TestTasksCommandExecuteResumeWithRuntimeStoreRejectsNonAgent(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "bash",
+		Status:            coresession.BackgroundTaskStatusStopped,
+		Summary:           "npm run dev",
+		ControlsAvailable: false,
+	}, &recordingResumeStopper{})
+
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-1"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Failed to resume task task-1: background task task-1 does not support resume" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+}
+
+func TestTasksCommandExecuteResumeWithRuntimeStoreRejectsNonStopped(t *testing.T) {
+	store := runtimesession.NewBackgroundTaskStore()
+	store.Register(coresession.BackgroundTaskSnapshot{
+		ID:                "task-1",
+		Type:              "agent",
+		Status:            coresession.BackgroundTaskStatusRunning,
+		Summary:           "review draft",
+		ControlsAvailable: true,
+	}, &recordingResumeStopper{})
+
+	result, err := TasksCommand{TaskStore: store}.Execute(context.Background(), command.Args{
+		Raw: []string{"resume", "task-1"},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Output != "Failed to resume task task-1: background task task-1 is not stopped" {
+		t.Fatalf("Execute() output = %q", result.Output)
+	}
+}
+
 type recordingStopper struct{}
 
 func (s *recordingStopper) Stop() error { return nil }
@@ -184,4 +315,51 @@ func (s *stubStopFailStore) List() []coresession.BackgroundTaskSnapshot {
 func (s *stubStopFailStore) Stop(id string) (coresession.BackgroundTaskSnapshot, error) {
 	_ = id
 	return coresession.BackgroundTaskSnapshot{}, s.err
+}
+
+type stubResumeStore struct {
+	snapshot      coresession.BackgroundTaskSnapshot
+	err           error
+	resumedTaskID string
+	resumedMessage string
+}
+
+type stubNoResumeStore struct{}
+
+func (s *stubNoResumeStore) List() []coresession.BackgroundTaskSnapshot {
+	return nil
+}
+
+func (s *stubNoResumeStore) Stop(id string) (coresession.BackgroundTaskSnapshot, error) {
+	_ = id
+	return coresession.BackgroundTaskSnapshot{}, errors.New("not implemented")
+}
+
+type recordingResumeStopper struct {
+	resumedMessage string
+}
+
+func (s *recordingResumeStopper) Stop() error { return nil }
+
+func (s *recordingResumeStopper) Resume(message string) error {
+	s.resumedMessage = message
+	return nil
+}
+
+func (s *stubResumeStore) List() []coresession.BackgroundTaskSnapshot {
+	return nil
+}
+
+func (s *stubResumeStore) Stop(id string) (coresession.BackgroundTaskSnapshot, error) {
+	_ = id
+	return coresession.BackgroundTaskSnapshot{}, errors.New("not implemented")
+}
+
+func (s *stubResumeStore) Resume(id string, message string) (coresession.BackgroundTaskSnapshot, error) {
+	s.resumedTaskID = id
+	s.resumedMessage = message
+	if s.err != nil {
+		return coresession.BackgroundTaskSnapshot{}, s.err
+	}
+	return s.snapshot, nil
 }

@@ -16,6 +16,12 @@ const (
 	tasksCommandStopReady  = "Controls: stop available via /tasks stop <task-id>."
 )
 
+// BackgroundTaskSnapshotResumer exposes the minimum runtime resume capability consumed by `/tasks resume`.
+type BackgroundTaskSnapshotResumer interface {
+	// Resume requests one stopped background task to resume execution with an optional message.
+	Resume(id string, message string) (coresession.BackgroundTaskSnapshot, error)
+}
+
 // BackgroundTaskSnapshotLister exposes the minimum runtime task snapshot source consumed by `/tasks`.
 type BackgroundTaskSnapshotLister interface {
 	// List returns the currently visible runtime background tasks.
@@ -36,7 +42,7 @@ func (c TasksCommand) Metadata() command.Metadata {
 		Name:        "tasks",
 		Aliases:     []string{"bashes"},
 		Description: "List and manage background tasks",
-		Usage:       "/tasks | /tasks stop <task-id>",
+		Usage:       "/tasks | /tasks stop <task-id> | /tasks resume <task-id> [message]",
 	}
 }
 
@@ -45,6 +51,9 @@ func (c TasksCommand) Execute(ctx context.Context, args command.Args) (command.R
 	_ = ctx
 	if len(args.Raw) > 0 && args.Raw[0] == "stop" {
 		return c.executeStop(args.Raw)
+	}
+	if len(args.Raw) > 0 && args.Raw[0] == "resume" {
+		return c.executeResume(args.Raw)
 	}
 
 	tasks := c.listTasks()
@@ -59,6 +68,48 @@ func (c TasksCommand) Execute(ctx context.Context, args command.Args) (command.R
 	return command.Result{
 		Output: output,
 	}, nil
+}
+
+// executeResume resumes one background task by ID through the shared task store when resume is implemented.
+func (c TasksCommand) executeResume(rawArgs []string) (command.Result, error) {
+	resumer, ok := c.TaskStore.(BackgroundTaskSnapshotResumer)
+	if !ok || resumer == nil {
+		logger.DebugCF("commands", "tasks resume skipped: task resume unavailable", nil)
+		return command.Result{Output: "Background task resume is unavailable."}, nil
+	}
+	if len(rawArgs) < 2 {
+		logger.DebugCF("commands", "tasks resume rejected: invalid usage", map[string]any{
+			"raw_args_count": len(rawArgs),
+		})
+		return command.Result{Output: "Usage: /tasks resume <task-id> [message]"}, nil
+	}
+	taskID := strings.TrimSpace(rawArgs[1])
+	if taskID == "" {
+		logger.DebugCF("commands", "tasks resume rejected: empty task id", nil)
+		return command.Result{Output: "Usage: /tasks resume <task-id> [message]"}, nil
+	}
+	message := ""
+	if len(rawArgs) > 2 {
+		message = strings.TrimSpace(strings.Join(rawArgs[2:], " "))
+	}
+	snapshot, err := resumer.Resume(taskID, message)
+	if err != nil {
+		logger.DebugCF("commands", "tasks resume failed", map[string]any{
+			"task_id": taskID,
+			"error":   err.Error(),
+		})
+		return command.Result{Output: fmt.Sprintf("Failed to resume task %s: %v", taskID, err)}, nil
+	}
+	logger.DebugCF("commands", "tasks resume succeeded", map[string]any{
+		"task_id":   snapshot.ID,
+		"task_type": snapshot.Type,
+		"status":    string(snapshot.Status),
+	})
+	summary := strings.TrimSpace(snapshot.Summary)
+	if summary == "" {
+		return command.Result{Output: fmt.Sprintf("Resumed background task: %s", snapshot.ID)}, nil
+	}
+	return command.Result{Output: fmt.Sprintf("Resumed background task: %s (%s)", snapshot.ID, summary)}, nil
 }
 
 // executeStop stops one background task by ID through the shared task store.

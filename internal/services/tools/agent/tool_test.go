@@ -518,3 +518,68 @@ func TestTool_Invoke_RunInBackgroundCanBeStopped(t *testing.T) {
 		t.Fatalf("stored task controls_available = true, want false")
 	}
 }
+
+func TestTool_Invoke_RunInBackgroundCanBeResumed(t *testing.T) {
+	registry := agent.NewInMemoryRegistry()
+	parentRuntime := &engine.Runtime{}
+	taskStore := runtimesession.NewBackgroundTaskStore()
+	agentTool := NewTool(registry, parentRuntime, nil, nil, taskStore)
+	agentTool.runnerFactory = func() runner {
+		return &ctxBlockingRunner{}
+	}
+
+	call := tool.Call{
+		Input: map[string]any{
+			"description":       "background resumable",
+			"prompt":            "wait first",
+			"subagent_type":     "Explore",
+			"run_in_background": true,
+		},
+	}
+	result, err := agentTool.Invoke(context.Background(), call)
+	if err != nil {
+		t.Fatalf("Invoke() unexpected error: %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() error = %q, want empty", result.Error)
+	}
+
+	var payload map[string]any
+	if unmarshalErr := json.Unmarshal([]byte(result.Output), &payload); unmarshalErr != nil {
+		t.Fatalf("Unmarshal(output) error = %v", unmarshalErr)
+	}
+	taskID, _ := payload["agentId"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("agentId missing in output: %s", result.Output)
+	}
+
+	if _, stopErr := taskStore.Stop(taskID); stopErr != nil {
+		t.Fatalf("Stop(%q) error = %v", taskID, stopErr)
+	}
+	if _, resumeErr := taskStore.Resume(taskID, "wait second"); resumeErr != nil {
+		t.Fatalf("Resume(%q) error = %v", taskID, resumeErr)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		snapshot, ok := taskStore.Get(taskID)
+		if ok && snapshot.Status == coresession.BackgroundTaskStatusRunning && snapshot.ControlsAvailable {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot, ok := taskStore.Get(taskID)
+	if !ok {
+		t.Fatalf("task %q missing after resume", taskID)
+	}
+	if snapshot.Status != coresession.BackgroundTaskStatusRunning {
+		t.Fatalf("resumed status = %q, want running", snapshot.Status)
+	}
+	if !snapshot.ControlsAvailable {
+		t.Fatal("resumed controls_available = false, want true")
+	}
+
+	if _, stopErr := taskStore.Stop(taskID); stopErr != nil {
+		t.Fatalf("final Stop(%q) error = %v", taskID, stopErr)
+	}
+}

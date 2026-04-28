@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
@@ -26,6 +27,8 @@ type Tool struct {
 	descriptor      *Descriptor
 	teammateStarter teammateStarter
 	runnerFactory   func() runner
+	backgroundMu    sync.Mutex
+	backgroundInput map[string]Input
 }
 
 // runner executes one agent task and returns the normalized output.
@@ -53,6 +56,7 @@ func NewTool(registry agent.Registry, parentRuntime *engine.Runtime, serverRegis
 		toolRegistry:    toolRegistry,
 		taskStore:       taskStore,
 		teammateStarter: osTeammateStarter{},
+		backgroundInput: make(map[string]Input),
 	}
 	t.runnerFactory = func() runner {
 		r := NewRunner(t.parentRuntime, t.registry)

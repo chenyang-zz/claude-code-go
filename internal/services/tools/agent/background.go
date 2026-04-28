@@ -31,6 +31,8 @@ type backgroundTaskStopper struct {
 	cancel context.CancelFunc
 	// once guarantees cancellation runs at most once.
 	once sync.Once
+	// resume relaunches one stopped background task.
+	resume func(message string) error
 }
 
 // Stop cancels one running background agent context.
@@ -44,6 +46,14 @@ func (s *backgroundTaskStopper) Stop() error {
 	return nil
 }
 
+// Resume relaunches one stopped background task when the resume callback is available.
+func (s *backgroundTaskStopper) Resume(message string) error {
+	if s == nil || s.resume == nil {
+		return fmt.Errorf("resume is unavailable")
+	}
+	return s.resume(message)
+}
+
 // launchBackground starts one asynchronous agent run and registers it in the shared background task store.
 func (t *Tool) launchBackground(parentCtx context.Context, input Input) coretool.Result {
 	taskID := "agent-" + uuid.NewString()
@@ -53,7 +63,13 @@ func (t *Tool) launchBackground(parentCtx context.Context, input Input) coretool
 	if parentCtx != nil {
 		runCtx, cancel = context.WithCancel(parentCtx)
 	}
-	stopper := &backgroundTaskStopper{cancel: cancel}
+	stopper := &backgroundTaskStopper{
+		cancel: cancel,
+		resume: func(message string) error {
+			return t.resumeBackgroundTask(taskID, message)
+		},
+	}
+	t.rememberBackgroundInput(taskID, input)
 
 	if t.taskStore != nil {
 		t.taskStore.Register(coresession.BackgroundTaskSnapshot{
@@ -100,7 +116,7 @@ func (t *Tool) runBackgroundTask(ctx context.Context, taskID string, input Input
 				Type:              "agent",
 				Status:            status,
 				Summary:           summary,
-				ControlsAvailable: true,
+				ControlsAvailable: status != coresession.BackgroundTaskStatusStopped,
 			})
 		}
 		return
@@ -119,6 +135,61 @@ func (t *Tool) runBackgroundTask(ctx context.Context, taskID string, input Input
 		"task_id":       taskID,
 		"subagent_type": input.SubagentType,
 	})
+}
+
+// rememberBackgroundInput stores one background input so stopped tasks can be resumed.
+func (t *Tool) rememberBackgroundInput(taskID string, input Input) {
+	if t == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	t.backgroundMu.Lock()
+	defer t.backgroundMu.Unlock()
+	if t.backgroundInput == nil {
+		t.backgroundInput = make(map[string]Input)
+	}
+	t.backgroundInput[taskID] = input
+}
+
+// lookupBackgroundInput reads one previously stored background input.
+func (t *Tool) lookupBackgroundInput(taskID string) (Input, bool) {
+	if t == nil || strings.TrimSpace(taskID) == "" {
+		return Input{}, false
+	}
+	t.backgroundMu.Lock()
+	defer t.backgroundMu.Unlock()
+	input, ok := t.backgroundInput[taskID]
+	return input, ok
+}
+
+// resumeBackgroundTask relaunches one stopped background agent task with an optional prompt override.
+func (t *Tool) resumeBackgroundTask(taskID string, message string) error {
+	input, ok := t.lookupBackgroundInput(taskID)
+	if !ok {
+		return fmt.Errorf("background input not found for task %s", taskID)
+	}
+	if trimmed := strings.TrimSpace(message); trimmed != "" {
+		input.Prompt = trimmed
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+	stopper := &backgroundTaskStopper{
+		cancel: cancel,
+		resume: func(nextMessage string) error {
+			return t.resumeBackgroundTask(taskID, nextMessage)
+		},
+	}
+	if t.taskStore != nil {
+		t.taskStore.Register(coresession.BackgroundTaskSnapshot{
+			ID:                taskID,
+			Type:              "agent",
+			Status:            coresession.BackgroundTaskStatusRunning,
+			Summary:           buildTaskSummary(input),
+			ControlsAvailable: true,
+		}, stopper)
+	}
+	t.rememberBackgroundInput(taskID, input)
+	go t.runBackgroundTask(runCtx, taskID, input)
+	return nil
 }
 
 // buildTaskSummary returns one stable summary for background task listings.

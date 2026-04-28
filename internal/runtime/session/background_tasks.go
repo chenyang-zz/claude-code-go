@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
@@ -14,6 +15,8 @@ type backgroundTaskEntry struct {
 	snapshot coresession.BackgroundTaskSnapshot
 	// stopper carries the best-effort stop capability for the task when available.
 	stopper interface{ Stop() error }
+	// resumer carries the optional resume capability for stopped tasks.
+	resumer interface{ Resume(message string) error }
 }
 
 // BackgroundTaskStore exposes one in-memory runtime task snapshot source for `/tasks`.
@@ -73,6 +76,7 @@ func (s *BackgroundTaskStore) Register(task coresession.BackgroundTaskSnapshot, 
 	s.tasks[task.ID] = backgroundTaskEntry{
 		snapshot: task,
 		stopper:  stopper,
+		resumer:  resolveTaskResumer(stopper),
 	}
 	count := len(s.tasks)
 	s.mu.Unlock()
@@ -83,6 +87,17 @@ func (s *BackgroundTaskStore) Register(task coresession.BackgroundTaskSnapshot, 
 		"status":  task.Status,
 		"count":   count,
 	})
+}
+
+// resolveTaskResumer extracts the optional resume capability from one task controller.
+func resolveTaskResumer(controller interface{ Stop() error }) interface{ Resume(message string) error } {
+	if controller == nil {
+		return nil
+	}
+	if resumer, ok := any(controller).(interface{ Resume(message string) error }); ok {
+		return resumer
+	}
+	return nil
 }
 
 // Update replaces the stored snapshot for one existing task while preserving its stop capability.
@@ -175,6 +190,53 @@ func (s *BackgroundTaskStore) Stop(id string) (coresession.BackgroundTaskSnapsho
 	s.Update(stopped)
 
 	return stopped, nil
+}
+
+// Resume requests one stopped background task to re-enter a runnable state.
+func (s *BackgroundTaskStore) Resume(id string, message string) (coresession.BackgroundTaskSnapshot, error) {
+	if s == nil || id == "" {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("task_id is required")
+	}
+
+	trimmedMessage := strings.TrimSpace(message)
+	s.mu.RLock()
+	entry, exists := s.tasks[id]
+	s.mu.RUnlock()
+	if !exists {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("no background task found with ID: %s", id)
+	}
+	if entry.snapshot.Type != "agent" {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("background task %s does not support resume", id)
+	}
+	if entry.snapshot.Status != coresession.BackgroundTaskStatusStopped {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("background task %s is not stopped", id)
+	}
+	if entry.resumer == nil {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("background task %s cannot be resumed", id)
+	}
+	if err := entry.resumer.Resume(trimmedMessage); err != nil {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("resume background task %s: %w", id, err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, exists = s.tasks[id]
+	if !exists {
+		return coresession.BackgroundTaskSnapshot{}, fmt.Errorf("no background task found with ID: %s", id)
+	}
+	resumed := entry.snapshot
+	resumed.Status = coresession.BackgroundTaskStatusRunning
+	resumed.ControlsAvailable = true
+	entry.snapshot = resumed
+	s.tasks[id] = entry
+
+	logger.DebugCF("background_task_store", "resumed runtime background task", map[string]any{
+		"task_id":        resumed.ID,
+		"type":           resumed.Type,
+		"status":         resumed.Status,
+		"resume_message": trimmedMessage,
+	})
+	return resumed, nil
 }
 
 // List returns a detached copy of the currently visible runtime task snapshots.

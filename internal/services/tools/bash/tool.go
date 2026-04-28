@@ -442,6 +442,9 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 		}
 	}
 
+	// Process image output: detect data URIs in stdout, resize, and encode.
+	richMeta := processImageOutput(&output, redirect.StdoutFile)
+
 	if execResult.TimedOut {
 		return coretool.Result{
 			Error: renderTimeout(output, timeoutMilliseconds),
@@ -470,10 +473,43 @@ func (t *Tool) executeForegroundCommand(ctx context.Context, call coretool.Call,
 
 	return coretool.Result{
 		Output: renderSuccess(output),
-		Meta: map[string]any{
-			"data": output,
-		},
+		Meta:   buildRichMetaFromOutput(output, richMeta),
 	}, nil
+}
+
+// processImageOutput detects if stdout contains a base64-encoded image data URI,
+// applies resize/compression, and returns rich result metadata. It modifies the
+// output in place (stdout may be replaced with the resized data URI, IsImage is
+// set). The outputFilePath is used to re-read full image data from disk when the
+// inline stdout may be truncated.
+func processImageOutput(output *Output, outputFilePath string) RichResultMetadata {
+	richMeta := RichResultMetadata{}
+
+	if output == nil {
+		return richMeta
+	}
+
+	if !isImageOutput(output.Stdout) {
+		return richMeta
+	}
+
+	resized, ok := resizeBashImageOutput(output.Stdout, outputFilePath, output.OutputFileSize)
+	if !ok {
+		// Image processing failed, fall through to text rendering.
+		return richMeta
+	}
+
+	// Update stdout with resized data URI.
+	output.Stdout = resized
+	richMeta.IsImage = true
+
+	// Build structured image data for tool result.
+	imgOut := imageOutputFromStdout(resized, output.OutputFileSize)
+	if imgOut != nil {
+		richMeta.ImageData = imgOut
+	}
+
+	return richMeta
 }
 
 // startBackgroundCommand launches one authorized Bash command in the background and registers it in the shared runtime task store.

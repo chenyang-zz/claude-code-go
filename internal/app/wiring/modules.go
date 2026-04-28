@@ -13,7 +13,10 @@ import (
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/ask_user_question"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/bash"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/enter_plan_mode"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/exit_plan_mode"
 	fileedit "github.com/sheepzhao/claude-code-go/internal/services/tools/file_edit"
 	fileread "github.com/sheepzhao/claude-code-go/internal/services/tools/file_read"
 	filewrite "github.com/sheepzhao/claude-code-go/internal/services/tools/file_write"
@@ -115,6 +118,9 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		task_list.NewTool(taskStore),
 		task_update.NewTool(taskStore),
 		web_fetch.NewTool(webFetchCache, permissions.Allow, permissions.Deny, permissions.Ask),
+		ask_user_question.NewTool(),
+		enter_plan_mode.NewTool(),
+		exit_plan_mode.NewTool(),
 	}
 }
 
@@ -136,5 +142,8 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		task_list.NewTool(taskStore),
 		task_update.NewToolWithHooks(taskStore, dispatcher, hookCfg, disableAllHooks),
 		web_fetch.NewTool(webFetchCache, permissions.Allow, permissions.Deny, permissions.Ask),
+		ask_user_question.NewTool(),
+		enter_plan_mode.NewTool(),
+		exit_plan_mode.NewTool(),
 	}
 }

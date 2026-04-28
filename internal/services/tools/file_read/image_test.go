@@ -18,6 +18,7 @@ import (
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
+	sharedimage "github.com/sheepzhao/claude-code-go/internal/services/tools/shared/image"
 )
 
 // createTestPNG creates a simple PNG image with the specified dimensions.
@@ -225,7 +226,7 @@ func TestReadImageLargeImageAutoResize(t *testing.T) {
 	projectDir := t.TempDir()
 	filePath := filepath.Join(projectDir, "large.png")
 
-	// Create a large image (2000x1800) that exceeds defaultMaxImageDimension (1568).
+	// Create a large image (2000x1800) that exceeds sharedimage.DefaultMaxImageDimension (1568).
 	data, err := createTestPNG(2000, 1800)
 	if err != nil {
 		t.Fatalf("createTestPNG() error = %v", err)
@@ -259,11 +260,11 @@ func TestReadImageLargeImageAutoResize(t *testing.T) {
 	}
 
 	// Display dimensions should be scaled down.
-	if imgOut.DisplayWidth > defaultMaxImageDimension {
-		t.Fatalf("readImage() display width = %d, want <= %d", imgOut.DisplayWidth, defaultMaxImageDimension)
+	if imgOut.DisplayWidth > sharedimage.DefaultMaxImageDimension {
+		t.Fatalf("readImage() display width = %d, want <= %d", imgOut.DisplayWidth, sharedimage.DefaultMaxImageDimension)
 	}
-	if imgOut.DisplayHeight > defaultMaxImageDimension {
-		t.Fatalf("readImage() display height = %d, want <= %d", imgOut.DisplayHeight, defaultMaxImageDimension)
+	if imgOut.DisplayHeight > sharedimage.DefaultMaxImageDimension {
+		t.Fatalf("readImage() display height = %d, want <= %d", imgOut.DisplayHeight, sharedimage.DefaultMaxImageDimension)
 	}
 
 	// Aspect ratio should be preserved.
@@ -376,9 +377,9 @@ func TestDetectImageFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := detectImageFormat(tt.data)
+			got := sharedimage.DetectFormat(tt.data)
 			if got != tt.expected {
-				t.Fatalf("detectImageFormat() = %q, want %q", got, tt.expected)
+				t.Fatalf("sharedimage.DetectFormat() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
@@ -405,9 +406,9 @@ func TestScaleDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%dx%d_to_%dx%d", tt.width, tt.height, tt.maxWidth, tt.maxHeight), func(t *testing.T) {
-			gotW, gotH := scaleDimensions(tt.width, tt.height, tt.maxWidth, tt.maxHeight)
+			gotW, gotH := sharedimage.ScaleDimensions(tt.width, tt.height, tt.maxWidth, tt.maxHeight)
 			if gotW != tt.wantWidth || gotH != tt.wantHeight {
-				t.Fatalf("scaleDimensions() = %dx%d, want %dx%d", gotW, gotH, tt.wantWidth, tt.wantHeight)
+				t.Fatalf("sharedimage.ScaleDimensions() = %dx%d, want %dx%d", gotW, gotH, tt.wantWidth, tt.wantHeight)
 			}
 		})
 	}
@@ -447,11 +448,11 @@ func TestReadImageCompression(t *testing.T) {
 	}
 
 	// Should have been resized down.
-	if imgOut.DisplayWidth > defaultMaxImageDimension {
-		t.Fatalf("readImage() display width = %d, want <= %d", imgOut.DisplayWidth, defaultMaxImageDimension)
+	if imgOut.DisplayWidth > sharedimage.DefaultMaxImageDimension {
+		t.Fatalf("readImage() display width = %d, want <= %d", imgOut.DisplayWidth, sharedimage.DefaultMaxImageDimension)
 	}
-	if imgOut.DisplayHeight > defaultMaxImageDimension {
-		t.Fatalf("readImage() display height = %d, want <= %d", imgOut.DisplayHeight, defaultMaxImageDimension)
+	if imgOut.DisplayHeight > sharedimage.DefaultMaxImageDimension {
+		t.Fatalf("readImage() display height = %d, want <= %d", imgOut.DisplayHeight, sharedimage.DefaultMaxImageDimension)
 	}
 
 	// Base64 should be non-empty.
