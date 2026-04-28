@@ -15,6 +15,10 @@ import (
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/ask_user_question"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/bash"
+	croncreate "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/create"
+	crondelete "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/delete"
+	cronlist "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/list"
+	cronshared "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/shared"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/enter_plan_mode"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/exit_plan_mode"
 	fileedit "github.com/sheepzhao/claude-code-go/internal/services/tools/file_edit"
@@ -99,6 +103,9 @@ func NewBaseWorkspaceModulesWithHooks(fs platformfs.FileSystem, policy *coreperm
 	return NewModules(BaseWorkspaceToolsWithHooks(fs, policy, permissions, backgroundTaskStore, taskStore, hookRunner, hookCfg, disableAllHooks)...)
 }
 
+// cronStore is the shared in-memory cron task store used by all three cron tools.
+var cronStore = cronshared.NewStore()
+
 // webFetchCache is the process-level shared cache for WebFetch results.
 var webFetchCache = web_fetch.NewCache(50*1024*1024, 15*time.Minute)
 
@@ -121,6 +128,9 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		ask_user_question.NewTool(),
 		enter_plan_mode.NewTool(),
 		exit_plan_mode.NewTool(),
+		croncreate.NewTool(cronStore),
+		crondelete.NewTool(cronStore),
+		cronlist.NewTool(cronStore),
 	}
 }
 
@@ -145,5 +155,8 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		ask_user_question.NewTool(),
 		enter_plan_mode.NewTool(),
 		exit_plan_mode.NewTool(),
+		croncreate.NewTool(cronStore),
+		crondelete.NewTool(cronStore),
+		cronlist.NewTool(cronStore),
 	}
 }
