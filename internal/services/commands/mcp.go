@@ -18,7 +18,7 @@ func (c MCPCommand) Metadata() command.Metadata {
 	return command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
-		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name>",
+		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name> | /mcp authenticate <server-name>",
 	}
 }
 
@@ -30,6 +30,12 @@ func (c MCPCommand) Execute(ctx context.Context, args command.Args) (command.Res
 	// Handle detail subcommand.
 	if len(args.Raw) >= 2 && args.Raw[0] == "detail" {
 		return c.executeDetail(ctx, args.Raw[1])
+	}
+	if len(args.Raw) > 0 && args.Raw[0] == "authenticate" {
+		if len(args.Raw) != 2 {
+			return command.Result{}, fmt.Errorf("usage: /mcp authenticate <server-name>")
+		}
+		return c.executeAuthenticate(ctx, args.Raw[1])
 	}
 
 	registry := mcpregistry.GetLastRegistry()
@@ -75,11 +81,62 @@ func (c MCPCommand) Execute(ctx context.Context, args command.Args) (command.Res
 		if e.Error != "" {
 			fmt.Fprintf(&b, " — %s", e.Error)
 		}
+		if e.Status == mcpregistry.StatusNeedsAuth {
+			if e.Config.OAuth != nil && e.Config.Type != "claudeai-proxy" {
+				b.WriteString(" (OAuth/XAA interactive flow not implemented yet)")
+			} else {
+				fmt.Fprintf(&b, " (next: /mcp authenticate %s)", e.Name)
+			}
+		}
 		b.WriteByte('\n')
 	}
 
 	return command.Result{
 		Output: strings.TrimSpace(b.String()),
+	}, nil
+}
+
+// executeAuthenticate retries one MCP server connection after credentials/config are updated.
+func (c MCPCommand) executeAuthenticate(ctx context.Context, serverName string) (command.Result, error) {
+	registry := mcpregistry.GetLastRegistry()
+	if registry == nil {
+		return command.Result{
+			Output: "No MCP servers configured.",
+		}, nil
+	}
+
+	entry, ok := registry.GetEntry(serverName)
+	if !ok {
+		return command.Result{
+			Output: fmt.Sprintf("MCP server %q not found.", serverName),
+		}, nil
+	}
+	if entry.Status == mcpregistry.StatusConnected {
+		return command.Result{
+			Output: fmt.Sprintf("MCP server %q is already connected.", serverName),
+		}, nil
+	}
+	if entry.Config.OAuth != nil && entry.Config.Type != "claudeai-proxy" {
+		return command.Result{
+			Output: fmt.Sprintf("MCP server %q requires OAuth/XAA interactive authentication, which is not implemented in Claude Code Go yet. Complete authentication externally and retry /mcp.", serverName),
+		}, nil
+	}
+
+	if err := registry.ReconnectServer(ctx, serverName); err != nil {
+		updated, found := registry.GetEntry(serverName)
+		if found && strings.TrimSpace(updated.Error) != "" {
+			return command.Result{
+				Output: fmt.Sprintf("Authentication retry for MCP server %q failed: %s", serverName, updated.Error),
+			}, nil
+		}
+		return command.Result{
+			Output: fmt.Sprintf("Authentication retry for MCP server %q failed: %v", serverName, err),
+		}, nil
+	}
+
+	updated, _ := registry.GetEntry(serverName)
+	return command.Result{
+		Output: fmt.Sprintf("MCP server %q reconnected successfully (status: %s).", serverName, updated.Status),
 	}, nil
 }
 
@@ -214,6 +271,13 @@ func (c MCPCommand) executeDetail(ctx context.Context, serverName string) (comma
 		}
 	} else {
 		b.WriteString("\nServer is not connected; tool list unavailable.\n")
+		if target.Status == mcpregistry.StatusNeedsAuth {
+			if target.Config.OAuth != nil && target.Config.Type != "claudeai-proxy" {
+				b.WriteString("Next action: complete OAuth/XAA authentication externally, then retry /mcp.\n")
+			} else {
+				fmt.Fprintf(&b, "Next action: run /mcp authenticate %s\n", target.Name)
+			}
+		}
 	}
 
 	return command.Result{

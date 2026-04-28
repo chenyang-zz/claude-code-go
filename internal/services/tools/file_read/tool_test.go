@@ -106,6 +106,76 @@ func TestToolInvokeReadsTextFile(t *testing.T) {
 	if state.ReadAt.IsZero() {
 		t.Fatal("Invoke() read state ReadAt is zero")
 	}
+	triggers, ok := result.Meta["nested_memory_attachment_triggers"].([]string)
+	if !ok {
+		t.Fatalf("Invoke() nested_memory_attachment_triggers type = %T", result.Meta["nested_memory_attachment_triggers"])
+	}
+	if len(triggers) != 1 || triggers[0] != filePath {
+		t.Fatalf("Invoke() nested_memory_attachment_triggers = %#v, want [%q]", triggers, filePath)
+	}
+}
+
+// TestToolInvokeDiscoversSkillDirTriggers verifies Read emits discovered SKILL.md directories when simple mode is disabled.
+func TestToolInvokeDiscoversSkillDirTriggers(t *testing.T) {
+	projectDir := t.TempDir()
+	skillDir := filepath.Join(projectDir, ".agents", "skills", "example")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", skillDir, err)
+	}
+	mustWriteFile(t, filepath.Join(skillDir, "SKILL.md"), "# demo\n")
+	targetFile := filepath.Join(skillDir, "notes.md")
+	mustWriteFile(t, targetFile, "demo\n")
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy() error = %v", err)
+	}
+	tool := NewTool(platformfs.NewLocalFS(), policy)
+
+	result, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": targetFile,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Invoke() result.Error = %q", result.Error)
+	}
+
+	dirs, ok := result.Meta["dynamic_skill_dir_triggers"].([]string)
+	if !ok {
+		t.Fatalf("Invoke() dynamic_skill_dir_triggers type = %T", result.Meta["dynamic_skill_dir_triggers"])
+	}
+	if len(dirs) != 1 || dirs[0] != skillDir {
+		t.Fatalf("Invoke() dynamic_skill_dir_triggers = %#v, want [%q]", dirs, skillDir)
+	}
+
+	t.Setenv("CLAUDE_CODE_SIMPLE", "1")
+	resultSimple, err := tool.Invoke(context.Background(), coretool.Call{
+		Name: Name,
+		Input: map[string]any{
+			"file_path": targetFile,
+		},
+		Context: coretool.UseContext{
+			WorkingDir: projectDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke() with simple mode error = %v", err)
+	}
+	dirsSimple, ok := resultSimple.Meta["dynamic_skill_dir_triggers"].([]string)
+	if !ok {
+		t.Fatalf("Invoke() with simple mode dynamic_skill_dir_triggers type = %T", resultSimple.Meta["dynamic_skill_dir_triggers"])
+	}
+	if len(dirsSimple) != 0 {
+		t.Fatalf("Invoke() with simple mode dynamic_skill_dir_triggers = %#v, want empty", dirsSimple)
+	}
 }
 
 // TestToolInvokePrefixesSessionMemoryFiles verifies memory-like files get a freshness reminder prefix.

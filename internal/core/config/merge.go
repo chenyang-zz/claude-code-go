@@ -39,6 +39,11 @@ func Merge(base, override Config) Config {
 	if len(override.LoadedSettingSources) > 0 {
 		base.LoadedSettingSources = append([]string(nil), override.LoadedSettingSources...)
 	}
+	if override.HasSettingSourcesFlag {
+		base.SettingSourcesFlag = override.SettingSourcesFlag
+		base.HasSettingSourcesFlag = true
+	}
+	base.SettingOrigins = mergeStringMap(base.SettingOrigins, override.SettingOrigins)
 	base.PolicySettings = mergePolicySettingsConfig(base.PolicySettings, override.PolicySettings)
 	if override.APIKeySource != "" {
 		base.APIKeySource = override.APIKeySource

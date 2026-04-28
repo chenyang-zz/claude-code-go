@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/pkg/sdk"
 )
 
@@ -81,6 +82,41 @@ func TestToSDKMessage_ProgressNoParent(t *testing.T) {
 	}
 	if tp.ParentToolUseID != nil {
 		t.Errorf("expected nil parent_tool_use_id, got %v", *tp.ParentToolUseID)
+	}
+}
+
+func TestToSDKMessage_ProgressMCPData(t *testing.T) {
+	evt := Event{
+		Type:      TypeProgress,
+		Timestamp: time.Now(),
+		Payload: ProgressPayload{
+			ToolUseID: "toolu_2",
+			Data: coretool.MCPProgressData{
+				Type:       "mcp_progress",
+				Status:     "finished",
+				ServerName: "git",
+				ToolName:   "status",
+				ElapsedMs:  2500,
+			},
+		},
+	}
+
+	msg := evt.ToSDKMessage()
+	if msg == nil {
+		t.Fatal("expected non-nil message")
+	}
+	tp, ok := msg.(sdk.ToolProgress)
+	if !ok {
+		t.Fatalf("expected sdk.ToolProgress, got %T", msg)
+	}
+	if tp.ToolName != "git__status" {
+		t.Fatalf("tool_name = %q, want git__status", tp.ToolName)
+	}
+	if tp.ElapsedTimeSec != 2.5 {
+		t.Fatalf("elapsed_time_seconds = %v, want 2.5", tp.ElapsedTimeSec)
+	}
+	if tp.Progress == nil {
+		t.Fatal("progress payload should be preserved")
 	}
 }
 

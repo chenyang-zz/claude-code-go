@@ -168,6 +168,30 @@ func TestRecoverEntries_UnknownTypeSkipped(t *testing.T) {
 	}
 }
 
+func TestRecoverEntries_LegacyProgressSkipped(t *testing.T) {
+	entries := []any{
+		UserEntry{
+			Type:    "user",
+			Message: message.Message{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
+		},
+		ProgressEntry{
+			Type:       "progress",
+			UUID:       "p-1",
+			ParentUUID: "u-1",
+			Data:       map[string]any{"type": "mcp_progress"},
+		},
+		AssistantEntry{
+			Type:    "assistant",
+			Message: message.Message{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("hi")}},
+		},
+	}
+
+	result := RecoverEntries(entries)
+	if len(result.Messages) != 2 {
+		t.Fatalf("message count = %d, want 2", len(result.Messages))
+	}
+}
+
 func TestRecoverFile_NotFound(t *testing.T) {
 	_, err := RecoverFile("/nonexistent/transcript.jsonl")
 	if err == nil {
@@ -234,6 +258,11 @@ func TestValidateEntry(t *testing.T) {
 		{
 			name:    "valid summary",
 			entry:   SummaryEntry{Type: "summary", Summary: "text"},
+			wantErr: false,
+		},
+		{
+			name:    "valid progress",
+			entry:   ProgressEntry{Type: "progress", UUID: "p-1"},
 			wantErr: false,
 		},
 		{

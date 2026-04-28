@@ -385,10 +385,12 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			issues = append(issues, validatePermissionsField(objectValue[key])...)
 		case "hooks":
 			issues = append(issues, validateHooksField(key, objectValue[key])...)
-		case "enabledPlugins", "sandbox", "pluginConfigs", "remote", "statusLine":
+		case "enabledPlugins", "sandbox", "pluginConfigs", "statusLine":
 			if issue, ok := validateObjectField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
 			}
+		case "remote":
+			issues = append(issues, validateRemoteField(key, objectValue[key])...)
 		case "extraKnownMarketplaces":
 			issues = append(issues, validateObjectMapField(key, objectValue[key])...)
 		case "strictKnownMarketplaces", "blockedMarketplaces", "companyAnnouncements", "claudeMdExcludes":
@@ -411,8 +413,10 @@ func ValidateSettingsDocument(value any) []ValidationIssue {
 			if issue, ok := validateEnumField(key, objectValue[key], []string{"latest", "stable"}); ok {
 				issues = append(issues, issue)
 			}
-		case "allowedChannelPlugins", "sshConfigs":
-			issues = append(issues, validateObjectArrayField(key, objectValue[key])...)
+		case "allowedChannelPlugins":
+			issues = append(issues, validateAllowedChannelPluginsField(key, objectValue[key])...)
+		case "sshConfigs":
+			issues = append(issues, validateSSHConfigsField(key, objectValue[key])...)
 		case "allowManagedHooksOnly":
 			if issue, ok := validateBooleanField(key, objectValue[key]); ok {
 				issues = append(issues, issue)
@@ -605,6 +609,125 @@ func validateObjectArrayField(path string, value any) []ValidationIssue {
 			Path:    fmt.Sprintf("%s.%d", path, index),
 			Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(item)),
 		})
+	}
+	return issues
+}
+
+// validateRemoteField verifies the remote settings object and its currently migrated nested keys.
+func validateRemoteField(path string, value any) []ValidationIssue {
+	remoteValue, ok := value.(map[string]any)
+	if !ok {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(value)),
+		}}
+	}
+
+	issues := make([]ValidationIssue, 0)
+	for key, nested := range remoteValue {
+		switch key {
+		case "defaultEnvironmentId":
+			if _, ok := nested.(string); !ok {
+				issues = append(issues, ValidationIssue{
+					Path:    path + "." + key,
+					Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(nested)),
+				})
+			}
+		default:
+			issues = append(issues, ValidationIssue{
+				Path:    path + "." + key,
+				Message: "Unknown field.",
+			})
+		}
+	}
+	return issues
+}
+
+// validateAllowedChannelPluginsField verifies the object-array shape and item field types for allowedChannelPlugins.
+func validateAllowedChannelPluginsField(path string, value any) []ValidationIssue {
+	items, ok := value.([]any)
+	if !ok {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected array, but received %s", jsonTypeName(value)),
+		}}
+	}
+
+	issues := make([]ValidationIssue, 0)
+	for index, item := range items {
+		objectItem, ok := item.(map[string]any)
+		if !ok {
+			issues = append(issues, ValidationIssue{
+				Path:    fmt.Sprintf("%s.%d", path, index),
+				Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(item)),
+			})
+			continue
+		}
+		itemPath := fmt.Sprintf("%s.%d", path, index)
+		for key, field := range objectItem {
+			switch key {
+			case "marketplace", "plugin":
+				if _, ok := field.(string); !ok {
+					issues = append(issues, ValidationIssue{
+						Path:    itemPath + "." + key,
+						Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(field)),
+					})
+				}
+			default:
+				issues = append(issues, ValidationIssue{
+					Path:    itemPath + "." + key,
+					Message: "Unknown field.",
+				})
+			}
+		}
+	}
+	return issues
+}
+
+// validateSSHConfigsField verifies the object-array shape and item field types for sshConfigs.
+func validateSSHConfigsField(path string, value any) []ValidationIssue {
+	items, ok := value.([]any)
+	if !ok {
+		return []ValidationIssue{{
+			Path:    path,
+			Message: fmt.Sprintf("Expected array, but received %s", jsonTypeName(value)),
+		}}
+	}
+
+	issues := make([]ValidationIssue, 0)
+	for index, item := range items {
+		objectItem, ok := item.(map[string]any)
+		if !ok {
+			issues = append(issues, ValidationIssue{
+				Path:    fmt.Sprintf("%s.%d", path, index),
+				Message: fmt.Sprintf("Expected object, but received %s", jsonTypeName(item)),
+			})
+			continue
+		}
+		itemPath := fmt.Sprintf("%s.%d", path, index)
+		for key, field := range objectItem {
+			switch key {
+			case "id", "name", "sshHost", "sshIdentityFile", "startDirectory":
+				if _, ok := field.(string); !ok {
+					issues = append(issues, ValidationIssue{
+						Path:    itemPath + "." + key,
+						Message: fmt.Sprintf("Expected string, but received %s", jsonTypeName(field)),
+					})
+				}
+			case "sshPort":
+				if _, ok := field.(float64); !ok {
+					issues = append(issues, ValidationIssue{
+						Path:    itemPath + "." + key,
+						Message: fmt.Sprintf("Expected number, but received %s", jsonTypeName(field)),
+					})
+				}
+			default:
+				issues = append(issues, ValidationIssue{
+					Path:    itemPath + "." + key,
+					Message: "Unknown field.",
+				})
+			}
+		}
 	}
 	return issues
 }

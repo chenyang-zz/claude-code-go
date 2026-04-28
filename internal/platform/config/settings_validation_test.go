@@ -25,6 +25,9 @@ func TestValidateSettingsContentRejectsUnknownFields(t *testing.T) {
 	if !strings.Contains(result.Error, "- mystery: Unknown field.") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want unknown field message", result.Error)
 	}
+	if len(result.Issues) == 0 || result.Issues[0].Code != ValidationCodeUnrecognizedKeys {
+		t.Fatalf("ValidateSettingsContent() issues = %#v, want unrecognized_keys code", result.Issues)
+	}
 }
 
 // TestValidateSettingsContentRejectsWrongPermissionShape verifies nested permission fields keep precise paths.
@@ -35,6 +38,13 @@ func TestValidateSettingsContentRejectsWrongPermissionShape(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "- permissions.allow.0: Expected string, but received number") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want nested path message", result.Error)
+	}
+	if len(result.Issues) == 0 {
+		t.Fatal("ValidateSettingsContent() issues = empty, want structured issue")
+	}
+	first := result.Issues[0]
+	if first.Code != ValidationCodeInvalidType || first.Expected != "string" || first.InvalidValue != "number" {
+		t.Fatalf("ValidateSettingsContent() first issue = %#v, want invalid_type with expected/received", first)
 	}
 }
 
@@ -94,6 +104,9 @@ func TestValidateSettingsContentRejectsExpandedFieldErrors(t *testing.T) {
 	if !strings.Contains(result.Error, "- permissions.defaultMode: Invalid value. Expected one of: \"acceptEdits\", \"bypassPermissions\", \"default\", \"dontAsk\", \"plan\"") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want defaultMode enum error", result.Error)
 	}
+	if len(result.Issues) < 2 {
+		t.Fatalf("ValidateSettingsContent() issues = %#v, want at least two structured issues", result.Issues)
+	}
 }
 
 // TestValidateSettingsContentRejectsUnsupportedEditorMode verifies editorMode uses a stable enum allowlist.
@@ -136,5 +149,26 @@ func TestValidateSettingsContentRejectsInvalidHooks(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "- hooks: parse hooks for event Stop:") {
 		t.Fatalf("ValidateSettingsContent() error = %q, want hook parse failure", result.Error)
+	}
+}
+
+// TestValidateSettingsContentRejectsPeripheralFieldShape verifies外围字段 keeps item-level typing and unknown-key checks.
+func TestValidateSettingsContentRejectsPeripheralFieldShape(t *testing.T) {
+	result := ValidateSettingsContent("{\n  \"remote\": {\n    \"defaultEnvironmentId\": true,\n    \"unknown\": \"x\"\n  },\n  \"allowedChannelPlugins\": [\n    {\n      \"marketplace\": 1,\n      \"plugin\": \"ok\",\n      \"extra\": true\n    }\n  ],\n  \"sshConfigs\": [\n    {\n      \"id\": \"prod\",\n      \"sshPort\": \"22\",\n      \"extra\": \"x\"\n    }\n  ]\n}\n")
+	if result.IsValid {
+		t.Fatal("ValidateSettingsContent() valid = true, want false")
+	}
+	mustContain := []string{
+		"- remote.defaultEnvironmentId: Expected string, but received boolean",
+		"- remote.unknown: Unknown field.",
+		"- allowedChannelPlugins.0.marketplace: Expected string, but received number",
+		"- allowedChannelPlugins.0.extra: Unknown field.",
+		"- sshConfigs.0.sshPort: Expected number, but received string",
+		"- sshConfigs.0.extra: Unknown field.",
+	}
+	for _, expected := range mustContain {
+		if !strings.Contains(result.Error, expected) {
+			t.Fatalf("ValidateSettingsContent() error = %q, want substring %q", result.Error, expected)
+		}
 	}
 }

@@ -140,10 +140,10 @@ func TestResultSuccessJSON(t *testing.T) {
 
 func TestResultErrorJSON(t *testing.T) {
 	msg := Result{
-		Base:     Base{Type: "result"},
-		Subtype:  "error_during_execution",
-		IsError:  true,
-		Errors:   []string{"something went wrong"},
+		Base:       Base{Type: "result"},
+		Subtype:    "error_during_execution",
+		IsError:    true,
+		Errors:     []string{"something went wrong"},
 		DurationMs: 500,
 	}
 
@@ -218,6 +218,10 @@ func TestToolProgressJSON(t *testing.T) {
 		ParentToolUseID: &parentID,
 		ElapsedTimeSec:  5.5,
 		TaskID:          "task_1",
+		Progress: map[string]any{
+			"type":   "bash_progress",
+			"status": "running",
+		},
 	}
 
 	data, err := json.Marshal(msg)
@@ -241,6 +245,13 @@ func TestToolProgressJSON(t *testing.T) {
 	}
 	if parsed["elapsed_time_seconds"] != 5.5 {
 		t.Errorf("elapsed_time_seconds = %v, want 5.5", parsed["elapsed_time_seconds"])
+	}
+	progress, ok := parsed["progress"].(map[string]any)
+	if !ok {
+		t.Fatalf("progress = %T, want map[string]any", parsed["progress"])
+	}
+	if progress["type"] != "bash_progress" {
+		t.Errorf("progress.type = %v, want bash_progress", progress["type"])
 	}
 }
 

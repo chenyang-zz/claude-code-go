@@ -163,12 +163,21 @@ func convertToolProgressEvent(data []byte, now time.Time) (*event.Event, error) 
 		Payload: event.ProgressPayload{
 			ToolUseID:       tp.ToolUseID,
 			ParentToolUseID: parentID,
-			Data: map[string]any{
-				"tool_name":        tp.ToolName,
-				"elapsed_time_sec": tp.ElapsedTimeSec,
-			},
+			Data:            buildToolProgressData(tp),
 		},
 	}, nil
+}
+
+// buildToolProgressData preserves typed progress payloads when present and
+// falls back to the basic tool progress metadata for older senders.
+func buildToolProgressData(tp sdk.ToolProgress) any {
+	if tp.Progress != nil {
+		return tp.Progress
+	}
+	return map[string]any{
+		"tool_name":        tp.ToolName,
+		"elapsed_time_sec": tp.ElapsedTimeSec,
+	}
 }
 
 // convertSystemEvent handles SDK system messages (init, status, compact_boundary).

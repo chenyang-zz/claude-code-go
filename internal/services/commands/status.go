@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -72,6 +73,9 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 		fmt.Sprintf("- Auth token source: %s", statusCredentialSource(c.Config.AuthTokenSource)),
 		fmt.Sprintf("- API base URL: %s", baseURLValue(c.Config.APIBaseURL)),
 		fmt.Sprintf("- API base URL source: %s", statusBaseURLSource(c.Config)),
+	}
+	if len(c.Config.SettingOrigins) > 0 {
+		lines = append(lines, fmt.Sprintf("- Settings source matrix: %s", statusSettingSourceMatrix(c.Config)))
 	}
 	lines = append(lines, statusAccountMetadataLines(c.Config)...)
 	lines = append(lines, transportDiagnosticLines(c.Config)...)
@@ -265,6 +269,15 @@ func statusSettingSources(cfg coreconfig.Config) string {
 
 // statusPolicySettingSourceLabel renders the minimum managed settings source detail surfaced by `/status`.
 func statusPolicySettingSourceLabel(details coreconfig.PolicySettingsConfig) string {
+	if details.Origin == coreconfig.PolicySettingsOriginRemote {
+		return "Enterprise managed settings (remote)"
+	}
+	if details.Origin == coreconfig.PolicySettingsOriginOSAdmin {
+		return "Enterprise managed settings (HKLM/plist)"
+	}
+	if details.Origin == coreconfig.PolicySettingsOriginOSUser {
+		return "Enterprise managed settings (HKCU)"
+	}
 	if details.Origin != coreconfig.PolicySettingsOriginFile {
 		return "Enterprise managed settings"
 	}
@@ -275,6 +288,48 @@ func statusPolicySettingSourceLabel(details coreconfig.PolicySettingsConfig) str
 		return "Enterprise managed settings (drop-ins)"
 	}
 	return "Enterprise managed settings (file)"
+}
+
+// statusSettingSourceMatrix renders tracked key->source pairs for effective settings fields.
+func statusSettingSourceMatrix(cfg coreconfig.Config) string {
+	if len(cfg.SettingOrigins) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(cfg.SettingOrigins))
+	for key := range cfg.SettingOrigins {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	pairs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		source := strings.TrimSpace(cfg.SettingOrigins[key])
+		if source == "" {
+			continue
+		}
+		pairs = append(pairs, fmt.Sprintf("%s<=%s", key, statusSettingSourceLabel(source, cfg.PolicySettings)))
+	}
+	if len(pairs) == 0 {
+		return "none"
+	}
+	return strings.Join(pairs, ", ")
+}
+
+// statusSettingSourceLabel renders one stable display label for one source id used in the matrix line.
+func statusSettingSourceLabel(source string, policy coreconfig.PolicySettingsConfig) string {
+	switch strings.TrimSpace(source) {
+	case "userSettings":
+		return "User settings"
+	case "projectSettings":
+		return "Project settings"
+	case "localSettings":
+		return "Local settings"
+	case "flagSettings":
+		return "--settings"
+	case "policySettings":
+		return statusPolicySettingSourceLabel(policy)
+	default:
+		return source
+	}
 }
 
 // statusCredentialSource renders the tracked environment key that supplied one runtime credential.

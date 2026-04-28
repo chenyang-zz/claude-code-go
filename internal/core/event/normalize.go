@@ -1,6 +1,9 @@
 package event
 
 import (
+	"fmt"
+
+	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/pkg/sdk"
 )
 
@@ -43,6 +46,25 @@ func normalizeProgress(evt Event) sdk.Message {
 	if !ok {
 		return nil
 	}
+
+	toolName := ""
+	elapsedTimeSec := 0.0
+	switch data := payload.Data.(type) {
+	case coretool.MCPProgressData:
+		toolName = data.ToolName
+		if data.ServerName != "" && data.ToolName != "" {
+			toolName = fmt.Sprintf("%s__%s", data.ServerName, data.ToolName)
+		}
+		if data.ElapsedMs > 0 {
+			elapsedTimeSec = float64(data.ElapsedMs) / 1000.0
+		}
+	case coretool.AgentToolProgressData:
+		toolName = "Agent"
+		if data.DurationMs > 0 {
+			elapsedTimeSec = float64(data.DurationMs) / 1000.0
+		}
+	}
+
 	var parentID *string
 	if payload.ParentToolUseID != "" {
 		parentID = &payload.ParentToolUseID
@@ -51,9 +73,9 @@ func normalizeProgress(evt Event) sdk.Message {
 		Base:            sdk.Base{Type: "tool_progress"},
 		ToolUseID:       payload.ToolUseID,
 		ParentToolUseID: parentID,
-		// ToolName and ElapsedTimeSec are not available in the internal
-		// ProgressPayload; callers that need them should enrich the message
-		// after normalization.
+		ToolName:        toolName,
+		ElapsedTimeSec:  elapsedTimeSec,
+		Progress:        payload.Data,
 	}
 }
 

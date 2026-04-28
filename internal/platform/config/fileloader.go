@@ -23,6 +23,10 @@ type FileLoader struct {
 	HomeDir string
 	// ManagedSettingsDir optionally overrides the managed settings root for tests and controlled runtime setups.
 	ManagedSettingsDir string
+	// ManagedAdminSettingsPath optionally overrides the OS-admin managed settings source path used in policy first-source-wins.
+	ManagedAdminSettingsPath string
+	// ManagedUserSettingsPath optionally overrides the OS-user managed settings source path used as the lowest policy fallback.
+	ManagedUserSettingsPath string
 	// LookupEnv resolves environment variables so tests can supply stable inputs.
 	LookupEnv func(string) string
 	// FlagSettingsValue carries one optional `--settings` CLI override that should merge after on-disk settings and before env.
@@ -139,6 +143,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	cfg.SessionDBPath = l.defaultSessionDBPath()
 
 	sourceEnvs := map[SettingSource]map[string]string{}
+	settingOrigins := map[string]string{}
 	loadedSettingSources := make([]string, 0, 5)
 	for _, candidate := range l.settingsPathCandidates() {
 		fileCfg, loaded, err := l.loadSettingsFile(candidate)
@@ -147,16 +152,18 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 		}
 		if loaded {
 			loadedSettingSources = append(loadedSettingSources, string(candidate.Source))
+			collectSettingOrigins(settingOrigins, fileCfg, candidate.Source)
 		}
 		sourceEnvs[candidate.Source] = cloneStringMap(fileCfg.Env)
 		cfg = coreconfig.Merge(cfg, fileCfg)
 	}
-	policyCfg, loadedPolicySettings, err := l.loadManagedSettings()
+	policyCfg, loadedPolicySettings, err := l.loadPolicySettings()
 	if err != nil {
 		return coreconfig.Config{}, err
 	}
 	if loadedPolicySettings {
 		loadedSettingSources = append(loadedSettingSources, string(SettingSourcePolicySettings))
+		collectSettingOrigins(settingOrigins, policyCfg, SettingSourcePolicySettings)
 		sourceEnvs[SettingSourcePolicySettings] = cloneStringMap(policyCfg.Env)
 		cfg = coreconfig.Merge(cfg, policyCfg)
 	}
@@ -166,10 +173,12 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 			return coreconfig.Config{}, err
 		}
 		loadedSettingSources = append(loadedSettingSources, string(SettingSourceFlagSettings))
+		collectSettingOrigins(settingOrigins, flagCfg, SettingSourceFlagSettings)
 		sourceEnvs[SettingSourceFlagSettings] = cloneStringMap(flagCfg.Env)
 		cfg = coreconfig.Merge(cfg, flagCfg)
 	}
 	cfg.LoadedSettingSources = append([]string(nil), loadedSettingSources...)
+	cfg.SettingOrigins = cloneStringMap(settingOrigins)
 	cfg.ManagedSettingsDir = l.managedSettingsDir()
 	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")))
 
@@ -225,6 +234,44 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	})
 
 	return cfg, nil
+}
+
+// collectSettingOrigins tracks which settings source last provided key runtime fields.
+func collectSettingOrigins(origins map[string]string, loaded coreconfig.Config, source SettingSource) {
+	if origins == nil {
+		return
+	}
+	sourceID := string(source)
+	if strings.TrimSpace(loaded.Model) != "" {
+		origins["model"] = sourceID
+	}
+	if loaded.HasEffortLevelSetting {
+		origins["effortLevel"] = sourceID
+	}
+	if loaded.HasFastModeSetting {
+		origins["fastMode"] = sourceID
+	}
+	if strings.TrimSpace(loaded.Theme) != "" {
+		origins["theme"] = sourceID
+	}
+	if strings.TrimSpace(loaded.EditorMode) != "" {
+		origins["editorMode"] = sourceID
+	}
+	if strings.TrimSpace(loaded.Provider) != "" {
+		origins["provider"] = sourceID
+	}
+	if strings.TrimSpace(loaded.ApprovalMode) != "" {
+		origins["approvalMode"] = sourceID
+	}
+	if strings.TrimSpace(loaded.SessionDBPath) != "" {
+		origins["sessionDbPath"] = sourceID
+	}
+	if len(loaded.Permissions.AdditionalDirectoryEntries) > 0 || len(loaded.Permissions.AdditionalDirectories) > 0 {
+		origins["permissions.additionalDirectories"] = sourceID
+	}
+	if len(loaded.Env) > 0 {
+		origins["env"] = sourceID
+	}
 }
 
 // firstResolvedEnvValue returns the first configured environment variable together with its source label.

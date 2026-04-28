@@ -40,6 +40,12 @@ type Config struct {
 	APIBaseURL string
 	// LoadedSettingSources lists the migrated settings layers that actually participated in config loading.
 	LoadedSettingSources []string
+	// SettingSourcesFlag stores the canonical `--setting-sources` value captured at bootstrap for child-process pass-through.
+	SettingSourcesFlag string
+	// HasSettingSourcesFlag reports whether `--setting-sources` was explicitly provided at bootstrap (including the empty value case).
+	HasSettingSourcesFlag bool
+	// SettingOrigins stores the effective settings-source mapping for key runtime fields (field -> source id).
+	SettingOrigins map[string]string
 	// ManagedSettingsDir stores the resolved managed settings root directory used for policy-scoped agent loading.
 	ManagedSettingsDir string
 	// PolicySettings stores the minimum managed-settings source metadata surfaced by `/status`.
@@ -154,6 +160,12 @@ type Config struct {
 type PolicySettingsOrigin string
 
 const (
+	// PolicySettingsOriginRemote identifies remote managed settings loaded from ~/.claude/remote-settings.json.
+	PolicySettingsOriginRemote PolicySettingsOrigin = "remote"
+	// PolicySettingsOriginOSAdmin identifies OS-admin managed settings loaded from HKLM/macOS managed plist.
+	PolicySettingsOriginOSAdmin PolicySettingsOrigin = "os_admin"
+	// PolicySettingsOriginOSUser identifies OS-user managed settings loaded from HKCU.
+	PolicySettingsOriginOSUser PolicySettingsOrigin = "os_user"
 	// PolicySettingsOriginFile identifies file-based managed settings loaded from managed-settings.json and drop-ins.
 	PolicySettingsOriginFile PolicySettingsOrigin = "file"
 )

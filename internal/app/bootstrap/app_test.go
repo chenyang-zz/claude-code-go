@@ -573,6 +573,75 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	if _, ok := app.Runner.Commands.Get("web-setup"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /web-setup command")
 	}
+	if _, ok := app.Runner.Commands.Get("brief"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /brief command")
+	}
+	if _, ok := app.Runner.Commands.Get("ultraplan"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /ultraplan command")
+	}
+	if _, ok := app.Runner.Commands.Get("share"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /share command")
+	}
+	if _, ok := app.Runner.Commands.Get("summary"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /summary command")
+	}
+	if _, ok := app.Runner.Commands.Get("env"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /env command")
+	}
+	if _, ok := app.Runner.Commands.Get("teleport"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /teleport command")
+	}
+	if _, ok := app.Runner.Commands.Get("onboarding"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /onboarding command")
+	}
+	if _, ok := app.Runner.Commands.Get("oauth-refresh"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /oauth-refresh command")
+	}
+	if _, ok := app.Runner.Commands.Get("issue"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /issue command")
+	}
+	if _, ok := app.Runner.Commands.Get("good-claude"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /good-claude command")
+	}
+	if _, ok := app.Runner.Commands.Get("bughunter"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /bughunter command")
+	}
+	if _, ok := app.Runner.Commands.Get("break-cache"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /break-cache command")
+	}
+	if _, ok := app.Runner.Commands.Get("ctx_viz"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /ctx_viz command")
+	}
+	if _, ok := app.Runner.Commands.Get("backfill-sessions"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /backfill-sessions command")
+	}
+	if _, ok := app.Runner.Commands.Get("init-verifiers"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /init-verifiers command")
+	}
+	if _, ok := app.Runner.Commands.Get("mock-limits"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /mock-limits command")
+	}
+	if _, ok := app.Runner.Commands.Get("reset-limits"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /reset-limits command")
+	}
+	if _, ok := app.Runner.Commands.Get("reset-limits-non-interactive"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /reset-limits-non-interactive command")
+	}
+	if _, ok := app.Runner.Commands.Get("ant-trace"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /ant-trace command")
+	}
+	if _, ok := app.Runner.Commands.Get("perf-issue"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /perf-issue command")
+	}
+	if _, ok := app.Runner.Commands.Get("debug-tool-call"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /debug-tool-call command")
+	}
+	if _, ok := app.Runner.Commands.Get("agents-platform"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /agents-platform command")
+	}
+	if _, ok := app.Runner.Commands.Get("autofix-pr"); !ok {
+		t.Fatal("NewAppWithDependencies() runner commands missing /autofix-pr command")
+	}
 	if _, ok := app.Runner.Commands.Get("seed-sessions"); !ok {
 		t.Fatal("NewAppWithDependencies() runner commands missing /seed-sessions command")
 	}
@@ -669,8 +738,8 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 80 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 80", len(cmds))
+	if len(cmds) != 102 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 102", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",
@@ -804,7 +873,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
-		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name>",
+		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name> | /mcp authenticate <server-name>",
 	}) {
 		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want mcp metadata", got)
 	}
@@ -1242,10 +1311,186 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() seventy-ninth metadata = %#v, want web-setup metadata", got)
 	}
 	if got := cmds[79].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "brief",
+		Description: "Toggle brief-only mode",
+		Usage:       "/brief",
+	}) {
+		t.Fatalf("newCommandRegistry() eightieth metadata = %#v, want brief metadata", got)
+	}
+	if got := cmds[80].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "ultraplan",
+		Description: "Draft an advanced plan in Claude Code on the web",
+		Usage:       "/ultraplan <prompt>",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-first metadata = %#v, want ultraplan metadata", got)
+	}
+	if got := cmds[81].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "share",
+		Description: "Share the current session",
+		Usage:       "/share",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-second metadata = %#v, want share metadata", got)
+	}
+	if got := cmds[82].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "summary",
+		Description: "Show internal summary diagnostics",
+		Usage:       "/summary",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-third metadata = %#v, want summary metadata", got)
+	}
+	if got := cmds[83].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "env",
+		Description: "Inspect internal environment state",
+		Usage:       "/env",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-fourth metadata = %#v, want env metadata", got)
+	}
+	if got := cmds[84].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "teleport",
+		Description: "Teleport the current session to remote runtime",
+		Usage:       "/teleport",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-fifth metadata = %#v, want teleport metadata", got)
+	}
+	if got := cmds[85].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "onboarding",
+		Description: "Run internal onboarding flow",
+		Usage:       "/onboarding",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-sixth metadata = %#v, want onboarding metadata", got)
+	}
+	if got := cmds[86].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "oauth-refresh",
+		Description: "Refresh OAuth credentials",
+		Usage:       "/oauth-refresh",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-seventh metadata = %#v, want oauth-refresh metadata", got)
+	}
+	if got := cmds[87].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "issue",
+		Description: "Run internal issue workflow",
+		Usage:       "/issue",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-eighth metadata = %#v, want issue metadata", got)
+	}
+	if got := cmds[88].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "good-claude",
+		Description: "Run internal good-claude workflow",
+		Usage:       "/good-claude",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() eighty-ninth metadata = %#v, want good-claude metadata", got)
+	}
+	if got := cmds[89].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "bughunter",
+		Description: "Run internal bughunter workflow",
+		Usage:       "/bughunter",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninetieth metadata = %#v, want bughunter metadata", got)
+	}
+	if got := cmds[90].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "break-cache",
+		Description: "Run internal cache-break workflow",
+		Usage:       "/break-cache",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-first metadata = %#v, want break-cache metadata", got)
+	}
+	if got := cmds[91].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "ctx_viz",
+		Description: "Run internal context visualization workflow",
+		Usage:       "/ctx_viz",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-second metadata = %#v, want ctx_viz metadata", got)
+	}
+	if got := cmds[92].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "backfill-sessions",
+		Description: "Backfill internal session fixtures",
+		Usage:       "/backfill-sessions",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-third metadata = %#v, want backfill-sessions metadata", got)
+	}
+	if got := cmds[93].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "init-verifiers",
+		Description: "Create verifier skill(s) for automated verification of code changes",
+		Usage:       "/init-verifiers",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-fourth metadata = %#v, want init-verifiers metadata", got)
+	}
+	if got := cmds[94].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "mock-limits",
+		Description: "Mock internal usage limits",
+		Usage:       "/mock-limits",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-fifth metadata = %#v, want mock-limits metadata", got)
+	}
+	if got := cmds[95].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "reset-limits",
+		Aliases:     []string{"reset-limits-non-interactive"},
+		Description: "Reset internal usage limits",
+		Usage:       "/reset-limits",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-sixth metadata = %#v, want reset-limits metadata", got)
+	}
+	if got := cmds[96].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "ant-trace",
+		Description: "Run internal ANT trace workflow",
+		Usage:       "/ant-trace",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-seventh metadata = %#v, want ant-trace metadata", got)
+	}
+	if got := cmds[97].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "perf-issue",
+		Description: "Run internal performance issue workflow",
+		Usage:       "/perf-issue",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-eighth metadata = %#v, want perf-issue metadata", got)
+	}
+	if got := cmds[98].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "debug-tool-call",
+		Description: "Run internal tool-call debug workflow",
+		Usage:       "/debug-tool-call",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() ninety-ninth metadata = %#v, want debug-tool-call metadata", got)
+	}
+	if got := cmds[99].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "agents-platform",
+		Description: "Run internal agents-platform workflow",
+		Usage:       "/agents-platform",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() one-hundredth metadata = %#v, want agents-platform metadata", got)
+	}
+	if got := cmds[100].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "autofix-pr",
+		Description: "Run internal autofix PR workflow",
+		Usage:       "/autofix-pr",
+		Hidden:      true,
+	}) {
+		t.Fatalf("newCommandRegistry() one-hundred-and-first metadata = %#v, want autofix-pr metadata", got)
+	}
+	if got := cmds[101].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
 	}) {
-		t.Fatalf("newCommandRegistry() eightieth metadata = %#v, want seed-sessions metadata", got)
+		t.Fatalf("newCommandRegistry() one-hundred-and-second metadata = %#v, want seed-sessions metadata", got)
 	}
 }

@@ -189,9 +189,9 @@ func TestProxyToolInvokeProgress(t *testing.T) {
 	c := client.NewClient(mt)
 	pt := AdaptTool("srv", client.Tool{Name: "test"}, c)
 
-	var events []map[string]any
+	var events []tool.MCPProgressData
 	progressFn := func(data any) {
-		if m, ok := data.(map[string]any); ok {
+		if m, ok := data.(tool.MCPProgressData); ok {
 			events = append(events, m)
 		}
 	}
@@ -205,11 +205,11 @@ func TestProxyToolInvokeProgress(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 progress events, got %d", len(events))
 	}
-	if events[0]["status"] != "started" {
-		t.Fatalf("first event status = %q, want started", events[0]["status"])
+	if events[0].Status != "started" {
+		t.Fatalf("first event status = %q, want started", events[0].Status)
 	}
-	if events[1]["status"] != "finished" {
-		t.Fatalf("second event status = %q, want finished", events[1]["status"])
+	if events[1].Status != "finished" {
+		t.Fatalf("second event status = %q, want finished", events[1].Status)
 	}
 }
 
@@ -233,6 +233,12 @@ func TestProxyToolInvokeAuthError(t *testing.T) {
 	}
 	if _, ok := metaErr.(*McpAuthError); !ok {
 		t.Fatalf("expected *McpAuthError in Meta, got %T", metaErr)
+	}
+	if !strings.Contains(result.Error, "/mcp authenticate srv") {
+		t.Fatalf("error = %q, want authenticate recovery hint", result.Error)
+	}
+	if got, ok := result.Meta["recovery_command"].(string); !ok || got != "/mcp authenticate srv" {
+		t.Fatalf("recovery_command = %#v, want /mcp authenticate srv", result.Meta["recovery_command"])
 	}
 }
 

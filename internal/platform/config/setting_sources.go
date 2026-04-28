@@ -53,3 +53,24 @@ func ParseSettingSourcesFlag(flag string) ([]SettingSource, error) {
 
 	return sources, nil
 }
+
+// FormatSettingSourcesFlag encodes parsed disk-backed setting sources back to one canonical CLI flag value.
+// The output preserves the provided order and only includes user/project/local entries.
+func FormatSettingSourcesFlag(sources []SettingSource) string {
+	if len(sources) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(sources))
+	for _, source := range sources {
+		switch source {
+		case SettingSourceUserSettings:
+			parts = append(parts, "user")
+		case SettingSourceProjectSettings:
+			parts = append(parts, "project")
+		case SettingSourceLocalSettings:
+			parts = append(parts, "local")
+		}
+	}
+	return strings.Join(parts, ",")
+}

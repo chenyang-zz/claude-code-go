@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
 )
 
 func TestParseEarlyCLIOptionsOutputFormatFlag(t *testing.T) {
@@ -110,6 +111,43 @@ func TestEarlyOptionsLoaderOutputFormat(t *testing.T) {
 	}
 	if cfg.OutputFormat != "stream-json" {
 		t.Fatalf("OutputFormat = %q, want stream-json", cfg.OutputFormat)
+	}
+}
+
+func TestParseEarlyCLIOptionsSettingSourcesFlag(t *testing.T) {
+	options, remaining, err := ParseEarlyCLIOptions([]string{"--setting-sources", "project,local", "prompt"})
+	if err != nil {
+		t.Fatalf("ParseEarlyCLIOptions() error = %v", err)
+	}
+	if len(remaining) != 1 || remaining[0] != "prompt" {
+		t.Fatalf("remaining = %#v, want [prompt]", remaining)
+	}
+	if !options.HasSettingSources {
+		t.Fatal("HasSettingSources = false, want true")
+	}
+	if len(options.SettingSources) != 2 || options.SettingSources[0] != platformconfig.SettingSourceProjectSettings || options.SettingSources[1] != platformconfig.SettingSourceLocalSettings {
+		t.Fatalf("SettingSources = %#v, want [projectSettings localSettings]", options.SettingSources)
+	}
+}
+
+func TestEarlyOptionsLoaderLoadsSettingSourcesFlagForPassThrough(t *testing.T) {
+	loader := earlyOptionsLoader{
+		base: mockConfigLoader{output: coreconfig.DefaultConfig()},
+		options: EarlyCLIOptions{
+			SettingSources:    []platformconfig.SettingSource{platformconfig.SettingSourceProjectSettings, platformconfig.SettingSourceLocalSettings},
+			HasSettingSources: true,
+		},
+	}
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.HasSettingSourcesFlag {
+		t.Fatal("HasSettingSourcesFlag = false, want true")
+	}
+	if cfg.SettingSourcesFlag != "project,local" {
+		t.Fatalf("SettingSourcesFlag = %q, want project,local", cfg.SettingSourcesFlag)
 	}
 }
 

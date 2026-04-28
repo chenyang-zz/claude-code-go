@@ -55,8 +55,8 @@ func RecoverFile(path string) (RecoverResult, error) {
 	}
 
 	logger.DebugCF("transcript", "recovered entries from file", map[string]any{
-		"path":         path,
-		"entry_count":  len(entries),
+		"path":        path,
+		"entry_count": len(entries),
 	})
 
 	return RecoverEntries(entries), nil
@@ -114,6 +114,10 @@ func RecoverEntries(entries []any) RecoverResult {
 		case SummaryEntry:
 			flushPending()
 			result.Summaries = append(result.Summaries, entry)
+		case ProgressEntry:
+			// Legacy progress entries are intentionally ignored. They are UI-only
+			// markers and do not participate in conversation recovery.
+			continue
 		case ToolUseEntry, ToolResultEntry:
 			// Redundant index entries — the same content is already inside
 			// the AssistantEntry / UserEntry Message.Content.
@@ -181,6 +185,10 @@ func validateEntry(entry any) error {
 		}
 		if e.Summary == "" {
 			return errors.New("summary entry missing summary text")
+		}
+	case ProgressEntry:
+		if e.Type != "progress" {
+			return errors.New("progress entry has wrong type discriminator")
 		}
 	default:
 		return errors.New("unknown entry type")

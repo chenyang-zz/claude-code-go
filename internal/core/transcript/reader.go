@@ -56,8 +56,8 @@ func (r *Reader) ReadNext() (any, error) {
 		entry, err := r.parseLine(line)
 		if err != nil {
 			logger.WarnCF("transcript", "skipping malformed transcript line", map[string]any{
-				"path": r.path,
-				"line": r.line,
+				"path":  r.path,
+				"line":  r.line,
 				"error": err.Error(),
 			})
 			continue
@@ -97,7 +97,7 @@ func (r *Reader) Close() error {
 	}
 
 	logger.DebugCF("transcript", "reader closed", map[string]any{
-		"path": r.path,
+		"path":       r.path,
 		"lines_read": r.line,
 	})
 
@@ -151,6 +151,12 @@ func (r *Reader) parseLine(line []byte) (any, error) {
 		var entry SummaryEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal summary entry: %w", err)
+		}
+		return entry, nil
+	case "progress":
+		var entry ProgressEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal progress entry: %w", err)
 		}
 		return entry, nil
 	default:

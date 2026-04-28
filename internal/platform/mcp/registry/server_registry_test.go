@@ -111,6 +111,43 @@ func TestServerRegistryConnectAllClaudeAiProxyWithAuthToken(t *testing.T) {
 	}
 }
 
+func TestServerRegistryReconnectServerClaudeAiProxyAfterAuthToken(t *testing.T) {
+	t.Parallel()
+
+	server := newRegistryClaudeAiProxyServer(t, "token-123")
+	defer server.Close()
+
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"proxy": {Type: "claudeai-proxy", URL: server.URL, Headers: map[string]string{"X-Test": "ok"}},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r.ConnectAll(ctx)
+
+	before, ok := r.GetEntry("proxy")
+	if !ok || before.Status != StatusNeedsAuth {
+		t.Fatalf("before status = %#v, want needs-auth", before.Status)
+	}
+
+	r.SetAuthToken("token-123")
+	if err := r.ReconnectServer(ctx, "proxy"); err != nil {
+		t.Fatalf("ReconnectServer() error = %v", err)
+	}
+
+	after, ok := r.GetEntry("proxy")
+	if !ok {
+		t.Fatal("GetEntry(proxy) = !ok, want ok")
+	}
+	if after.Status != StatusConnected {
+		t.Fatalf("after status = %q, want connected", after.Status)
+	}
+	if len(after.Tools) != 1 || after.Tools[0].Name != "tool_one" {
+		t.Fatalf("after tools = %#v", after.Tools)
+	}
+}
+
 func TestServerRegistryConnectAllHTTP(t *testing.T) {
 	t.Parallel()
 

@@ -66,11 +66,11 @@ func (p *ProxyTool) Invoke(ctx context.Context, call tool.Call) (tool.Result, er
 	start := time.Now()
 
 	// Report start progress when a callback is available.
-	tool.ReportProgress(ctx, map[string]any{
-		"type":       "mcp_progress",
-		"status":     "started",
-		"serverName": p.serverName,
-		"toolName":   p.mcpTool.Name,
+	tool.ReportProgress(ctx, tool.MCPProgressData{
+		Type:       "mcp_progress",
+		Status:     "started",
+		ServerName: p.serverName,
+		ToolName:   p.mcpTool.Name,
 	})
 
 	// Apply a bounded timeout so a hung MCP server does not block the engine loop.
@@ -88,23 +88,30 @@ func (p *ProxyTool) Invoke(ctx context.Context, call tool.Call) (tool.Result, er
 	elapsed := time.Since(start)
 
 	// Report finish progress (always, even on error).
-	tool.ReportProgress(ctx, map[string]any{
-		"type":       "mcp_progress",
-		"status":     "finished",
-		"serverName": p.serverName,
-		"toolName":   p.mcpTool.Name,
-		"elapsedMs":  elapsed.Milliseconds(),
+	tool.ReportProgress(ctx, tool.MCPProgressData{
+		Type:       "mcp_progress",
+		Status:     "finished",
+		ServerName: p.serverName,
+		ToolName:   p.mcpTool.Name,
+		ElapsedMs:  elapsed.Milliseconds(),
 	})
 
 	if err != nil {
 		classified := classifyMcpError(p.serverName, p.mcpTool.Name, err)
+		errText := classified.Error()
+		meta := map[string]any{
+			"server": p.serverName,
+			"tool":   p.mcpTool.Name,
+			"error":  classified,
+		}
+		if _, ok := classified.(*McpAuthError); ok {
+			recovery := fmt.Sprintf("/mcp authenticate %s", p.serverName)
+			errText = fmt.Sprintf("%s; retry after authentication via `%s`", errText, recovery)
+			meta["recovery_command"] = recovery
+		}
 		return tool.Result{
-			Error: classified.Error(),
-			Meta: map[string]any{
-				"server": p.serverName,
-				"tool":   p.mcpTool.Name,
-				"error":  classified,
-			},
+			Error: errText,
+			Meta:  meta,
 		}, nil
 	}
 

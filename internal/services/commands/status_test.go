@@ -185,6 +185,28 @@ func TestStatusCommandExecuteWithoutCredential(t *testing.T) {
 	}
 }
 
+// TestStatusSettingSourceMatrix verifies `/status` renders a stable key->source matrix when origins are available.
+func TestStatusSettingSourceMatrix(t *testing.T) {
+	cfg := coreconfig.Config{
+		PolicySettings: coreconfig.PolicySettingsConfig{
+			Origin:      coreconfig.PolicySettingsOriginFile,
+			HasBaseFile: true,
+			HasDropIns:  true,
+		},
+		SettingOrigins: map[string]string{
+			"provider":    "policySettings",
+			"model":       "projectSettings",
+			"sessionDbPath": "flagSettings",
+		},
+	}
+
+	got := statusSettingSourceMatrix(cfg)
+	want := "model<=Project settings, provider<=Enterprise managed settings (file + drop-ins), sessionDbPath<=--settings"
+	if got != want {
+		t.Fatalf("statusSettingSourceMatrix() = %q, want %q", got, want)
+	}
+}
+
 // TestStatusCommandExecuteWithLargeMemoryFile verifies /status reports oversized workspace memory files.
 func TestStatusCommandExecuteWithLargeMemoryFile(t *testing.T) {
 	statFn := func(path string) (os.FileInfo, error) {
@@ -352,6 +374,36 @@ func TestStatusSettingSourcesRendersManagedVariants(t *testing.T) {
 				},
 			},
 			expect: "Enterprise managed settings (drop-ins)",
+		},
+		{
+			name: "remote managed",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"policySettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin: coreconfig.PolicySettingsOriginRemote,
+				},
+			},
+			expect: "Enterprise managed settings (remote)",
+		},
+		{
+			name: "os admin managed",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"policySettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin: coreconfig.PolicySettingsOriginOSAdmin,
+				},
+			},
+			expect: "Enterprise managed settings (HKLM/plist)",
+		},
+		{
+			name: "os user managed",
+			cfg: coreconfig.Config{
+				LoadedSettingSources: []string{"policySettings"},
+				PolicySettings: coreconfig.PolicySettingsConfig{
+					Origin: coreconfig.PolicySettingsOriginOSUser,
+				},
+			},
+			expect: "Enterprise managed settings (HKCU)",
 		},
 		{
 			name: "file and drop-ins",

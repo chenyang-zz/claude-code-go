@@ -57,20 +57,20 @@ func (Result) isSDKMessage() {}
 // SystemInit represents the system initialization message.
 type SystemInit struct {
 	Base
-	Subtype           string    `json:"subtype"`
-	Agents            []string  `json:"agents,omitempty"`
-	APIKeySource      string    `json:"api_key_source"`
-	Betas             []string  `json:"betas,omitempty"`
-	ClaudeCodeVersion string    `json:"claude_code_version"`
-	CWD               string    `json:"cwd"`
-	Tools             []string  `json:"tools"`
+	Subtype           string      `json:"subtype"`
+	Agents            []string    `json:"agents,omitempty"`
+	APIKeySource      string      `json:"api_key_source"`
+	Betas             []string    `json:"betas,omitempty"`
+	ClaudeCodeVersion string      `json:"claude_code_version"`
+	CWD               string      `json:"cwd"`
+	Tools             []string    `json:"tools"`
 	MCPServers        []MCPServer `json:"mcp_servers"`
-	Model             string    `json:"model"`
-	PermissionMode    string    `json:"permission_mode"`
-	SlashCommands     []string  `json:"slash_commands"`
-	OutputStyle       string    `json:"output_style"`
-	Skills            []string  `json:"skills"`
-	Plugins           []Plugin  `json:"plugins"`
+	Model             string      `json:"model"`
+	PermissionMode    string      `json:"permission_mode"`
+	SlashCommands     []string    `json:"slash_commands"`
+	OutputStyle       string      `json:"output_style"`
+	Skills            []string    `json:"skills"`
+	Plugins           []Plugin    `json:"plugins"`
 }
 
 func (SystemInit) isSDKMessage() {}
@@ -83,6 +83,7 @@ type ToolProgress struct {
 	ParentToolUseID *string `json:"parent_tool_use_id"`
 	ElapsedTimeSec  float64 `json:"elapsed_time_seconds"`
 	TaskID          string  `json:"task_id,omitempty"`
+	Progress        any     `json:"progress,omitempty"`
 }
 
 func (ToolProgress) isSDKMessage() {}

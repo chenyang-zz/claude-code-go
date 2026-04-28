@@ -143,6 +143,36 @@ func TestConvertRemoteEventToolProgress(t *testing.T) {
 	}
 }
 
+func TestConvertRemoteEventToolProgressWithTypedPayload(t *testing.T) {
+	t.Parallel()
+	data, _ := json.Marshal(sdk.ToolProgress{
+		Base:      sdk.Base{Type: "tool_progress"},
+		ToolUseID: "tool-typed",
+		ToolName:  "Agent",
+		Progress: map[string]any{
+			"type":       "agent_tool_progress",
+			"status":     "started",
+			"agent_type": "explore",
+		},
+	})
+	evt := remote.Event{Data: data}
+	got, err := ConvertRemoteEvent(evt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected event, got nil")
+	}
+	payload := got.Payload.(event.ProgressPayload)
+	progress, ok := payload.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("payload data type = %T, want map[string]any", payload.Data)
+	}
+	if progress["type"] != "agent_tool_progress" {
+		t.Fatalf("progress type = %v, want agent_tool_progress", progress["type"])
+	}
+}
+
 func TestConvertRemoteEventSystemCompactBoundary(t *testing.T) {
 	t.Parallel()
 	data, _ := json.Marshal(map[string]any{

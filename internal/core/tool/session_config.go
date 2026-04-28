@@ -31,6 +31,10 @@ type SessionConfigSnapshot struct {
 	PluginSkills []SkillInfo
 	// UserSettings holds the filtered user settings object.
 	UserSettings map[string]any
+	// SettingSourcesFlag stores the canonical `--setting-sources` CLI value captured at bootstrap.
+	SettingSourcesFlag string
+	// HasSettingSourcesFlag reports whether `--setting-sources` was explicitly provided at bootstrap.
+	HasSettingSourcesFlag bool
 }
 
 // IsEmpty reports whether the snapshot contains no visible configuration.
@@ -39,5 +43,7 @@ func (s SessionConfigSnapshot) IsEmpty() bool {
 		len(s.CustomAgents) == 0 &&
 		len(s.MCPServers) == 0 &&
 		len(s.PluginSkills) == 0 &&
-		len(s.UserSettings) == 0
+		len(s.UserSettings) == 0 &&
+		!s.HasSettingSourcesFlag &&
+		s.SettingSourcesFlag == ""
 }

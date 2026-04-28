@@ -25,6 +25,7 @@ func TestReader_ReadNext_AllEntryTypes(t *testing.T) {
 		`{"type":"tool_result","timestamp":"2026-04-24T10:00:00Z","tool_use_id":"tu1","output":"package main","is_error":false}`,
 		`{"type":"system","timestamp":"2026-04-24T10:00:00Z","subtype":"compact_boundary","compact_metadata":{"trigger":"auto","pre_token_count":1000,"post_token_count":120}}`,
 		`{"type":"summary","timestamp":"2026-04-24T10:00:00Z","summary":"session summary"}`,
+		`{"type":"progress","uuid":"p-1","parentUuid":"u-1","data":{"type":"mcp_progress","status":"started"}}`,
 	}
 
 	dir := t.TempDir()
@@ -118,6 +119,19 @@ func TestReader_ReadNext_AllEntryTypes(t *testing.T) {
 	}
 	if sue.Summary != "session summary" {
 		t.Fatalf("summary mismatch")
+	}
+
+	// progress (legacy)
+	entry, err = reader.ReadNext()
+	if err != nil {
+		t.Fatalf("read progress: %v", err)
+	}
+	pe, ok := entry.(ProgressEntry)
+	if !ok {
+		t.Fatalf("expected ProgressEntry, got %T", entry)
+	}
+	if pe.UUID != "p-1" {
+		t.Fatalf("progress uuid = %q, want p-1", pe.UUID)
 	}
 
 	// EOF

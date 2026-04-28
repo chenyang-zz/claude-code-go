@@ -88,6 +88,19 @@ type SummaryEntry struct {
 	Summary string `json:"summary"`
 }
 
+// ProgressEntry stores one legacy progress record that may exist in older
+// transcript files. Progress records are not part of conversation recovery.
+type ProgressEntry struct {
+	// Type is the transcript discriminator and is always "progress".
+	Type string `json:"type"`
+	// UUID is the legacy transcript message identifier.
+	UUID string `json:"uuid,omitempty"`
+	// ParentUUID links this progress entry to its parent transcript message.
+	ParentUUID string `json:"parentUuid,omitempty"`
+	// Data carries subtype-specific progress payload content.
+	Data map[string]any `json:"data,omitempty"`
+}
+
 // NewUserEntry builds a user transcript entry from one normalized message.
 func NewUserEntry(timestamp time.Time, msg message.Message) UserEntry {
 	return UserEntry{

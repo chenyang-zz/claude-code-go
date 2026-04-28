@@ -372,6 +372,80 @@ func (r *ServerRegistry) GetEntry(name string) (Entry, bool) {
 	return Entry{}, false
 }
 
+// ReconnectServer reconnects one configured server in place and refreshes its snapshots.
+// It is used by command-level recovery flows (for example, manual authentication retries).
+func (r *ServerRegistry) ReconnectServer(ctx context.Context, name string) error {
+	if r == nil {
+		return fmt.Errorf("nil registry")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("empty server name")
+	}
+
+	r.mu.Lock()
+	idx := -1
+	for i := range r.entries {
+		if r.entries[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		r.mu.Unlock()
+		return fmt.Errorf("server %q not found in registry", name)
+	}
+	entry := r.entries[idx]
+	authToken := r.authToken
+	oldClient := r.entries[idx].Client
+	r.entries[idx].Client = nil
+	r.entries[idx].Status = StatusDisabled
+	r.entries[idx].Error = ""
+	r.mu.Unlock()
+
+	if oldClient != nil {
+		_ = oldClient.Close()
+	}
+
+	transport, err := newTransportForEntry(ctx, entry, authToken)
+	if err != nil {
+		r.updateStatus(idx, statusForConnectionError(err), fmt.Sprintf("transport: %v", err))
+		return err
+	}
+
+	c := client.NewClient(transport)
+	result, err := c.Initialize(ctx, client.InitializeRequest{
+		ProtocolVersion: "2024-11-05",
+		Capabilities: client.ClientCapabilities{
+			Roots: map[string]any{},
+		},
+		ClientInfo: client.Implementation{
+			Name:    "claude-code-go",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		_ = c.Close()
+		r.updateStatus(idx, statusForConnectionError(err), fmt.Sprintf("initialize: %v", err))
+		return err
+	}
+
+	r.mu.Lock()
+	r.entries[idx].Client = c
+	r.entries[idx].Status = StatusConnected
+	r.entries[idx].Capabilities = result.Capabilities
+	r.entries[idx].Instructions = result.Instructions
+	r.entries[idx].Tools = nil
+	r.entries[idx].Resources = nil
+	r.entries[idx].Prompts = nil
+	r.entries[idx].Error = ""
+	r.mu.Unlock()
+
+	r.registerNotificationHandlers(idx)
+	r.refreshConnectedSnapshots(ctx, idx)
+	return nil
+}
+
 // ConnectDynamicServer connects a single server dynamically and appends it to the registry.
 // Unlike ConnectAll, this returns the connected entry directly and is intended for
 // agent-specific MCP servers that are created at runtime.

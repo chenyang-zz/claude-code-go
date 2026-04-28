@@ -470,6 +470,72 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.WebSetupCommand{}); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(servicecommands.BriefCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.UltraplanCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ShareCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.SummaryCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.EnvCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.TeleportCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.OnboardingCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.OAuthRefreshCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.IssueCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.GoodClaudeCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.BughunterCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.BreakCacheCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.CtxVizCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.BackfillSessionsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.InitVerifiersCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.MockLimitsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.ResetLimitsCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.AntTraceCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.PerfIssueCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.DebugToolCallCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.AgentsPlatformCommand{}); err != nil {
+		return nil, err
+	}
+	if err := registry.Register(servicecommands.AutofixPRCommand{}); err != nil {
+		return nil, err
+	}
 	if err := registry.Register(servicecommands.SeedSessionsCommand{
 		Repository:  sessionRepository,
 		ProjectPath: dereferenceConfig(cfg).ProjectPath,
@@ -606,7 +672,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
-			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools)
+			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools, backgroundTaskStore)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
 				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
 			} else {
@@ -649,7 +715,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 
 		// Register the Agent tool after the runtime is created so the runner can use it as parent.
 		if agentRegistry != nil {
-			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools)
+			agentTool := agenttool.NewTool(agentRegistry, runtime, mcpServerRegistry, modules.Tools, backgroundTaskStore)
 			if regErr := modules.Tools.Register(agentTool); regErr != nil {
 				logger.WarnCF("bootstrap", "failed to register agent tool", map[string]any{"error": regErr.Error()})
 			} else {
@@ -690,6 +756,8 @@ func buildSessionConfigSnapshot(cfg coreconfig.Config, agentRegistry agent.Regis
 
 	// User settings: expose a filtered, non-sensitive subset.
 	snapshot.UserSettings = filterSettingsForSnapshot(cfg)
+	snapshot.SettingSourcesFlag = cfg.SettingSourcesFlag
+	snapshot.HasSettingSourcesFlag = cfg.HasSettingSourcesFlag
 
 	return snapshot
 }

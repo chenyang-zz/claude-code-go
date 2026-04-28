@@ -555,6 +555,182 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Register(web-setup) error = %v", err)
 	}
 	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "brief",
+		Description: "Toggle brief-only mode",
+		Usage:       "/brief",
+	}}); err != nil {
+		t.Fatalf("Register(brief) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "ultraplan",
+		Description: "Draft an advanced plan in Claude Code on the web",
+		Usage:       "/ultraplan <prompt>",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(ultraplan) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "share",
+		Description: "Share the current session",
+		Usage:       "/share",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(share) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "summary",
+		Description: "Show internal summary diagnostics",
+		Usage:       "/summary",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(summary) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "env",
+		Description: "Inspect internal environment state",
+		Usage:       "/env",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(env) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "teleport",
+		Description: "Teleport the current session to remote runtime",
+		Usage:       "/teleport",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(teleport) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "onboarding",
+		Description: "Run internal onboarding flow",
+		Usage:       "/onboarding",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(onboarding) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "oauth-refresh",
+		Description: "Refresh OAuth credentials",
+		Usage:       "/oauth-refresh",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(oauth-refresh) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "issue",
+		Description: "Run internal issue workflow",
+		Usage:       "/issue",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(issue) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "good-claude",
+		Description: "Run internal good-claude workflow",
+		Usage:       "/good-claude",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(good-claude) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "bughunter",
+		Description: "Run internal bughunter workflow",
+		Usage:       "/bughunter",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(bughunter) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "break-cache",
+		Description: "Run internal cache-break workflow",
+		Usage:       "/break-cache",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(break-cache) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "ctx_viz",
+		Description: "Run internal context visualization workflow",
+		Usage:       "/ctx_viz",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(ctx_viz) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "backfill-sessions",
+		Description: "Backfill internal session fixtures",
+		Usage:       "/backfill-sessions",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(backfill-sessions) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "init-verifiers",
+		Description: "Create verifier skill(s) for automated verification of code changes",
+		Usage:       "/init-verifiers",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(init-verifiers) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "mock-limits",
+		Description: "Mock internal usage limits",
+		Usage:       "/mock-limits",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(mock-limits) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "reset-limits",
+		Aliases:     []string{"reset-limits-non-interactive"},
+		Description: "Reset internal usage limits",
+		Usage:       "/reset-limits",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(reset-limits) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "ant-trace",
+		Description: "Run internal ANT trace workflow",
+		Usage:       "/ant-trace",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(ant-trace) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "perf-issue",
+		Description: "Run internal performance issue workflow",
+		Usage:       "/perf-issue",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(perf-issue) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "debug-tool-call",
+		Description: "Run internal tool-call debug workflow",
+		Usage:       "/debug-tool-call",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(debug-tool-call) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "agents-platform",
+		Description: "Run internal agents-platform workflow",
+		Usage:       "/agents-platform",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(agents-platform) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
+		Name:        "autofix-pr",
+		Description: "Run internal autofix PR workflow",
+		Usage:       "/autofix-pr",
+		Hidden:      true,
+	}}); err != nil {
+		t.Fatalf("Register(autofix-pr) error = %v", err)
+	}
+	if err := registry.Register(stubCommand{meta: command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
@@ -589,7 +765,7 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/ide - Manage IDE integrations and show status\n  Usage: /ide [open]\n/init - Initialize a new CLAUDE.md file with codebase documentation\n/install-github-app - Set up Claude GitHub Actions for a repository\n/install-slack-app - Install the Claude Slack app\n/remote-env - Configure the default remote environment for teleport sessions\n/desktop - Continue the current session in Claude Desktop\n  Aliases: /app\n/mobile - Show QR code to download the Claude mobile app\n  Aliases: /ios, /android\n/feedback - Submit feedback about Claude Code\n  Aliases: /bug\n  Usage: /feedback [report]\n/exit - Exit the REPL\n  Aliases: /quit\n/install - Install Claude Code native build\n  Usage: /install [options]\n/context - Show current context usage\n/review - Review a pull request\n  Usage: /review [pr-number]\n/rewind - Restore the code and/or conversation to a previous point\n  Aliases: /checkpoint\n/skills - List available skills\n/tag - Toggle a searchable tag on the current session\n  Usage: /tag <tag-name>\n/color - Set the prompt bar color for this session\n  Usage: /color <color|default>\n/passes - Share a free week of Claude Code with friends\n/sandbox - Configure sandbox settings\n  Usage: /sandbox [exclude <command-pattern>]\n/stickers - Order Claude Code stickers\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/btw - Ask a quick side question without interrupting the main conversation\n  Usage: /btw <question>\n/chrome - Claude in Chrome (Beta) settings\n/think-back - Your 2025 Claude Code Year in Review\n/reload-plugins - Activate pending plugin changes in the current session\n/advisor - Configure the advisor model\n  Usage: /advisor [<model>|off]\n/statusline - Set up Claude Code's status line UI\n  Usage: /statusline [prompt]\n/ultrareview - Find and verify bugs in your branch using Claude Code on the web\n  Usage: /ultrareview [pr-number]\n/insights - Generate a report analyzing your Claude Code sessions\n  Usage: /insights [--homespaces]\n/remote-control - Connect this terminal for remote-control sessions\n  Aliases: /rc\n  Usage: /remote-control [name]\n/commit - Create a git commit\n/commit-push-pr - Commit, push, and open a PR\n  Usage: /commit-push-pr [instructions]\n/web-setup - Setup Claude Code on the web (requires connecting your GitHub account)\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
+	want := "Available commands:\n/help - Show help and available commands\n/clear - Clear conversation history and start a new session\n/compact - Clear conversation history but keep a summary in context\n  Usage: /compact [instructions]\n/memory - Edit Claude memory files\n/resume - Resume a saved session by search or continue it with a new prompt\n  Aliases: /continue\n  Usage: /resume <search-term> | /resume <session-id> <prompt>\n/config - Show the current runtime configuration\n  Aliases: /settings\n/model - Change the model\n  Usage: /model [model]\n/fast - Toggle fast mode (Opus 4.6 only)\n  Usage: /fast [on|off]\n/effort - Set effort level for model usage\n  Usage: /effort [low|medium|high|max|auto]\n/output-style - Deprecated: use /config to change output style\n/rename - Rename the current conversation for easier resume discovery\n  Usage: /rename <title>\n/doctor - Diagnose the current Claude Code Go host setup\n/permissions - Manage allow & deny tool permission rules\n  Aliases: /allowed-tools\n/add-dir - Add a new working directory\n  Usage: /add-dir <path>\n/login - Sign in with your Anthropic account\n/logout - Sign out from your Anthropic account\n/cost - Show the total cost and duration of the current session\n/status - Show Claude Code status including version, model, account, API connectivity, and tool statuses\n/mcp - Manage MCP servers\n  Usage: /mcp [enable|disable <server-name>]\n/session - Show remote session URL and QR code\n/branch - Create a branch of the current conversation at this point\n  Aliases: /fork\n  Usage: /branch [name]\n/voice - Toggle voice mode\n/ide - Manage IDE integrations and show status\n  Usage: /ide [open]\n/init - Initialize a new CLAUDE.md file with codebase documentation\n/install-github-app - Set up Claude GitHub Actions for a repository\n/install-slack-app - Install the Claude Slack app\n/remote-env - Configure the default remote environment for teleport sessions\n/desktop - Continue the current session in Claude Desktop\n  Aliases: /app\n/mobile - Show QR code to download the Claude mobile app\n  Aliases: /ios, /android\n/feedback - Submit feedback about Claude Code\n  Aliases: /bug\n  Usage: /feedback [report]\n/exit - Exit the REPL\n  Aliases: /quit\n/install - Install Claude Code native build\n  Usage: /install [options]\n/context - Show current context usage\n/review - Review a pull request\n  Usage: /review [pr-number]\n/rewind - Restore the code and/or conversation to a previous point\n  Aliases: /checkpoint\n/skills - List available skills\n/tag - Toggle a searchable tag on the current session\n  Usage: /tag <tag-name>\n/color - Set the prompt bar color for this session\n  Usage: /color <color|default>\n/passes - Share a free week of Claude Code with friends\n/sandbox - Configure sandbox settings\n  Usage: /sandbox [exclude <command-pattern>]\n/stickers - Order Claude Code stickers\n/privacy-settings - View and update your privacy settings\n/plan - Enable plan mode or view the current session plan\n  Usage: /plan [open|<description>]\n/tasks - List and manage background tasks\n  Aliases: /bashes\n/diff - View uncommitted changes and per-turn diffs\n/files - List all files currently in context\n/copy - Copy Claude's last response to clipboard (or /copy N for the Nth-latest)\n  Usage: /copy [N]\n/export - Export the current conversation to a file or clipboard\n  Usage: /export [filename]\n/version - Print the version this session is running (not what autoupdate downloaded)\n/release-notes - View release notes\n/upgrade - Upgrade to Max for higher rate limits and more Opus\n/usage - Show plan usage limits\n/stats - Show your Claude Code usage statistics and activity\n/extra-usage - Configure extra usage to keep working when limits are hit\n/theme - Change the theme\n  Usage: /theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>\n/vim - Toggle between Vim and Normal editing modes\n/terminal-setup - Install Shift+Enter key binding for newlines\n/keybindings - Open or create your keybindings configuration file\n/btw - Ask a quick side question without interrupting the main conversation\n  Usage: /btw <question>\n/chrome - Claude in Chrome (Beta) settings\n/think-back - Your 2025 Claude Code Year in Review\n/reload-plugins - Activate pending plugin changes in the current session\n/advisor - Configure the advisor model\n  Usage: /advisor [<model>|off]\n/statusline - Set up Claude Code's status line UI\n  Usage: /statusline [prompt]\n/ultrareview - Find and verify bugs in your branch using Claude Code on the web\n  Usage: /ultrareview [pr-number]\n/insights - Generate a report analyzing your Claude Code sessions\n  Usage: /insights [--homespaces]\n/remote-control - Connect this terminal for remote-control sessions\n  Aliases: /rc\n  Usage: /remote-control [name]\n/commit - Create a git commit\n/commit-push-pr - Commit, push, and open a PR\n  Usage: /commit-push-pr [instructions]\n/web-setup - Setup Claude Code on the web (requires connecting your GitHub account)\n/brief - Toggle brief-only mode\n/seed-sessions - Insert demo persisted sessions for /resume testing\n/agents - Manage agent configurations\n/plugin - Manage Claude Code plugins\n  Aliases: /plugins, /marketplace\n  Usage: /plugin [subcommand]\n/hooks - View hook configurations for tool events\nSend plain text without a leading slash to start a normal prompt."
 	if result.Output != want {
 		t.Fatalf("Execute() output = %q, want %q", result.Output, want)
 	}
@@ -604,5 +780,68 @@ func TestHelpCommandExecuteRendersRegisteredCommands(t *testing.T) {
 	}
 	if strings.Contains(result.Output, "/heapdump -") {
 		t.Fatalf("Execute() output unexpectedly includes hidden /heapdump command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/ultraplan -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /ultraplan command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/share -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /share command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/summary -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /summary command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/env -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /env command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/teleport -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /teleport command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/onboarding -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /onboarding command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/oauth-refresh -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /oauth-refresh command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/issue -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /issue command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/good-claude -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /good-claude command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/bughunter -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /bughunter command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/break-cache -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /break-cache command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/ctx_viz -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /ctx_viz command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/backfill-sessions -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /backfill-sessions command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/init-verifiers -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /init-verifiers command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/mock-limits -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /mock-limits command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/reset-limits -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /reset-limits command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/ant-trace -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /ant-trace command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/perf-issue -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /perf-issue command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/debug-tool-call -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /debug-tool-call command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/agents-platform -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /agents-platform command: %q", result.Output)
+	}
+	if strings.Contains(result.Output, "/autofix-pr -") {
+		t.Fatalf("Execute() output unexpectedly includes hidden /autofix-pr command: %q", result.Output)
 	}
 }

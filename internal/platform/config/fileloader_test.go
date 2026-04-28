@@ -85,6 +85,18 @@ func TestFileLoaderLoadMergesSettingsAndEnv(t *testing.T) {
 	if cfg.Permissions.DisableBypassPermissionsMode != "disable" {
 		t.Fatalf("Load() permissions.disableBypassPermissionsMode = %q, want disable", cfg.Permissions.DisableBypassPermissionsMode)
 	}
+	if cfg.SettingOrigins["model"] != string(SettingSourceProjectSettings) {
+		t.Fatalf("Load() setting origin model = %q, want projectSettings", cfg.SettingOrigins["model"])
+	}
+	if cfg.SettingOrigins["provider"] != string(SettingSourceUserSettings) {
+		t.Fatalf("Load() setting origin provider = %q, want userSettings", cfg.SettingOrigins["provider"])
+	}
+	if cfg.SettingOrigins["approvalMode"] != string(SettingSourceProjectSettings) {
+		t.Fatalf("Load() setting origin approvalMode = %q, want projectSettings", cfg.SettingOrigins["approvalMode"])
+	}
+	if cfg.SettingOrigins["sessionDbPath"] != string(SettingSourceUserSettings) {
+		t.Fatalf("Load() setting origin sessionDbPath = %q, want userSettings", cfg.SettingOrigins["sessionDbPath"])
+	}
 }
 
 // TestFileLoaderLoadOAuthAccount verifies the loader preserves the minimum cached oauthAccount metadata from settings.
@@ -736,12 +748,175 @@ func TestFileLoaderLoadManagedSettingsBaseAndDropIns(t *testing.T) {
 	if cfg.PolicySettings.Origin != coreconfig.PolicySettingsOriginFile || !cfg.PolicySettings.HasBaseFile || !cfg.PolicySettings.HasDropIns {
 		t.Fatalf("Load() policy settings = %#v, want file origin with base+drop-ins", cfg.PolicySettings)
 	}
+	if cfg.SettingOrigins["model"] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() setting origin model = %q, want policySettings", cfg.SettingOrigins["model"])
+	}
+	if cfg.SettingOrigins["provider"] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() setting origin provider = %q, want policySettings", cfg.SettingOrigins["provider"])
+	}
+	if cfg.SettingOrigins["env"] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() setting origin env = %q, want policySettings", cfg.SettingOrigins["env"])
+	}
 	if len(cfg.Permissions.AdditionalDirectoryEntries) != 1 {
 		t.Fatalf("Load() permissions.additionalDirectoryEntries = %#v, want one managed entry", cfg.Permissions.AdditionalDirectoryEntries)
 	}
 	entry := cfg.Permissions.AdditionalDirectoryEntries[0]
 	if entry.Path != "/managed/dropin" || entry.Source != coreconfig.AdditionalDirectorySourcePolicySettings {
 		t.Fatalf("Load() permissions.additionalDirectoryEntries[0] = %#v, want managed drop-in path with policySettings source", entry)
+	}
+}
+
+// TestFileLoaderLoadRemoteManagedSettingsPrecedesManagedFiles verifies remote managed settings win over file-based managed settings.
+func TestFileLoaderLoadRemoteManagedSettingsPrecedesManagedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
+
+	if err := os.MkdirAll(filepath.Join(homeDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(home) error = %v", err)
+	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".claude", "remote-settings.json"), []byte(`{"model":"remote-managed-model","provider":"openai-compatible"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(remote managed settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"model":"file-managed-model","provider":"anthropic"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(file managed settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "remote-managed-model" {
+		t.Fatalf("Load() model = %q, want remote-managed-model", cfg.Model)
+	}
+	if cfg.Provider != coreconfig.ProviderOpenAICompatible {
+		t.Fatalf("Load() provider = %q, want %q", cfg.Provider, coreconfig.ProviderOpenAICompatible)
+	}
+	if cfg.PolicySettings.Origin != coreconfig.PolicySettingsOriginRemote {
+		t.Fatalf("Load() policy settings origin = %q, want remote", cfg.PolicySettings.Origin)
+	}
+	if len(cfg.LoadedSettingSources) != 1 || cfg.LoadedSettingSources[0] != string(SettingSourcePolicySettings) {
+		t.Fatalf("Load() loaded setting sources = %#v, want [policySettings]", cfg.LoadedSettingSources)
+	}
+}
+
+// TestFileLoaderLoadOSAdminManagedSettingsPrecedesManagedFiles verifies OS-admin managed settings win over file-based managed settings.
+func TestFileLoaderLoadOSAdminManagedSettingsPrecedesManagedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
+	adminPath := filepath.Join(tempDir, "admin-managed.json")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
+	}
+	if err := os.WriteFile(adminPath, []byte(`{"model":"os-admin-model","provider":"anthropic"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(os-admin managed settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"model":"file-model","provider":"openai-compatible"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(file managed settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
+	loader.ManagedAdminSettingsPath = adminPath
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "os-admin-model" || cfg.Provider != coreconfig.ProviderAnthropic {
+		t.Fatalf("Load() = %#v, want os-admin managed settings to win", cfg)
+	}
+	if cfg.PolicySettings.Origin != coreconfig.PolicySettingsOriginOSAdmin {
+		t.Fatalf("Load() policy settings origin = %q, want os_admin", cfg.PolicySettings.Origin)
+	}
+}
+
+// TestFileLoaderLoadOSUserManagedSettingsFallback verifies OS-user managed settings are used only after remote/os-admin/file sources are absent.
+func TestFileLoaderLoadOSUserManagedSettingsFallback(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
+	userPath := filepath.Join(tempDir, "user-managed.json")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
+	}
+	if err := os.WriteFile(userPath, []byte(`{"model":"os-user-model","provider":"anthropic"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(os-user managed settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
+	loader.ManagedUserSettingsPath = userPath
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Model != "os-user-model" || cfg.Provider != coreconfig.ProviderAnthropic {
+		t.Fatalf("Load() = %#v, want os-user managed settings fallback", cfg)
+	}
+	if cfg.PolicySettings.Origin != coreconfig.PolicySettingsOriginOSUser {
+		t.Fatalf("Load() policy settings origin = %q, want os_user", cfg.PolicySettings.Origin)
+	}
+}
+
+// TestFileLoaderLoadPolicySettingsEnvOverridesUntrustedSafeEnv verifies policySettings env remains highest-priority over project/local safe env keys.
+func TestFileLoaderLoadPolicySettingsEnvOverridesUntrustedSafeEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	projectDir := filepath.Join(tempDir, "project")
+	homeDir := filepath.Join(tempDir, "home")
+	managedDir := filepath.Join(tempDir, "managed")
+
+	if err := os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	if err := os.MkdirAll(managedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(managed) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.json"), []byte(`{"env":{"AWS_REGION":"project-region","ANTHROPIC_BASE_URL":"https://project.example.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(project settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, ".claude", "settings.local.json"), []byte(`{"env":{"AWS_REGION":"local-region","ANTHROPIC_BASE_URL":"https://local.example.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(local settings) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(managedDir, "managed-settings.json"), []byte(`{"env":{"AWS_REGION":"policy-region","ANTHROPIC_BASE_URL":"https://policy.example.com"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(policy settings) error = %v", err)
+	}
+
+	loader := NewFileLoader(projectDir, homeDir, func(string) string { return "" })
+	loader.ManagedSettingsDir = managedDir
+
+	cfg, err := loader.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Env["AWS_REGION"] != "policy-region" {
+		t.Fatalf("Load() env AWS_REGION = %q, want policy-region", cfg.Env["AWS_REGION"])
+	}
+	if cfg.Env["ANTHROPIC_BASE_URL"] != "https://policy.example.com" {
+		t.Fatalf("Load() env ANTHROPIC_BASE_URL = %q, want policy value from trusted policySettings", cfg.Env["ANTHROPIC_BASE_URL"])
 	}
 }
 

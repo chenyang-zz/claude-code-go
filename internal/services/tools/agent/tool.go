@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
+	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
@@ -16,20 +18,50 @@ import (
 // It dispatches agent requests to a Runner created on demand from the
 // configured registry and parent runtime.
 type Tool struct {
-	registry       agent.Registry
-	parentRuntime  *engine.Runtime
-	serverRegistry *mcpregistry.ServerRegistry
-	toolRegistry   coretool.Registry
-	descriptor     *Descriptor
+	registry        agent.Registry
+	parentRuntime   *engine.Runtime
+	serverRegistry  *mcpregistry.ServerRegistry
+	toolRegistry    coretool.Registry
+	taskStore       BackgroundTaskStore
+	descriptor      *Descriptor
+	teammateStarter teammateStarter
+	runnerFactory   func() runner
+}
+
+// runner executes one agent task and returns the normalized output.
+type runner interface {
+	// Run executes one agent task.
+	Run(ctx context.Context, input Input) (Output, error)
+}
+
+// BackgroundTaskStore describes the shared lifecycle store used by background Agent tasks.
+type BackgroundTaskStore interface {
+	// Register inserts one new live background task snapshot into the shared store.
+	Register(task coresession.BackgroundTaskSnapshot, stopper interface{ Stop() error })
+	// Update replaces the stored snapshot for one existing task.
+	Update(task coresession.BackgroundTaskSnapshot) bool
+	// Remove deletes one task from the shared task list.
+	Remove(id string)
 }
 
 // NewTool creates an Agent tool wired to the given registry and parent runtime.
-func NewTool(registry agent.Registry, parentRuntime *engine.Runtime, serverRegistry *mcpregistry.ServerRegistry, toolRegistry coretool.Registry) *Tool {
+func NewTool(registry agent.Registry, parentRuntime *engine.Runtime, serverRegistry *mcpregistry.ServerRegistry, toolRegistry coretool.Registry, taskStore BackgroundTaskStore) *Tool {
 	t := &Tool{
-		registry:       registry,
-		parentRuntime:  parentRuntime,
-		serverRegistry: serverRegistry,
-		toolRegistry:   toolRegistry,
+		registry:        registry,
+		parentRuntime:   parentRuntime,
+		serverRegistry:  serverRegistry,
+		toolRegistry:    toolRegistry,
+		taskStore:       taskStore,
+		teammateStarter: osTeammateStarter{},
+	}
+	t.runnerFactory = func() runner {
+		r := NewRunner(t.parentRuntime, t.registry)
+		if t.parentRuntime != nil {
+			r.SessionConfig = t.parentRuntime.SessionConfig
+		}
+		r.ServerRegistry = t.serverRegistry
+		r.ToolRegistry = t.toolRegistry
+		return r
 	}
 	if registry != nil {
 		t.descriptor = &Descriptor{Registry: registry}
@@ -86,6 +118,16 @@ func (t *Tool) InputSchema() coretool.InputSchema {
 				Description: "Optional name for the spawned agent.",
 				Required:    false,
 			},
+			"team_name": {
+				Type:        coretool.ValueKindString,
+				Description: "Optional team name for teammate spawn.",
+				Required:    false,
+			},
+			"mode": {
+				Type:        coretool.ValueKindString,
+				Description: "Optional permission mode for teammate spawn.",
+				Required:    false,
+			},
 			"cwd": {
 				Type:        coretool.ValueKindString,
 				Description: "Optional working directory override for the agent.",
@@ -123,15 +165,44 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	logger.DebugCF("agent.tool", "invoking agent", map[string]any{
 		"subagent_type": input.SubagentType,
 		"description":   input.Description,
+		"background":    input.RunInBackground,
 	})
-
-	runner := NewRunner(t.parentRuntime, t.registry)
-	if t.parentRuntime != nil {
-		runner.SessionConfig = t.parentRuntime.SessionConfig
+	if strings.TrimSpace(input.Name) != "" && strings.TrimSpace(input.TeamName) != "" {
+		spawnRequest := teammateSpawnRequest{
+			Name:          strings.TrimSpace(input.Name),
+			TeamName:      strings.TrimSpace(input.TeamName),
+			Cwd:           strings.TrimSpace(input.Cwd),
+			SessionConfig: t.parentRuntime.SessionConfig,
+		}
+		pid, spawnErr := t.teammateStarter.Start(ctx, spawnRequest)
+		if spawnErr != nil {
+			return coretool.Result{Error: fmt.Sprintf("teammate spawn failed: %v", spawnErr)}, nil
+		}
+		logger.DebugCF("agent.tool", "teammate spawn launched", map[string]any{
+			"name":      spawnRequest.Name,
+			"team_name": spawnRequest.TeamName,
+			"pid":       pid,
+		})
+		spawnOutput := Output{
+			AgentID:   fmt.Sprintf("%s@%s", spawnRequest.Name, spawnRequest.TeamName),
+			AgentType: input.SubagentType,
+			Content: []TextBlock{{
+				Type: "text",
+				Text: fmt.Sprintf("Teammate %s launched in team %s", spawnRequest.Name, spawnRequest.TeamName),
+			}},
+		}
+		resultJSON, marshalErr := json.Marshal(spawnOutput)
+		if marshalErr != nil {
+			return coretool.Result{Error: fmt.Sprintf("failed to marshal teammate spawn output: %v", marshalErr)}, nil
+		}
+		return coretool.Result{Output: string(resultJSON)}, nil
 	}
-	runner.ServerRegistry = t.serverRegistry
-	runner.ToolRegistry = t.toolRegistry
-	output, err := runner.Run(ctx, input)
+
+	if input.RunInBackground {
+		return t.launchBackground(ctx, input), nil
+	}
+
+	output, err := t.runnerFactory().Run(ctx, input)
 	if err != nil {
 		logger.WarnCF("agent.tool", "agent run failed", map[string]any{
 			"subagent_type": input.SubagentType,

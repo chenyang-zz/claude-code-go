@@ -167,6 +167,10 @@ func (l earlyOptionsLoader) Load(ctx context.Context) (coreconfig.Config, error)
 	if err != nil {
 		return coreconfig.Config{}, err
 	}
+	if l.options.HasSettingSources {
+		cfg.SettingSourcesFlag = platformconfig.FormatSettingSourcesFlag(l.options.SettingSources)
+		cfg.HasSettingSourcesFlag = true
+	}
 	if l.options.OutputFormat != "" {
 		cfg.OutputFormat = l.options.OutputFormat
 	}

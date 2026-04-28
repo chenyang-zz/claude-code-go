@@ -309,12 +309,15 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		"start_line":  output.StartLine,
 		"total_lines": output.TotalLines,
 	})
+	triggerMeta := buildReadPathTriggerMeta(filePath, call.Context.WorkingDir)
 
 	return coretool.Result{
 		Output: renderOutput(output, memoryFreshnessReminder(filePath, info.ModTime())),
 		Meta: map[string]any{
-			"data":       output,
-			"read_state": buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
+			"data":                              output,
+			"read_state":                        buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
+			"nested_memory_attachment_triggers": triggerMeta.NestedMemoryAttachmentTriggers,
+			"dynamic_skill_dir_triggers":        triggerMeta.DynamicSkillDirTriggers,
 		},
 	}, nil
 }

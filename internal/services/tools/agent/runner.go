@@ -61,6 +61,11 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		"agent_type": def.AgentType,
 		"model":      def.Model,
 	})
+	coretool.ReportProgress(ctx, coretool.AgentToolProgressData{
+		Type:      "agent_tool_progress",
+		Status:    "started",
+		AgentType: def.AgentType,
+	})
 
 	// 2. Sync agent memory snapshot before building the prompt.
 	memoryScope := ""
@@ -161,6 +166,14 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 
 	// 7. Collect events and build output
 	output := r.collectOutput(stream, def.AgentType, start)
+	coretool.ReportProgress(ctx, coretool.AgentToolProgressData{
+		Type:              "agent_tool_progress",
+		Status:            "finished",
+		AgentType:         def.AgentType,
+		DurationMs:        output.TotalDurationMs,
+		TotalToolUseCount: output.TotalToolUseCount,
+		TotalTokens:       output.TotalTokens,
+	})
 
 	logger.DebugCF("agent.runner", "agent run completed", map[string]any{
 		"agent_type":   def.AgentType,
