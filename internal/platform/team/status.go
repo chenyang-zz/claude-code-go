@@ -30,10 +30,14 @@ type Reader struct {
 	TaskStore task.Store
 }
 
-// TeamFile describes the subset of the team config needed for status summaries.
+// TeamFile describes the team configuration stored in config.json.
 type TeamFile struct {
 	// Name is the human-readable team name from config.json.
 	Name string `json:"name"`
+	// Description is an optional team description.
+	Description string `json:"description,omitempty"`
+	// CreatedAt is the Unix timestamp (milliseconds) when the team was created.
+	CreatedAt int64 `json:"createdAt,omitempty"`
 	// LeadAgentID identifies the lead agent for the team.
 	LeadAgentID string `json:"leadAgentId"`
 	// Members contains the team members shown by /agents.
@@ -129,21 +133,7 @@ func (r *Reader) homeDir() string {
 
 // teamConfigPath returns the full path to a team's config.json file.
 func teamConfigPath(homeDir, teamID string) string {
-	return filepath.Join(homeDir, ".claude", "teams", sanitizeName(teamID), teamConfigFileName)
-}
-
-// sanitizeName rewrites a string for safe use as a path component.
-func sanitizeName(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			continue
-		}
-		b.WriteByte('-')
-	}
-	return strings.ToLower(b.String())
+	return filepath.Join(homeDir, ".claude", "teams", SanitizeName(teamID), teamConfigFileName)
 }
 
 // buildStatus constructs a Status from a team file and a task list.

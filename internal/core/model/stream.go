@@ -14,6 +14,10 @@ const (
 	EventTypeError EventType = "error"
 	// EventTypeDone marks the end of a provider stream.
 	EventTypeDone EventType = "done"
+	// EventTypeServerToolUse carries a server-side tool use block (e.g. web_search).
+	EventTypeServerToolUse EventType = "server_tool_use"
+	// EventTypeWebSearchResult carries a web_search_tool_result block from the API.
+	EventTypeWebSearchResult EventType = "web_search_tool_result"
 )
 
 // StopReason describes why the model stopped generating tokens.
@@ -38,11 +42,38 @@ type Event struct {
 	Signature  string
 	Error      string
 	ToolUse    *ToolUse
-	StopReason StopReason
-	Usage      *Usage
+	// ServerToolUse carries a server-side tool use block emitted by the model
+	// when it invokes a server-defined tool such as web_search_20250305.
+	ServerToolUse *ServerToolUse
+	// WebSearchResult carries a web_search_tool_result block from the API
+	// containing search result hits or an error.
+	WebSearchResult *WebSearchResult
+	StopReason      StopReason
+	Usage           *Usage
 	// ResponseID carries the provider-side response identifier when available.
 	// Used by the OpenAI Responses API for stateful conversation tracking.
 	ResponseID string
+}
+
+// ServerToolUse represents a server-side tool invocation requested by the model,
+// such as a web_search_20250305 call.
+type ServerToolUse struct {
+	ID    string
+	Name  string
+	Input map[string]any
+}
+
+// WebSearchResult represents the result of a web_search_20250305 execution.
+type WebSearchResult struct {
+	ToolUseID string
+	Content   []WebSearchHit
+	ErrorCode string
+}
+
+// WebSearchHit carries a single web search result entry.
+type WebSearchHit struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
 }
 
 // Stream is the asynchronous event channel returned by a model client.

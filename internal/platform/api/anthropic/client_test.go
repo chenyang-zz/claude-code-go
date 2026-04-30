@@ -1136,3 +1136,180 @@ func TestClientStreamSkipsThinkingBlocksForCacheControl(t *testing.T) {
 	for range stream {
 	}
 }
+
+
+// TestClientStreamExtraToolSchemas verifies that ExtraToolSchemas are serialized
+// as extra_tools in the request body.
+func TestClientStreamExtraToolSchemas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		extraTools, ok := body["extra_tools"].([]any)
+		if !ok || len(extraTools) != 1 {
+			t.Fatalf("extra_tools = %#v, want 1 tool", body["extra_tools"])
+		}
+
+		tool, ok := extraTools[0].(map[string]any)
+		if !ok {
+			t.Fatalf("extra_tool = %#v, want object", extraTools[0])
+		}
+		if tool["type"] != "web_search_20250305" {
+			t.Fatalf("extra_tool type = %q, want web_search_20250305", tool["type"])
+		}
+		if tool["name"] != "web_search" {
+			t.Fatalf("extra_tool name = %q, want web_search", tool["name"])
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		ExtraToolSchemas: []map[string]any{
+			{
+				"type":     "web_search_20250305",
+				"name":     "web_search",
+				"max_uses": float64(8),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
+// TestClientStreamServerToolUse verifies Anthropic server_tool_use SSE payloads
+// are mapped into shared server_tool_use events.
+func TestClientStreamServerToolUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"stu_1\",\"name\":\"web_search\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"test search\\\"}\"}}\n\n"))
+		_, _ = w.Write([]byte("event: content_block_stop\n"))
+		_, _ = w.Write([]byte("data: {\"index\":0}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	evt := <-stream
+	if evt.Type != model.EventTypeServerToolUse {
+		t.Fatalf("Stream() first event type = %q, want server_tool_use", evt.Type)
+	}
+	if evt.ServerToolUse == nil {
+		t.Fatal("Stream() server_tool_use payload = nil")
+	}
+	if evt.ServerToolUse.ID != "stu_1" || evt.ServerToolUse.Name != "web_search" {
+		t.Fatalf("Stream() server_tool_use = %#v", evt.ServerToolUse)
+	}
+	if got := evt.ServerToolUse.Input["query"]; got != "test search" {
+		t.Fatalf("Stream() server_tool_use input query = %#v, want test search", got)
+	}
+}
+
+// TestClientStreamWebSearchResult verifies Anthropic web_search_tool_result SSE
+// payloads are mapped into shared web_search_result events.
+func TestClientStreamWebSearchResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":1,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"stu_1\",\"content\":[{\"title\":\"Example\",\"url\":\"https://example.com\"}]}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	evt := <-stream
+	if evt.Type != model.EventTypeWebSearchResult {
+		t.Fatalf("Stream() first event type = %q, want web_search_tool_result", evt.Type)
+	}
+	if evt.WebSearchResult == nil {
+		t.Fatal("Stream() web_search_result payload = nil")
+	}
+	if evt.WebSearchResult.ToolUseID != "stu_1" {
+		t.Fatalf("Stream() web_search_result tool_use_id = %q, want stu_1", evt.WebSearchResult.ToolUseID)
+	}
+	if len(evt.WebSearchResult.Content) != 1 {
+		t.Fatalf("Stream() web_search_result content length = %d, want 1", len(evt.WebSearchResult.Content))
+	}
+	if evt.WebSearchResult.Content[0].Title != "Example" {
+		t.Fatalf("Stream() web_search_result hit title = %q, want Example", evt.WebSearchResult.Content[0].Title)
+	}
+	if evt.WebSearchResult.Content[0].URL != "https://example.com" {
+		t.Fatalf("Stream() web_search_result hit url = %q", evt.WebSearchResult.Content[0].URL)
+	}
+}
+
+// TestClientStreamWebSearchResultError verifies error web_search_tool_result
+// with error_code is properly handled.
+func TestClientStreamWebSearchResultError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte("data: {\"index\":1,\"content_block\":{\"type\":\"web_search_tool_result\",\"tool_use_id\":\"stu_1\",\"error_code\":\"search_error\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	evt := <-stream
+	if evt.Type != model.EventTypeWebSearchResult {
+		t.Fatalf("Stream() first event type = %q, want web_search_tool_result", evt.Type)
+	}
+	if evt.WebSearchResult == nil {
+		t.Fatal("Stream() web_search_result payload = nil")
+	}
+	if evt.WebSearchResult.ErrorCode != "search_error" {
+		t.Fatalf("Stream() web_search_result error_code = %q, want search_error", evt.WebSearchResult.ErrorCode)
+	}
+	if len(evt.WebSearchResult.Content) != 0 {
+		t.Fatalf("Stream() web_search_result content length = %d, want 0", len(evt.WebSearchResult.Content))
+	}
+}

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -22,14 +23,14 @@ func TestPluginCommandMetadata(t *testing.T) {
 	}
 }
 
-// TestPluginCommandExecute verifies /plugin returns the stable settings fallback.
-func TestPluginCommandExecute(t *testing.T) {
+// TestPluginCommandExecute_NoLoader verifies /plugin returns a fallback message when the loader is nil.
+func TestPluginCommandExecute_NoLoader(t *testing.T) {
 	result, err := PluginCommand{}.Execute(context.Background(), command.Args{})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 
-	if result.Output != pluginCommandFallback {
-		t.Fatalf("Execute() output = %q, want %q", result.Output, pluginCommandFallback)
+	if !strings.Contains(result.Output, "Plugin management is not available") {
+		t.Fatalf("Execute() output = %q, want unavailable fallback", result.Output)
 	}
 }

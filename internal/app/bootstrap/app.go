@@ -27,10 +27,12 @@ import (
 	mcpbridge "github.com/sheepzhao/claude-code-go/internal/platform/mcp/bridge"
 	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
+	"github.com/sheepzhao/claude-code-go/internal/platform/plugin"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	platformteam "github.com/sheepzhao/claude-code-go/internal/platform/team"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/cron"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
@@ -42,6 +44,10 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/tool_search"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/web_search"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -56,6 +62,8 @@ type App struct {
 	Config coreconfig.Config
 	// Runner owns the one-turn REPL execution flow.
 	Runner *repl.Runner
+	// Scheduler runs cron scheduled tasks.
+	Scheduler *cron.Scheduler
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -135,7 +143,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	}
 
 	agentRegistry := resolveAgentRegistry(cfg)
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore, agentRegistry)
+	pluginLoader := plugin.NewPluginLoader(plugin.NewInstalledPluginsStore())
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore, agentRegistry, pluginLoader)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +158,15 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		"output_format":       cfg.OutputFormat,
 	})
 
+	scheduler := cron.NewScheduler(cron.SchedulerOptions{
+		ProjectRoot: cfg.ProjectPath,
+	})
+	scheduler.Start()
+
 	return &App{
-		Config: cfg,
-		Runner: runner,
+		Config:    cfg,
+		Runner:    runner,
+		Scheduler: scheduler,
 	}, nil
 }
 
@@ -164,7 +179,7 @@ func configureConsoleLogging(outputFormat string) {
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, agentRegistry agent.Registry) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, agentRegistry agent.Registry, pluginLoader *plugin.PluginLoader) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -213,10 +228,11 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OutputStyleCommand{}); err != nil {
 		return nil, err
 	}
-	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions, backgroundTaskStore, taskStore)...)
+	statusToolRegistry, err := wiring.NewModules(wiring.BaseWorkspaceTools(platformfs.NewLocalFS(), policy, cfg.Permissions, backgroundTaskStore, taskStore, cfg.HomeDir, cfg.ProjectPath)...)
 	if err != nil {
 		return nil, err
 	}
+		tool_search.SharedRegistry = statusToolRegistry.Tools
 	if err := registry.Register(servicecommands.DoctorCommand{
 		Config:       dereferenceConfig(cfg),
 		ToolRegistry: statusToolRegistry.Tools,
@@ -419,7 +435,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.PluginCommand{}); err != nil {
+	if err := registry.Register(servicecommands.PluginCommand{Loader: pluginLoader}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.HooksCommand{}); err != nil {
@@ -437,7 +453,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.ThinkbackPlayCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.ReloadPluginsCommand{}); err != nil {
+	if err := registry.Register(servicecommands.ReloadPluginsCommand{Loader: pluginLoader}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.AdvisorCommand{}); err != nil {
@@ -542,7 +558,109 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
-	return registry, nil
+		// Load skills from all sources (project, user, managed, bundled)
+		// and register them into the command registry so SkillTool can invoke them.
+		homeDir := dereferenceConfig(cfg).HomeDir
+		projectPath := dereferenceConfig(cfg).ProjectPath
+
+		var allSkills []*skill.Skill
+
+		// Project skills: from .claude/skills/ in CWD and parent dirs up to $HOME.
+		if projectPath != "" {
+			projectSkills, loadErrors, err := skill.LoadProjectSkills(projectPath, homeDir)
+			if err != nil {
+				logger.WarnCF("bootstrap", "failed to load project skills", map[string]any{
+						"error": err.Error(),
+				})
+			}
+			for _, le := range loadErrors {
+				logger.WarnCF("bootstrap", "skill load error", map[string]any{
+						"skill": le.Name,
+						"error": le.Error,
+				})
+			}
+			allSkills = append(allSkills, projectSkills...)
+		}
+
+		// User skills: from ~/.claude/skills/.
+		if homeDir != "" {
+			userSkills, loadErrors, err := skill.LoadUserSkills(homeDir)
+			if err != nil {
+				logger.WarnCF("bootstrap", "failed to load user skills", map[string]any{
+						"error": err.Error(),
+				})
+			}
+			for _, le := range loadErrors {
+				logger.WarnCF("bootstrap", "user skill load error", map[string]any{
+						"skill": le.Name,
+						"error": le.Error,
+				})
+			}
+			allSkills = append(allSkills, userSkills...)
+		}
+
+		// Managed skills: from ~/.claude/managed/.claude/skills/.
+		if homeDir != "" {
+			managedSkills, loadErrors, err := skill.LoadManagedSkills(homeDir)
+			if err != nil {
+				logger.WarnCF("bootstrap", "failed to load managed skills", map[string]any{
+						"error": err.Error(),
+				})
+			}
+			for _, le := range loadErrors {
+				logger.WarnCF("bootstrap", "managed skill load error", map[string]any{
+						"skill": le.Name,
+						"error": le.Error,
+				})
+			}
+			allSkills = append(allSkills, managedSkills...)
+		}
+
+		// Legacy /commands/ loading: load old-format skills from .claude/commands/.
+		if projectPath != "" {
+			commandsSkills, loadErrors, err := skill.LoadSkillsFromCommandsDir(projectPath)
+			if err != nil {
+				logger.WarnCF("bootstrap", "failed to load commands skills", map[string]any{
+					"error": err.Error(),
+				})
+			}
+			for _, le := range loadErrors {
+				logger.WarnCF("bootstrap", "commands skill load error", map[string]any{
+					"skill": le.Name,
+					"error": le.Error,
+				})
+			}
+			allSkills = append(allSkills, commandsSkills...)
+		}
+
+		// Deduplicate by canonical path, then separate conditional skills
+		// (skills with paths frontmatter that activate when matching files are touched).
+		allSkills = skill.DeduplicateByPath(allSkills)
+		allSkills = skill.SeparateConditionalSkills(allSkills)
+
+		if registered := skill.RegisterSkills(registry, allSkills, "skills"); registered > 0 {
+			logger.InfoCF("bootstrap", "loaded skills", map[string]any{
+				"count": registered,
+			})
+		}
+
+		// Initialize and register bundled skills.
+		bundled.InitBundledSkills()
+		for _, bs := range skill.GetBundledSkills() {
+			if err := registry.Register(bs); err != nil {
+				logger.DebugCF("bootstrap", "failed to register bundled skill", map[string]any{
+						"name":  bs.Metadata().Name,
+						"error": err.Error(),
+				})
+			}
+		}
+
+		// Publish the command registry for SkillTool to look up skills at invoke time.
+		skill.SharedRegistry = registry
+
+		// Start the file watcher for skill and command directories.
+		skill.StartDefaultWatcher(homeDir, projectPath)
+		return registry, nil
 }
 
 // dereferenceConfig copies the pointed runtime config or returns the zero value when unavailable.
@@ -592,7 +710,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	}
 
 	hookRunner := runtimehooks.NewRunner()
-	modules, err := wiring.NewBaseWorkspaceModulesWithHooks(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore, hookRunner, cfg.Hooks, cfg.DisableAllHooks)
+	modules, err := wiring.NewBaseWorkspaceModulesWithHooks(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore, hookRunner, cfg.Hooks, cfg.DisableAllHooks, cfg.HomeDir, cfg.ProjectPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -681,6 +799,14 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			}
 		}
 
+		// Register the WebSearch tool using the runtime's model client for sub-calls.
+		webSearchTool := web_search.NewTool(runtime.Client, cfg.Model)
+		if regErr := modules.Tools.Register(webSearchTool); regErr != nil {
+			logger.WarnCF("bootstrap", "failed to register web_search tool", map[string]any{"error": regErr.Error()})
+		} else {
+			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
+		}
+
 		return runtime, policy, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
@@ -722,6 +848,14 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				// Re-describe tools so the runtime catalog includes the Agent tool.
 				runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 			}
+		}
+
+		// Register the WebSearch tool using the runtime's model client for sub-calls.
+		webSearchTool := web_search.NewTool(runtime.Client, cfg.Model)
+		if regErr := modules.Tools.Register(webSearchTool); regErr != nil {
+			logger.WarnCF("bootstrap", "failed to register web_search tool", map[string]any{"error": regErr.Error()})
+		} else {
+			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 		}
 
 		return runtime, policy, nil
@@ -1119,5 +1253,6 @@ func buildUsageLimitsProbe(cfg *coreconfig.Config) servicecommands.UsageLimitsPr
 
 // Run forwards execution to the configured runner.
 func (a *App) Run(ctx context.Context, args []string) error {
+	defer a.Scheduler.Stop()
 	return a.Runner.Run(ctx, args)
 }

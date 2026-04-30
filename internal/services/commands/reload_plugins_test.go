@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -21,15 +22,14 @@ func TestReloadPluginsCommandMetadata(t *testing.T) {
 	}
 }
 
-// TestReloadPluginsCommandExecute verifies /reload-plugins returns the stable fallback for no-arg execution.
-func TestReloadPluginsCommandExecute(t *testing.T) {
-	result, err := ReloadPluginsCommand{}.Execute(context.Background(), command.Args{})
-	if err != nil {
-		t.Fatalf("Execute() error = %v", err)
+// TestReloadPluginsCommandExecute_NoLoader verifies /reload-plugins returns an error when the loader is nil.
+func TestReloadPluginsCommandExecute_NoLoader(t *testing.T) {
+	_, err := ReloadPluginsCommand{}.Execute(context.Background(), command.Args{})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want loader unavailable error")
 	}
-
-	if result.Output != reloadPluginsCommandFallback {
-		t.Fatalf("Execute() output = %q, want %q", result.Output, reloadPluginsCommandFallback)
+	if !strings.Contains(err.Error(), "plugin loader is not available") {
+		t.Fatalf("Execute() error = %q, want loader unavailable error", err.Error())
 	}
 }
 
@@ -39,7 +39,7 @@ func TestReloadPluginsCommandExecuteRejectsArgs(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() error = nil, want usage error")
 	}
-	if err.Error() != "usage: /reload-plugins" {
+	if !strings.Contains(err.Error(), "usage: /reload-plugins") {
 		t.Fatalf("Execute() error = %q, want usage error", err.Error())
 	}
 }

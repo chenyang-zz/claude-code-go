@@ -6,7 +6,7 @@ import (
 )
 
 func TestStoreCreate(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	task, err := s.Create("*/5 * * * *", "test prompt", true, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -29,7 +29,7 @@ func TestStoreCreate(t *testing.T) {
 }
 
 func TestStoreCreateMaxJobs(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	// Fill up to MaxJobs.
 	for i := 0; i < MaxJobs; i++ {
 		_, err := s.Create("* * * * *", "fill", false, false)
@@ -45,7 +45,7 @@ func TestStoreCreateMaxJobs(t *testing.T) {
 }
 
 func TestStoreDelete(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	task, _ := s.Create("0 9 * * *", "daily", true, false)
 
 	if err := s.Delete(task.ID); err != nil {
@@ -57,7 +57,7 @@ func TestStoreDelete(t *testing.T) {
 }
 
 func TestStoreDeleteNotFound(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	err := s.Delete("nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent ID")
@@ -65,7 +65,7 @@ func TestStoreDeleteNotFound(t *testing.T) {
 }
 
 func TestStoreList(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	// Empty list.
 	if len(s.List()) != 0 {
 		t.Error("expected empty list")
@@ -81,7 +81,7 @@ func TestStoreList(t *testing.T) {
 }
 
 func TestStoreExists(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	if s.Exists("nonexistent") {
 		t.Error("expected false for nonexistent task")
 	}
@@ -92,7 +92,7 @@ func TestStoreExists(t *testing.T) {
 }
 
 func TestStoreCount(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	if s.Count() != 0 {
 		t.Error("expected 0 count initially")
 	}
@@ -104,7 +104,7 @@ func TestStoreCount(t *testing.T) {
 }
 
 func TestStoreConcurrency(t *testing.T) {
-	s := NewStore()
+	s := NewStore(t.TempDir())
 	var wg sync.WaitGroup
 	n := 20
 

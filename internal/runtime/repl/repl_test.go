@@ -923,7 +923,7 @@ func TestRunnerRunPluginCommandReportsFallback(t *testing.T) {
 		t.Fatalf("Run(/plugin) error = %v", err)
 	}
 
-	want := "Plugin management is not available in Claude Code Go yet. Plugin settings, marketplace browsing, trust prompts, marketplace management, and interactive plugin management flows remain unmigrated.\n"
+	want := "Plugin management is not available in this session.\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("Run(/plugin) output = %q, want %q", got, want)
 	}

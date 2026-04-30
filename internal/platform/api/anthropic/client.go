@@ -52,13 +52,14 @@ type Client struct {
 }
 
 type messagesRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	System      string             `json:"system,omitempty"`
-	Stream      bool               `json:"stream"`
-	Messages    []anthropicMessage `json:"messages"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
-	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
+	Model        string                  `json:"model"`
+	MaxTokens    int                     `json:"max_tokens"`
+	System       string                  `json:"system,omitempty"`
+	Stream       bool                    `json:"stream"`
+	Messages     []anthropicMessage      `json:"messages"`
+	Tools        []anthropicTool         `json:"tools,omitempty"`
+	ExtraTools   []map[string]any        `json:"extra_tools,omitempty"`
+	OutputConfig *anthropicOutputConfig  `json:"output_config,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -115,6 +116,7 @@ type streamContentBlock struct {
 	toolName  string
 	inputJSON strings.Builder
 	thinking  strings.Builder
+	text      strings.Builder
 	signature string
 	data      string
 }
@@ -122,12 +124,18 @@ type streamContentBlock struct {
 type contentBlockStartEnvelope struct {
 	Index        int `json:"index"`
 	ContentBlock struct {
-		Type      string `json:"type"`
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Thinking  string `json:"thinking,omitempty"`
-		Signature string `json:"signature,omitempty"`
-		Data      string `json:"data,omitempty"`
+		Type       string `json:"type"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Thinking   string `json:"thinking,omitempty"`
+		Signature  string `json:"signature,omitempty"`
+		Data       string `json:"data,omitempty"`
+		ToolUseID  string `json:"tool_use_id,omitempty"`
+		Content    []struct {
+			Title string `json:"title"`
+			URL   string `json:"url"`
+		} `json:"content,omitempty"`
+		ErrorCode string `json:"error_code,omitempty"`
 	} `json:"content_block"`
 }
 
@@ -349,6 +357,12 @@ func (c *Client) buildMessagesRequest(req model.Request) messagesRequest {
 		}
 	}
 
+	// Pass through server-side tool schemas (e.g. web_search_20250305)
+	// as extra tools that the model executes internally.
+	if len(req.ExtraToolSchemas) > 0 {
+		msgReq.ExtraTools = req.ExtraToolSchemas
+	}
+
 	return msgReq
 }
 
@@ -400,6 +414,16 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 				toolID:    payload.ContentBlock.ID,
 				toolName:  payload.ContentBlock.Name,
 			}
+		case "server_tool_use":
+			contentBlocks[payload.Index] = &streamContentBlock{
+				blockType: payload.ContentBlock.Type,
+				toolID:    payload.ContentBlock.ID,
+				toolName:  payload.ContentBlock.Name,
+			}
+		case "text":
+			contentBlocks[payload.Index] = &streamContentBlock{
+				blockType: payload.ContentBlock.Type,
+			}
 		case "thinking":
 			contentBlocks[payload.Index] = &streamContentBlock{
 				blockType: payload.ContentBlock.Type,
@@ -408,6 +432,22 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 			contentBlocks[payload.Index] = &streamContentBlock{
 				blockType: payload.ContentBlock.Type,
 				data:      payload.ContentBlock.Data,
+			}
+		case "web_search_tool_result":
+			var hits []model.WebSearchHit
+			for _, c := range payload.ContentBlock.Content {
+				hits = append(hits, model.WebSearchHit{Title: c.Title, URL: c.URL})
+			}
+			if hits == nil {
+				hits = []model.WebSearchHit{}
+			}
+			out <- model.Event{
+				Type: model.EventTypeWebSearchResult,
+				WebSearchResult: &model.WebSearchResult{
+					ToolUseID: payload.ContentBlock.ToolUseID,
+					Content:   hits,
+					ErrorCode: payload.ContentBlock.ErrorCode,
+				},
 			}
 		}
 	case "content_block_delta":
@@ -449,7 +489,7 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 		}
 		if payload.Delta.Type == "input_json_delta" {
 			block, ok := contentBlocks[payload.Index]
-			if !ok || block.blockType != "tool_use" {
+			if !ok || (block.blockType != "tool_use" && block.blockType != "server_tool_use") {
 				out <- model.Event{
 					Type:  model.EventTypeError,
 					Error: "received tool input delta for unknown content block",
@@ -487,6 +527,23 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 			out <- model.Event{
 				Type: model.EventTypeToolUse,
 				ToolUse: &model.ToolUse{
+					ID:    block.toolID,
+					Name:  block.toolName,
+					Input: input,
+				},
+			}
+		case "server_tool_use":
+			input, err := parseToolUseInput(block.inputJSON.String())
+			if err != nil {
+				out <- model.Event{
+					Type:  model.EventTypeError,
+					Error: fmt.Sprintf("parse anthropic server tool use input: %v", err),
+				}
+				return
+			}
+			out <- model.Event{
+				Type: model.EventTypeServerToolUse,
+				ServerToolUse: &model.ServerToolUse{
 					ID:    block.toolID,
 					Name:  block.toolName,
 					Input: input,

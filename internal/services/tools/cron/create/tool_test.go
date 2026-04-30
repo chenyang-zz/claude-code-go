@@ -9,19 +9,20 @@ import (
 	cronshared "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/shared"
 )
 
-func newTestTool() *Tool {
-	return NewTool(cronshared.NewStore())
+func newTestTool(t *testing.T) *Tool {
+	t.Helper()
+	return NewTool(cronshared.NewStore(t.TempDir()))
 }
 
 func TestName(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if tool.Name() != Name {
 		t.Errorf("expected Name %q, got %q", Name, tool.Name())
 	}
 }
 
 func TestDescription(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	desc := tool.Description()
 	if desc == "" {
 		t.Error("expected non-empty description")
@@ -32,28 +33,28 @@ func TestDescription(t *testing.T) {
 }
 
 func TestIsReadOnly(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if tool.IsReadOnly() {
 		t.Error("expected IsReadOnly to return false")
 	}
 }
 
 func TestIsConcurrencySafe(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if !tool.IsConcurrencySafe() {
 		t.Error("expected IsConcurrencySafe to return true")
 	}
 }
 
 func TestRequiresUserInteraction(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if !tool.RequiresUserInteraction() {
 		t.Error("expected RequiresUserInteraction to return true")
 	}
 }
 
 func TestInputSchema(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	schema := tool.InputSchema()
 
 	// cron field
@@ -84,7 +85,7 @@ func TestInputSchema(t *testing.T) {
 }
 
 func TestInvoke(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 
 	result, err := tool.Invoke(context.Background(), coretool.Call{
 		Input: map[string]any{
@@ -123,7 +124,7 @@ func TestInvoke(t *testing.T) {
 }
 
 func TestInvokeWithRecurringFalse(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 
 	result, err := tool.Invoke(context.Background(), coretool.Call{
 		Input: map[string]any{
@@ -144,7 +145,7 @@ func TestInvokeWithRecurringFalse(t *testing.T) {
 }
 
 func TestInvokeInvalidCron(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 
 	// Too few fields.
 	_, err := tool.Invoke(context.Background(), coretool.Call{
@@ -160,7 +161,7 @@ func TestInvokeInvalidCron(t *testing.T) {
 }
 
 func TestInvokeInvalidCronFields(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 
 	result, _ := tool.Invoke(context.Background(), coretool.Call{
 		Input: map[string]any{
@@ -174,7 +175,7 @@ func TestInvokeInvalidCronFields(t *testing.T) {
 }
 
 func TestInvokeMaxJobs(t *testing.T) {
-	store := cronshared.NewStore()
+	store := cronshared.NewStore(t.TempDir())
 	// Fill up to MaxJobs.
 	for i := 0; i < cronshared.MaxJobs; i++ {
 		store.Create("* * * * *", "fill", false, false)

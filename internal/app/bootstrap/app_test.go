@@ -732,14 +732,14 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 
 // TestNewCommandRegistryRegistersResume verifies batch-12 bootstrap wiring exposes the minimum resume command through the registry.
 func TestNewCommandRegistryRegistersResume(t *testing.T) {
-	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil, runtimesession.NewBackgroundTaskStore(), nil, nil)
+	registry, err := newCommandRegistry(&coreconfig.Config{}, nil, nil, nil, nil, nil, runtimesession.NewBackgroundTaskStore(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandRegistry() error = %v", err)
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 102 {
-		t.Fatalf("newCommandRegistry() list len = %d, want 102", len(cmds))
+	if len(cmds) != 115 {
+		t.Fatalf("newCommandRegistry() list len = %d, want 115", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "help",

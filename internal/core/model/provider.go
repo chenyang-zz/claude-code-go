@@ -56,6 +56,12 @@ type Request struct {
 
 	// User is an end-user identifier for monitoring and abuse detection.
 	User *string
+
+	// ExtraToolSchemas carries provider-defined server-side tool schemas
+	// (e.g. web_search_20250305) that the model executes internally before
+	// returning results. Unlike Tools, these schemas are passed through
+	// to the provider without client-side tool registration.
+	ExtraToolSchemas []map[string]any
 }
 
 // TaskBudgetParam represents the output_config.task_budget wire format sent

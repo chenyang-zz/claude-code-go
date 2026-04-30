@@ -1,0 +1,96 @@
+package bundled
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
+)
+
+const defaultLoopInterval = "10m"
+const defaultMaxAgeDays = 7
+
+const loopUsage = `Usage: /loop [interval] <prompt>
+
+Run a prompt or slash command on a recurring interval.
+
+Intervals: Ns, Nm, Nh, Nd (e.g. 5m, 30m, 2h, 1d). Minimum granularity is 1 minute.
+If no interval is specified, defaults to ` + defaultLoopInterval + `.
+
+Examples:
+  /loop 5m /babysit-prs
+  /loop 30m check the deploy
+  /loop 1h /standup 1
+  /loop check the deploy          (defaults to ` + defaultLoopInterval + `)
+  /loop check the deploy every 20m`
+
+var leadingTokenRe = regexp.MustCompile(`^\d+[smhd]$`)
+
+func buildLoopPrompt(args string) string {
+	return fmt.Sprintf(`# /loop — schedule a recurring prompt
+
+Parse the input below into [interval] <prompt…> and schedule it with CronCreate.
+
+## Parsing (in priority order)
+
+1. **Leading token**: if the first whitespace-delimited token matches `+"`^\\d+[smhd]$`"+` (e.g. 5m, 2h), that's the interval; the rest is the prompt.
+2. **Trailing "every" clause**: otherwise, if the input ends with `+"`every <N><unit>`"+` or `+"`every <N> <unit-word>`"+`, extract that as the interval and strip it from the prompt.
+3. **Default**: otherwise, interval is %s and the entire input is the prompt.
+
+If the resulting prompt is empty, show usage and stop.
+
+## Interval → cron
+
+Supported suffixes: s (seconds, rounded up to nearest minute, min 1), m (minutes), h (hours), d (days).
+
+| Interval pattern      | Cron expression     | Notes                                    |
+|-----------------------|---------------------|------------------------------------------|
+| Nm where N <= 59      | */N * * * *         | every N minutes                          |
+| Nm where N >= 60      | 0 */H * * *         | round to hours (H = N/60)                |
+| Nh where N <= 23      | 0 */N * * *         | every N hours                            |
+| Nd                    | 0 0 */N * *         | every N days at midnight local           |
+| Ns                    | treat as ceil(N/60)m| cron minimum granularity is 1 minute     |
+
+## Action
+
+1. Call CronCreate with:
+   - cron: the expression from the table above
+   - prompt: the parsed prompt, verbatim
+   - recurring: true
+2. Briefly confirm: what's scheduled, the cron expression, the human-readable cadence, that recurring tasks auto-expire after %d days, and that they can cancel sooner with CronDelete (include the job ID).
+3. Then immediately execute the parsed prompt now — don't wait for the first cron fire.
+
+## Input
+
+%s`, defaultLoopInterval, defaultMaxAgeDays, args)
+}
+
+func registerLoopSkill() {
+	skill.RegisterBundledSkill(skill.BundledSkillDefinition{
+		Name:         "loop",
+		Description:  "Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo, defaults to 10m)",
+		WhenToUse:    "When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval. Do NOT invoke for one-off tasks.",
+		ArgumentHint: "[interval] <prompt>",
+		UserInvocable: true,
+		GetPromptForCommand: func(args string) (string, error) {
+			trimmed := strings.TrimSpace(args)
+			if trimmed == "" {
+				return loopUsage, nil
+			}
+
+			// Parse interval from first token
+			parts := strings.Fields(trimmed)
+			if len(parts) > 0 && leadingTokenRe.MatchString(parts[0]) {
+				interval := parts[0]
+				prompt := strings.TrimSpace(strings.TrimPrefix(trimmed, interval))
+				if prompt == "" {
+					return loopUsage, nil
+				}
+				_ = interval // interval parsed by the model via the prompt guidance
+			}
+
+			return buildLoopPrompt(trimmed), nil
+		},
+	})
+}

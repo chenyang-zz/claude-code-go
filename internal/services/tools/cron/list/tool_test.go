@@ -9,19 +9,20 @@ import (
 	cronshared "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/shared"
 )
 
-func newTestTool() *Tool {
-	return NewTool(cronshared.NewStore())
+func newTestTool(t *testing.T) *Tool {
+	t.Helper()
+	return NewTool(cronshared.NewStore(t.TempDir()))
 }
 
 func TestName(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if tool.Name() != Name {
 		t.Errorf("expected Name %q, got %q", Name, tool.Name())
 	}
 }
 
 func TestDescription(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	desc := tool.Description()
 	if desc == "" {
 		t.Error("expected non-empty description")
@@ -29,21 +30,21 @@ func TestDescription(t *testing.T) {
 }
 
 func TestIsReadOnly(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if !tool.IsReadOnly() {
 		t.Error("expected IsReadOnly to return true")
 	}
 }
 
 func TestIsConcurrencySafe(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	if !tool.IsConcurrencySafe() {
 		t.Error("expected IsConcurrencySafe to return true")
 	}
 }
 
 func TestInputSchema(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 	schema := tool.InputSchema()
 	if schema.Properties == nil {
 		t.Error("expected non-nil Properties map")
@@ -54,7 +55,7 @@ func TestInputSchema(t *testing.T) {
 }
 
 func TestInvokeEmptyList(t *testing.T) {
-	tool := newTestTool()
+	tool := newTestTool(t)
 
 	result, err := tool.Invoke(context.Background(), coretool.Call{
 		Input: map[string]any{},
@@ -85,7 +86,7 @@ func TestInvokeEmptyList(t *testing.T) {
 }
 
 func TestInvokeWithJobs(t *testing.T) {
-	store := cronshared.NewStore()
+	store := cronshared.NewStore(t.TempDir())
 	store.Create("*/5 * * * *", "task one", true, false)
 	store.Create("0 9 * * 1-5", "task two", false, false)
 
