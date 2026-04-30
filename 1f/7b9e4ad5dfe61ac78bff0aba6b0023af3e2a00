@@ -1,0 +1,375 @@
+internal/services/tools/mcp/list_resources/tool_test.go
+  cf7902d20dbecc87 1-181
+internal/services/tools/skill/bundled/debug_test.go
+  cf7902d20dbecc87 1-44
+internal/services/tools/skill/bundled/remember.go
+  cf7902d20dbecc87 1-82
+internal/platform/lsp/passive_feedback_test.go
+  cf7902d20dbecc87 1-257
+internal/services/tools/skill/bundled/claude_api.go
+  cf7902d20dbecc87 1-132
+internal/services/tools/skill/loader_test.go
+  cf7902d20dbecc87 1-714
+internal/services/tools/notebook_edit/tool_test.go
+  cf7902d20dbecc87 1-1042
+internal/services/tools/skill/bundled/simplify_test.go
+  cf7902d20dbecc87 1-43
+internal/services/tools/worktree/shared/manager_test.go
+  cf7902d20dbecc87 1-212
+internal/services/tools/skill/bundled/init_test.go
+  cf7902d20dbecc87 1-86
+internal/platform/lsp/client.go
+  cf7902d20dbecc87 1-308
+internal/services/tools/skill/commands_loader.go
+  cf7902d20dbecc87 1-247
+internal/runtime/cron/scheduler_test.go
+  cf7902d20dbecc87 1-121
+internal/platform/api/anthropic/client_test.go
+  cf7902d20dbecc87 1139-1315
+internal/services/tools/cron/list/tool_test.go
+  cf7902d20dbecc87 12-14,18,25,33,40,47,58,89
+internal/platform/plugin/agents_test.go
+  cf7902d20dbecc87 1-222
+internal/platform/plugin/refresh_test.go
+  cf7902d20dbecc87 1-133
+internal/services/tools/skill/bundled.go
+  cf7902d20dbecc87 1-218
+internal/app/wiring/modules_test.go
+  cf7902d20dbecc87 20
+internal/services/tools/skill/bundled/simplify.go
+  cf7902d20dbecc87 1-65
+internal/services/tools/skill/bundled/keybindings_test.go
+  cf7902d20dbecc87 1-47
+internal/platform/lsp/manager_test.go
+  cf7902d20dbecc87 1-378
+internal/services/tools/skill/bundled/init.go
+  cf7902d20dbecc87 1-35
+internal/runtime/repl/repl_test.go
+  cf7902d20dbecc87 926
+internal/platform/plugin/commands.go
+  cf7902d20dbecc87 1-286
+internal/services/tools/skill/bundled/schedule_remote_agents.go
+  cf7902d20dbecc87 1-125
+internal/services/tools/remote_trigger/tool_test.go
+  cf7902d20dbecc87 1-369
+internal/app/wiring/modules.go
+  cf7902d20dbecc87 5,19,31-41,47-50,52-54,117-118,122-123,126-139,145,147,156,160,166-184,189,192,202,206,212-245
+internal/services/tools/task_output/tool_test.go
+  cf7902d20dbecc87 1-262
+internal/platform/plugin/lsp_registrar_test.go
+  cf7902d20dbecc87 1-102
+internal/platform/lsp/manager.go
+  cf7902d20dbecc87 1-579
+internal/platform/plugin/mcp_registrar_test.go
+  cf7902d20dbecc87 1-103
+internal/services/tools/synthetic_output/tool_test.go
+  cf7902d20dbecc87 1-202
+internal/platform/plugin/agent_registrar_test.go
+  cf7902d20dbecc87 1-144
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 30,35,47-50,65-66,146-147,161-165,167-169,182,231,235,438,456,561-663,713,802-809,853-860,1256
+internal/services/tools/config_tool/tool.go
+  cf7902d20dbecc87 1-227
+internal/services/tools/skill/conditional.go
+  cf7902d20dbecc87 1-214
+internal/platform/plugin/registrar.go
+  cf7902d20dbecc87 1-241
+internal/platform/team/status.go
+  cf7902d20dbecc87 33,37-40,136
+internal/services/commands/plugin_test.go
+  cf7902d20dbecc87 6,26-27,33-34
+internal/services/tools/skill/bundled/lorem_ipsum.go
+  cf7902d20dbecc87 1-97
+internal/platform/plugin/lsp_servers_test.go
+  cf7902d20dbecc87 1-137
+internal/runtime/cron/jitter_test.go
+  cf7902d20dbecc87 1-168
+internal/services/tools/mcp/read_resource/tool.go
+  cf7902d20dbecc87 1-164
+internal/platform/plugin/command_adapter.go
+  cf7902d20dbecc87 1-90
+internal/services/tools/skill/tool.go
+  cf7902d20dbecc87 1-226
+internal/platform/plugin/hook_loader.go
+  cf7902d20dbecc87 1-102
+internal/services/tools/skill/dynamic.go
+  cf7902d20dbecc87 1-157
+internal/services/tools/team_create/tool.go
+  cf7902d20dbecc87 1-134
+internal/platform/plugin/hook_loader_test.go
+  cf7902d20dbecc87 1-207
+internal/runtime/cron/scheduler.go
+  cf7902d20dbecc87 1-358
+internal/platform/plugin/loader_test.go
+  cf7902d20dbecc87 1-337
+internal/services/tools/worktree/enter/tool_test.go
+  cf7902d20dbecc87 1-187
+internal/services/tools/notebook_edit/tool.go
+  cf7902d20dbecc87 1-385
+internal/platform/lsp/types.go
+  cf7902d20dbecc87 1-276
+internal/services/tools/skill/dynamic_test.go
+  cf7902d20dbecc87 1-216
+internal/services/tools/lsp/formatters.go
+  cf7902d20dbecc87 1-453
+internal/services/tools/skill/bundled/loop.go
+  cf7902d20dbecc87 1-96
+internal/platform/lsp/server_instance_test.go
+  cf7902d20dbecc87 1-181
+internal/services/tools/notebook_edit/types.go
+  cf7902d20dbecc87 1-69
+internal/platform/plugin/lsp_servers.go
+  cf7902d20dbecc87 1-103
+internal/services/tools/web_search/tool_test.go
+  cf7902d20dbecc87 1-478
+internal/runtime/cron/compute_test.go
+  cf7902d20dbecc87 1-154
+internal/platform/plugin/uninstall.go
+  cf7902d20dbecc87 1-53
+internal/services/tools/brief/tool_test.go
+  cf7902d20dbecc87 1-151
+internal/platform/team/team_helpers_test.go
+  cf7902d20dbecc87 1-232
+internal/services/tools/skill/bundled/skillify.go
+  cf7902d20dbecc87 1-106
+internal/services/tools/tool_search/tool_test.go
+  cf7902d20dbecc87 1-396
+internal/runtime/cron/jitter.go
+  cf7902d20dbecc87 1-169
+internal/services/tools/skill/bundled/schedule_remote_agents_test.go
+  cf7902d20dbecc87 1-47
+internal/services/tools/sleep/tool.go
+  cf7902d20dbecc87 1-149
+internal/services/tools/skill/bundled/verify_test.go
+  cf7902d20dbecc87 1-44
+internal/platform/api/anthropic/client.go
+  cf7902d20dbecc87 55-62,119,127-138,360-365,417-426,436-451,492,535-551
+internal/services/tools/task_output/tool.go
+  cf7902d20dbecc87 1-222
+internal/platform/config/settings_writer_test.go
+  cf7902d20dbecc87 1-327
+internal/services/tools/config_tool/supported_settings.go
+  cf7902d20dbecc87 1-59
+internal/services/tools/skill/commands_loader_test.go
+  cf7902d20dbecc87 1-213
+internal/services/tools/skill/bundled/claude_api_test.go
+  cf7902d20dbecc87 1-44
+internal/platform/store/cron_persistence.go
+  cf7902d20dbecc87 1-215
+internal/services/tools/cron/delete/tool_test.go
+  cf7902d20dbecc87 11-13,17,24,32,39,46,53,70,96
+internal/platform/plugin/types_test.go
+  cf7902d20dbecc87 1-219
+internal/services/tools/skill/bundled/verify.go
+  cf7902d20dbecc87 1-53
+internal/runtime/cron/lock.go
+  cf7902d20dbecc87 1-205
+internal/platform/plugin/persistence.go
+  cf7902d20dbecc87 1-241
+internal/services/tools/skill/bundled/remember_test.go
+  cf7902d20dbecc87 1-41
+internal/services/tools/skill/watcher.go
+  cf7902d20dbecc87 1-243
+internal/services/tools/skill/bundled/loop_test.go
+  cf7902d20dbecc87 1-52
+internal/platform/plugin/validate_test.go
+  cf7902d20dbecc87 1-72
+internal/platform/plugin/output_styles.go
+  cf7902d20dbecc87 1-94
+internal/services/tools/todo_write/tool_test.go
+  cf7902d20dbecc87 1-184
+internal/platform/plugin/command_adapter_test.go
+  cf7902d20dbecc87 1-122
+internal/services/tools/mcp/list_resources/tool.go
+  cf7902d20dbecc87 1-143
+internal/platform/plugin/refresh.go
+  cf7902d20dbecc87 1-113
+internal/platform/plugin/loader.go
+  cf7902d20dbecc87 3-168
+internal/services/tools/skill/bundled_test.go
+  cf7902d20dbecc87 1-283
+internal/platform/plugin/agents.go
+  cf7902d20dbecc87 1-138
+internal/services/tools/brief/modules.go
+  cf7902d20dbecc87 1-4
+internal/services/tools/web_search/tool.go
+  cf7902d20dbecc87 1-225
+internal/services/tools/synthetic_output/tool.go
+  cf7902d20dbecc87 1-100
+internal/platform/plugin/registrar_test.go
+  cf7902d20dbecc87 1-173
+internal/services/tools/brief/tool.go
+  cf7902d20dbecc87 1-109
+internal/services/tools/send_message/tool.go
+  cf7902d20dbecc87 1-252
+internal/services/tools/worktree/enter/tool.go
+  cf7902d20dbecc87 1-147
+internal/services/tools/skill/bundled/update_config_test.go
+  cf7902d20dbecc87 1-47
+internal/platform/config/settings_writer.go
+  cf7902d20dbecc87 1-175
+internal/services/tools/lsp/tool_test.go
+  cf7902d20dbecc87 1-410
+internal/platform/plugin/mcp_registrar.go
+  cf7902d20dbecc87 1-78
+internal/services/tools/skill/bundled/update_config.go
+  cf7902d20dbecc87 1-222
+internal/services/tools/lsp/tool.go
+  cf7902d20dbecc87 1-370
+internal/services/commands/reload_plugins_test.go
+  cf7902d20dbecc87 6,25-29,31-32,42
+internal/core/model/provider.go
+  cf7902d20dbecc87 59-64
+internal/platform/lsp/jsonrpc_test.go
+  cf7902d20dbecc87 1-102
+internal/services/tools/team_delete/tool_test.go
+  cf7902d20dbecc87 1-194
+internal/services/tools/tool_search/tool.go
+  cf7902d20dbecc87 1-184
+internal/services/commands/plugin.go
+  cf7902d20dbecc87 5-6,9,13-16,28-29,33-45,47,49,52-96
+internal/services/commands/reload_plugins.go
+  cf7902d20dbecc87 9,13-18,29-30,39-67,70,73-88
+internal/services/tools/skill/bundled/skillify_test.go
+  cf7902d20dbecc87 1-44
+internal/services/tools/skill/shell_exec.go
+  cf7902d20dbecc87 1-137
+internal/platform/plugin/hooks_registrar.go
+  cf7902d20dbecc87 1-111
+internal/platform/plugin/install_test.go
+  cf7902d20dbecc87 1-239
+internal/platform/store/cron_persistence_test.go
+  cf7902d20dbecc87 1-173
+internal/platform/plugin/install.go
+  cf7902d20dbecc87 1-321
+go.mod
+  cf7902d20dbecc87 14-15
+internal/platform/plugin/agent_registrar.go
+  cf7902d20dbecc87 1-131
+internal/platform/plugin/discovery_test.go
+  cf7902d20dbecc87 1-201
+internal/services/tools/skill/bundled/keybindings.go
+  cf7902d20dbecc87 1-163
+internal/platform/lsp/transport.go
+  cf7902d20dbecc87 1-99
+internal/services/tools/skill/bundled/stuck.go
+  cf7902d20dbecc87 1-64
+internal/services/tools/skill/watcher_test.go
+  cf7902d20dbecc87 1-166
+internal/services/tools/mcp/read_resource/tool_test.go
+  cf7902d20dbecc87 1-169
+internal/services/tools/team_create/tool_test.go
+  cf7902d20dbecc87 1-230
+internal/app/bootstrap/app_test.go
+  cf7902d20dbecc87 735,741-742
+internal/services/tools/task_output/modules.go
+  cf7902d20dbecc87 1-4
+internal/platform/lsp/diagnostics_test.go
+  cf7902d20dbecc87 1-444
+internal/platform/plugin/commands_test.go
+  cf7902d20dbecc87 1-348
+internal/platform/plugin/output_styles_test.go
+  cf7902d20dbecc87 1-165
+internal/platform/plugin/mcp_servers_test.go
+  cf7902d20dbecc87 1-172
+internal/services/tools/config_tool/tool_test.go
+  cf7902d20dbecc87 1-322
+internal/services/tools/worktree/shared/manager.go
+  cf7902d20dbecc87 1-233
+internal/services/tools/skill/tool_test.go
+  cf7902d20dbecc87 1-377
+internal/services/tools/worktree/exit/tool_test.go
+  cf7902d20dbecc87 1-227
+internal/core/model/stream.go
+  cf7902d20dbecc87 17-20,45-52,58-76
+internal/services/tools/skill/bundled/batch_test.go
+  cf7902d20dbecc87 1-46
+internal/services/tools/skill/bundled/batch.go
+  cf7902d20dbecc87 1-127
+internal/platform/lsp/server_instance.go
+  cf7902d20dbecc87 1-308
+internal/services/tools/worktree/exit/tool.go
+  cf7902d20dbecc87 1-162
+internal/platform/plugin/manifest.go
+  cf7902d20dbecc87 3-73
+internal/platform/plugin/manifest_test.go
+  cf7902d20dbecc87 1-202
+internal/platform/plugin/registry_test.go
+  cf7902d20dbecc87 1-244
+internal/platform/plugin/persistence_test.go
+  cf7902d20dbecc87 1-306
+internal/platform/plugin/mcp_servers.go
+  cf7902d20dbecc87 1-99
+internal/platform/plugin/hooks_registrar_test.go
+  cf7902d20dbecc87 1-156
+internal/platform/plugin/registry.go
+  cf7902d20dbecc87 3-112
+internal/services/tools/skill/bundled/debug.go
+  cf7902d20dbecc87 1-60
+internal/services/tools/skill/conditional_test.go
+  cf7902d20dbecc87 1-226
+internal/services/tools/cron/create/tool_test.go
+  cf7902d20dbecc87 12-14,18,25,36,43,50,57,88,127,148,164,178
+internal/services/tools/remote_trigger/tool.go
+  cf7902d20dbecc87 1-211
+internal/services/tools/skill/loader.go
+  cf7902d20dbecc87 1-679
+internal/services/tools/send_message/tool_test.go
+  cf7902d20dbecc87 1-685
+internal/services/tools/skill/bundled/lorem_ipsum_test.go
+  cf7902d20dbecc87 1-74
+internal/platform/lsp/jsonrpc.go
+  cf7902d20dbecc87 1-122
+internal/platform/lsp/passive_feedback.go
+  cf7902d20dbecc87 1-204
+internal/platform/plugin/types.go
+  cf7902d20dbecc87 1-354
+internal/platform/plugin/lsp_registrar.go
+  cf7902d20dbecc87 1-87
+internal/services/tools/cron/shared/store.go
+  cf7902d20dbecc87 9,15-17,19-21,23-24,27-30,33-34,39-44,52,56-61,65-66,71-86,89-90,93,98-100,102,105,109-119,122,126-137
+internal/services/tools/todo_write/tool.go
+  cf7902d20dbecc87 1-132
+internal/platform/team/team_helpers.go
+  cf7902d20dbecc87 1-109
+internal/services/tools/cron/shared/store_test.go
+  cf7902d20dbecc87 9,32,48,60,68,84,95,107
+internal/services/tools/sleep/tool_test.go
+  cf7902d20dbecc87 1-259
+internal/platform/plugin/validate.go
+  cf7902d20dbecc87 1-35
+internal/services/tools/skill/shell_exec_test.go
+  cf7902d20dbecc87 1-312
+internal/services/tools/team_delete/tool.go
+  cf7902d20dbecc87 1-96
+internal/services/tools/skill/bundled/stuck_test.go
+  cf7902d20dbecc87 1-41
+internal/runtime/cron/compute.go
+  cf7902d20dbecc87 1-279
+internal/platform/lsp/diagnostics.go
+  cf7902d20dbecc87 1-342
+internal/platform/plugin/discovery.go
+  cf7902d20dbecc87 1-123
+internal/platform/plugin/uninstall_test.go
+  cf7902d20dbecc87 1-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1f7b9e4ad5dfe61ac78bff0aba6b0023af3e2a00",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 33947,
+      "total_deletions": 2663,
+      "accepted_lines": 31461,
+      "overriden_lines": 0
+    }
+  }
+}
