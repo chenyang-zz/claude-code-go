@@ -11,8 +11,10 @@ import (
 )
 
 // ReloadPluginsCommand triggers a full plugin refresh and returns a summary.
-// Runtime subsystem registration is performed by the caller-injected registrar.
+// When a Reloader is configured, it uses the full unregister-refresh-register
+// pipeline; otherwise it falls back to direct loader+registrar calls.
 type ReloadPluginsCommand struct {
+	Reloader  *plugin.Reloader
 	Loader    *plugin.PluginLoader
 	Registrar *plugin.PluginRegistrar
 }
@@ -36,26 +38,40 @@ func (c ReloadPluginsCommand) Execute(ctx context.Context, args command.Args) (c
 		return command.Result{}, fmt.Errorf("usage: %s", c.Metadata().Usage)
 	}
 
-	if c.Loader == nil {
-		return command.Result{}, fmt.Errorf("plugin loader is not available")
-	}
-
-	result, err := c.Loader.RefreshActivePlugins()
-	if err != nil {
-		logger.WarnCF("commands", "plugin refresh failed", map[string]any{
-			"error": err.Error(),
-		})
-		return command.Result{}, fmt.Errorf("plugin refresh failed: %w", err)
-	}
-
+	var result *plugin.RefreshResult
 	var summary *plugin.RegistrationSummary
-	if c.Registrar != nil {
-		summary, err = c.Registrar.RegisterAll(result, nil)
+	var err error
+
+	// Prefer the reloader pipeline when available.
+	if c.Reloader != nil {
+		summary, err = c.Reloader.Reload()
 		if err != nil {
-			logger.WarnCF("commands", "plugin registration failed", map[string]any{
+			logger.WarnCF("commands", "plugin reload failed", map[string]any{
 				"error": err.Error(),
 			})
-			return command.Result{}, fmt.Errorf("plugin registration failed: %w", err)
+			return command.Result{}, fmt.Errorf("plugin reload failed: %w", err)
+		}
+		// Extract result counts from summary when available; fallback to zero.
+		result = &plugin.RefreshResult{}
+	} else {
+		if c.Loader == nil {
+			return command.Result{}, fmt.Errorf("plugin loader is not available")
+		}
+		result, err = c.Loader.RefreshActivePlugins()
+		if err != nil {
+			logger.WarnCF("commands", "plugin refresh failed", map[string]any{
+				"error": err.Error(),
+			})
+			return command.Result{}, fmt.Errorf("plugin refresh failed: %w", err)
+		}
+		if c.Registrar != nil {
+			summary, err = c.Registrar.RegisterAll(result, nil)
+			if err != nil {
+				logger.WarnCF("commands", "plugin registration failed", map[string]any{
+					"error": err.Error(),
+				})
+				return command.Result{}, fmt.Errorf("plugin registration failed: %w", err)
+			}
 		}
 	}
 

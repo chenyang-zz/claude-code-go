@@ -73,8 +73,8 @@ func TestExtractMcpServers_WithMcpJson_WrapperFormat(t *testing.T) {
 	if s.PluginName != "test-plugin" {
 		t.Errorf("expected PluginName 'test-plugin', got %q", s.PluginName)
 	}
-	if s.PluginSource != "test-plugin@local" {
-		t.Errorf("expected PluginSource 'test-plugin@local', got %q", s.PluginSource)
+	if s.PluginSource != "test-plugin" {
+		t.Errorf("expected PluginSource 'test-plugin', got %q", s.PluginSource)
 	}
 	if s.Scope != "dynamic" {
 		t.Errorf("expected Scope 'dynamic', got %q", s.Scope)

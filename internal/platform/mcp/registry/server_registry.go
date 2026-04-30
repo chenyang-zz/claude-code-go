@@ -522,6 +522,28 @@ func (r *ServerRegistry) DisconnectServer(name string) error {
 	return fmt.Errorf("server %q not found in registry", name)
 }
 
+// Clear disconnects and removes all entries from the registry.
+func (r *ServerRegistry) Clear() error {
+	r.mu.Lock()
+	entries := make([]Entry, len(r.entries))
+	copy(entries, r.entries)
+	r.entries = r.entries[:0]
+	r.mu.Unlock()
+
+	var errs []error
+	for _, e := range entries {
+		if e.Client != nil {
+			if err := e.Client.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close %q: %w", e.Name, err))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("mcp registry clear errors: %v", errs)
+	}
+	return nil
+}
+
 // CloseAll shuts down every active connection.
 func (r *ServerRegistry) CloseAll() {
 	r.mu.Lock()

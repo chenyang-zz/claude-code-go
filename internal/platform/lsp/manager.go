@@ -357,6 +357,35 @@ func (m *Manager) IsFileOpen(filePath string) bool {
 	return ok
 }
 
+// StopAllServers stops all running LSP servers and clears internal state.
+// Unlike Shutdown, it does not return an error if the manager is nil.
+func (m *Manager) StopAllServers() error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var errs []error
+	for name, entry := range m.servers {
+		if entry.State == ServerStateRunning {
+			if err := entry.Client.Shutdown(); err != nil {
+				errs = append(errs, fmt.Errorf("shutdown %q: %w", name, err))
+			}
+		}
+		entry.State = ServerStateStopped
+	}
+
+	m.servers = make(map[string]*serverEntry)
+	m.extMap = make(map[string]string)
+	m.openFiles = make(map[string]string)
+
+	if len(errs) > 0 {
+		return fmt.Errorf("lsp manager stop errors: %v", errs)
+	}
+	return nil
+}
+
 // Shutdown stops all running LSP servers and clears internal state.
 func (m *Manager) Shutdown() error {
 	m.mu.Lock()

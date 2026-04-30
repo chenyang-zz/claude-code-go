@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
+	"github.com/sheepzhao/claude-code-go/internal/platform/plugin"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -35,6 +37,9 @@ func NewRunner() *Runner {
 }
 
 // RunCommand executes one command-type hook, piping the hook input as JSON via stdin.
+// Plugin variables in the command string are substituted, and plugin-specific
+// environment variables (CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DATA,
+// CLAUDE_PROJECT_DIR) are injected into the child process.
 func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input any, cwd string) (hook.HookResult, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
@@ -49,14 +54,28 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Extract plugin context from the If field.
+	pluginName, pluginRoot, pluginSource := extractPluginInfo(cmdHook.If)
+
+	// Substitute plugin variables in the command string.
+	command := cmdHook.Command
+	if pluginRoot != "" {
+		command = strings.ReplaceAll(command, "${CLAUDE_PLUGIN_ROOT}", filepath.ToSlash(pluginRoot))
+	}
+	if pluginSource != "" {
+		if dataDir, err := plugin.GetPluginDataDir(pluginSource); err == nil {
+			command = strings.ReplaceAll(command, "${CLAUDE_PLUGIN_DATA}", filepath.ToSlash(dataDir))
+		}
+	}
+
 	shellPath, shellArgs := resolveShell(cmdHook.Shell)
-	args := append(shellArgs, cmdHook.Command)
+	args := append(shellArgs, command)
 
 	cmd := exec.CommandContext(runCtx, shellPath, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = r.environ()
+	cmd.Env = r.injectPluginEnv(r.environ(), pluginRoot, pluginSource, cwd)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -65,7 +84,9 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 	cmd.Stdin = bytes.NewReader(append(inputJSON, '\n'))
 
 	logger.DebugCF("hook_runner", "executing hook command", map[string]any{
-		"command":     cmdHook.Command,
+		"command":     command,
+		"original":    cmdHook.Command,
+		"plugin":      pluginName,
 		"shell":       shellPath,
 		"timeout_sec": int(timeout.Seconds()),
 		"cwd":         cwd,
@@ -86,7 +107,7 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 			result.PreventContinuation = true
 		}
 		logger.DebugCF("hook_runner", "hook command succeeded", map[string]any{
-			"command":    cmdHook.Command,
+			"command":    command,
 			"stdout_len": len(result.Stdout),
 		})
 		return result, nil
@@ -96,7 +117,7 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 		result.TimedOut = true
 		result.ExitCode = -1
 		logger.DebugCF("hook_runner", "hook command timed out", map[string]any{
-			"command":     cmdHook.Command,
+			"command":     command,
 			"timeout_sec": int(timeout.Seconds()),
 		})
 		return result, nil
@@ -105,7 +126,7 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 	if errors.Is(runCtx.Err(), context.Canceled) {
 		result.ExitCode = -1
 		logger.DebugCF("hook_runner", "hook command canceled", map[string]any{
-			"command": cmdHook.Command,
+			"command": command,
 		})
 		return result, nil
 	}
@@ -114,14 +135,14 @@ func (r *Runner) RunCommand(ctx context.Context, cmdHook hook.CommandHook, input
 	if errors.As(err, &exitErr) {
 		result.ExitCode = exitErr.ExitCode()
 		logger.DebugCF("hook_runner", "hook command exited with failure", map[string]any{
-			"command":   cmdHook.Command,
+			"command":   command,
 			"exit_code": result.ExitCode,
 			"stderr":    truncateForLog(result.Stderr, 200),
 		})
 		return result, nil
 	}
 
-	return hook.HookResult{}, fmt.Errorf("run hook command %q: %w", cmdHook.Command, err)
+	return hook.HookResult{}, fmt.Errorf("run hook command %q: %w", command, err)
 }
 
 // RunStopHooks executes all command hooks for a stop-type event.
@@ -259,4 +280,61 @@ func ErrorMessages(results []hook.HookResult) []string {
 		}
 	}
 	return msgs
+}
+
+// extractPluginInfo parses the plugin context encoded in the If field.
+// The expected format is "plugin:{name}:{root}:{source}".
+// If the field does not start with "plugin:", empty strings are returned
+// and the If value is treated as a normal condition.
+func extractPluginInfo(ifField string) (name, root, source string) {
+	if !strings.HasPrefix(ifField, "plugin:") {
+		return "", "", ""
+	}
+	parts := strings.SplitN(ifField, ":", 4)
+	if len(parts) >= 2 {
+		name = parts[1]
+	}
+	if len(parts) >= 3 {
+		root = parts[2]
+	}
+	if len(parts) >= 4 {
+		source = parts[3]
+	}
+	return name, root, source
+}
+
+// injectPluginEnv injects plugin-specific environment variables into the base
+// environment. Variables are only added when their corresponding values are
+// non-empty and not already present in the base environment.
+func (r *Runner) injectPluginEnv(base []string, pluginRoot, pluginSource, projectDir string) []string {
+	env := make(map[string]string)
+	for _, e := range base {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			env[k] = v
+		}
+	}
+
+	if projectDir != "" {
+		if _, ok := env["CLAUDE_PROJECT_DIR"]; !ok {
+			env["CLAUDE_PROJECT_DIR"] = projectDir
+		}
+	}
+	if pluginRoot != "" {
+		if _, ok := env["CLAUDE_PLUGIN_ROOT"]; !ok {
+			env["CLAUDE_PLUGIN_ROOT"] = filepath.ToSlash(pluginRoot)
+		}
+	}
+	if pluginSource != "" {
+		if dataDir, err := plugin.GetPluginDataDir(pluginSource); err == nil {
+			if _, ok := env["CLAUDE_PLUGIN_DATA"]; !ok {
+				env["CLAUDE_PLUGIN_DATA"] = filepath.ToSlash(dataDir)
+			}
+		}
+	}
+
+	result := make([]string, 0, len(env))
+	for k, v := range env {
+		result = append(result, k+"="+v)
+	}
+	return result
 }

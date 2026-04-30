@@ -4,6 +4,8 @@
 // are handled by other packages or future batches.
 package plugin
 
+import "strings"
+
 // PluginSourceType identifies the type of source a plugin originates from.
 type PluginSourceType string
 
@@ -158,6 +160,12 @@ type PluginCommand struct {
 	AllowedTools string `json:"allowedTools,omitempty"`
 	// ArgumentHint is the argument-hint frontmatter field.
 	ArgumentHint string `json:"argumentHint,omitempty"`
+	// ArgumentNames is the list of argument names from the frontmatter arguments
+	// field, used for named parameter substitution ($name).
+	ArgumentNames []string `json:"argumentNames,omitempty"`
+	// PluginSource is the plugin source identifier used for resolving the
+	// ${CLAUDE_PLUGIN_DATA} variable.
+	PluginSource string `json:"pluginSource,omitempty"`
 	// WhenToUse is the when_to_use frontmatter field.
 	WhenToUse string `json:"whenToUse,omitempty"`
 	// Version is the version frontmatter field.
@@ -208,6 +216,19 @@ type PluginError struct {
 // Error implements the error interface.
 func (e *PluginError) Error() string {
 	return e.Message
+}
+
+// ParsedAllowedTools parses the AllowedTools frontmatter field into a slice of
+// individual tool names. Returns nil if AllowedTools is empty.
+func (pc *PluginCommand) ParsedAllowedTools() []string {
+	if pc == nil || pc.AllowedTools == "" {
+		return nil
+	}
+	tools := strings.Split(pc.AllowedTools, ",")
+	for i := range tools {
+		tools[i] = strings.TrimSpace(tools[i])
+	}
+	return tools
 }
 
 // PluginLoadResult aggregates the results of a plugin loading operation.
@@ -282,7 +303,9 @@ type McpServerConfig struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	// PluginName is the originating plugin name.
 	PluginName string `json:"pluginName,omitempty"`
-	// PluginSource is the plugin source identifier.
+	// PluginPath is the absolute path to the plugin root directory.
+	PluginPath string `json:"pluginPath,omitempty"`
+	// PluginSource is the plugin source identifier used for data directory resolution.
 	PluginSource string `json:"pluginSource,omitempty"`
 	// Scope identifies this as a plugin-scoped server ("dynamic").
 	Scope string `json:"scope,omitempty"`
@@ -321,6 +344,10 @@ type LspServerConfig struct {
 	MaxRestarts int `json:"maxRestarts,omitempty"`
 	// PluginName is the originating plugin name.
 	PluginName string `json:"pluginName,omitempty"`
+	// PluginPath is the absolute path to the plugin root directory.
+	PluginPath string `json:"pluginPath,omitempty"`
+	// PluginSource is the plugin source identifier used for data directory resolution.
+	PluginSource string `json:"pluginSource,omitempty"`
 	// Scope identifies this as a plugin-scoped server ("dynamic").
 	Scope string `json:"scope,omitempty"`
 }

@@ -30,6 +30,8 @@ func ExtractLspServers(plugin *LoadedPlugin) ([]*LspServerConfig, error) {
 
 	for _, cfg := range configs {
 		cfg.PluginName = plugin.Name
+		cfg.PluginPath = plugin.Path
+		cfg.PluginSource = plugin.Name
 		cfg.Scope = "dynamic"
 	}
 

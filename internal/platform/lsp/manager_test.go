@@ -128,6 +128,50 @@ func TestShutdown(t *testing.T) {
 	}
 }
 
+func TestManager_StopAllServers(t *testing.T) {
+	m := NewManager()
+	_ = m.RegisterServer("gopls", ServerConfig{Command: "gopls"}, []string{".go"})
+	_ = m.RegisterServer("tsserver", ServerConfig{Command: "tsserver"}, []string{".ts"})
+
+	m.openFiles["file:///test/file.go"] = "gopls"
+
+	err := m.StopAllServers()
+	if err != nil {
+		t.Fatalf("StopAllServers error: %v", err)
+	}
+
+	if len(m.servers) != 0 {
+		t.Error("servers should be cleared after StopAllServers")
+	}
+	if len(m.extMap) != 0 {
+		t.Error("extension map should be cleared after StopAllServers")
+	}
+	if len(m.openFiles) != 0 {
+		t.Error("open files should be cleared after StopAllServers")
+	}
+}
+
+func TestManager_StopAllServersNil(t *testing.T) {
+	var m *Manager
+	if err := m.StopAllServers(); err != nil {
+		t.Fatalf("StopAllServers on nil manager should be no-op, got error: %v", err)
+	}
+}
+
+func TestManager_StopAllServersNotRunning(t *testing.T) {
+	m := NewManager()
+	_ = m.RegisterServer("gopls", ServerConfig{Command: "gopls"}, []string{".go"})
+
+	err := m.StopAllServers()
+	if err != nil {
+		t.Fatalf("StopAllServers error for stopped servers: %v", err)
+	}
+
+	if len(m.servers) != 0 {
+		t.Error("servers should be cleared even when not running")
+	}
+}
+
 func TestExtToLanguageID(t *testing.T) {
 	tests := []struct {
 		ext      string

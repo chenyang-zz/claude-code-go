@@ -44,7 +44,7 @@ func (r *HooksRegistrar) RegisterHooks(plugins []*LoadedPlugin, base hook.HooksC
 			}
 
 			for _, m := range matchers {
-				hm, err := convertHookMatcher(m, p.Path, p.Name)
+				hm, err := convertHookMatcher(m, p.Path, p.Name, p.Name)
 				if err != nil {
 					logger.WarnCF("plugin.hooks_registrar", "failed to convert hook matcher", map[string]any{
 						"event":  eventName,
@@ -76,10 +76,10 @@ func (r *HooksRegistrar) RegisterHooks(plugins []*LoadedPlugin, base hook.HooksC
 }
 
 // convertHookMatcher converts a plugin HookMatcherEntry and its plugin context
-// into a core hook.HookMatcher.  The plugin root path is preserved in the
-// CommandHook's execution context via the If field (used by the hook runner
-// for CWD resolution).
-func convertHookMatcher(entry HookMatcherEntry, pluginRoot, pluginName string) (hook.HookMatcher, error) {
+// into a core hook.HookMatcher.  The plugin root path and source are preserved
+// in the CommandHook's If field so the hook runner can perform variable
+// substitution and environment injection.
+func convertHookMatcher(entry HookMatcherEntry, pluginRoot, pluginName, pluginSource string) (hook.HookMatcher, error) {
 	var rawHooks []json.RawMessage
 
 	for _, hc := range entry.Hooks {
@@ -91,10 +91,9 @@ func convertHookMatcher(entry HookMatcherEntry, pluginRoot, pluginName string) (
 			cmdHook.Timeout = hc.Timeout / 1000 // Plugin stores ms, core uses seconds
 		}
 		if pluginRoot != "" {
-			// Store plugin root in the If field so the hook runner can derive
-			// the correct working directory.  This is a pragmatic use of an
-			// otherwise unused field for plugin hook CWD tracking.
-			cmdHook.If = fmt.Sprintf("plugin:%s:%s", pluginName, pluginRoot)
+			// Encode plugin context into the If field for the hook runner.
+			// Format: plugin:{name}:{root}:{source}
+			cmdHook.If = fmt.Sprintf("plugin:%s:%s:%s", pluginName, pluginRoot, pluginSource)
 		}
 
 		raw, err := json.Marshal(cmdHook)

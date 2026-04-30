@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
@@ -37,18 +38,23 @@ func (a *CommandAdapter) Metadata() command.Metadata {
 		desc = fmt.Sprintf("Plugin command from %s", pc.PluginName)
 	}
 
+	usage := fmt.Sprintf("/%s [args]", pc.Name)
+	if pc.ArgumentHint != "" {
+		usage = fmt.Sprintf("/%s %s", pc.Name, pc.ArgumentHint)
+	}
+
 	return command.Metadata{
 		Name:        pc.Name,
 		Description: desc,
-		Usage:       fmt.Sprintf("/%s [args]", pc.Name),
+		Usage:       usage,
 		Hidden:      !pc.UserInvocable,
 	}
 }
 
 // Execute returns the command's raw markdown content as text output.  This is
 // a minimal passthrough that makes plugin commands callable without requiring
-// the full engine query infrastructure.  Arguments are substituted into the
-// content using simple ${arg} replacement when arg names are available.
+// the full engine query infrastructure.  Plugin variables and arguments are
+// substituted into the content before returning.
 func (a *CommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	if a == nil || a.pluginCmd == nil {
 		return command.Result{}, fmt.Errorf("command adapter is nil")
@@ -56,11 +62,25 @@ func (a *CommandAdapter) Execute(ctx context.Context, args command.Args) (comman
 
 	content := a.pluginCmd.RawContent
 
-	// Perform simple argument substitution if the command declares argument
-	// names in its frontmatter (stored in the AllowedTools field as a
-	// comma-separated list in our current extraction).
-	if content != "" && len(args.Raw) > 0 {
-		content = substituteSimpleArgs(content, args.Raw)
+	if content != "" {
+		// 1. Plugin variable substitution (${CLAUDE_PLUGIN_ROOT}, ${CLAUDE_PLUGIN_DATA}).
+		content = SubstitutePluginVariables(content, a.pluginCmd.PluginPath, a.pluginCmd.PluginSource)
+
+		// 2. Skill directory substitution (${CLAUDE_SKILL_DIR}) for skill commands.
+		if a.pluginCmd.IsSkill {
+			skillDir := filepath.Dir(a.pluginCmd.SourcePath)
+			content = SubstituteSkillDir(content, skillDir)
+		}
+
+		// 3. Argument substitution.
+		if len(args.Raw) > 0 {
+			// Backward-compatible ${1}, ${2}, ... positional substitution.
+			content = substituteSimpleArgs(content, args.Raw)
+			// Full argument substitution ($ARGUMENTS, $n, $name).
+			// appendIfNoPlaceholder is false because substituteSimpleArgs already
+			// handles positional ${n} placeholders.
+			content = SubstituteArguments(content, args.Raw, a.pluginCmd.ArgumentNames, false)
+		}
 	}
 
 	// If no content is available, return a descriptive fallback.
@@ -75,6 +95,15 @@ func (a *CommandAdapter) Execute(ctx context.Context, args command.Args) (comman
 	return command.Result{
 		Output: content,
 	}, nil
+}
+
+// ParsedAllowedTools parses the AllowedTools frontmatter field into a slice of
+// individual tool names. Returns nil if AllowedTools is empty.
+func (a *CommandAdapter) ParsedAllowedTools() []string {
+	if a == nil || a.pluginCmd == nil {
+		return nil
+	}
+	return a.pluginCmd.ParsedAllowedTools()
 }
 
 // substituteSimpleArgs replaces positional ${1}, ${2}, ... placeholders in

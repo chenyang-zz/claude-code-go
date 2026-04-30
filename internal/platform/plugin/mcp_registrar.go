@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
@@ -65,13 +66,48 @@ func (r *McpRegistrar) RegisterMcpServers(servers []*McpServerConfig) (registere
 }
 
 // toClientServerConfig maps a plugin McpServerConfig to the core
-// client.ServerConfig used by the MCP runtime.
+// client.ServerConfig used by the MCP runtime. Plugin variables in
+// Command, Args, and Env are substituted, and CLAUDE_PLUGIN_ROOT /
+// CLAUDE_PLUGIN_DATA are injected into the environment.
 func toClientServerConfig(s *McpServerConfig) client.ServerConfig {
+	command := s.Command
+	args := make([]string, len(s.Args))
+	copy(args, s.Args)
+	env := make(map[string]string, len(s.Env))
+	for k, v := range s.Env {
+		env[k] = v
+	}
+
+	// Substitute plugin variables when plugin context is available.
+	if s.PluginPath != "" || s.PluginSource != "" {
+		command = SubstitutePluginVariables(command, s.PluginPath, s.PluginSource)
+		for i, arg := range args {
+			args[i] = SubstitutePluginVariables(arg, s.PluginPath, s.PluginSource)
+		}
+		for k, v := range env {
+			env[k] = SubstitutePluginVariables(v, s.PluginPath, s.PluginSource)
+		}
+	}
+
+	// Inject CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA into env.
+	if s.PluginPath != "" {
+		if _, ok := env["CLAUDE_PLUGIN_ROOT"]; !ok {
+			env["CLAUDE_PLUGIN_ROOT"] = filepath.ToSlash(s.PluginPath)
+		}
+	}
+	if s.PluginSource != "" {
+		if dataDir, err := GetPluginDataDir(s.PluginSource); err == nil {
+			if _, ok := env["CLAUDE_PLUGIN_DATA"]; !ok {
+				env["CLAUDE_PLUGIN_DATA"] = filepath.ToSlash(dataDir)
+			}
+		}
+	}
+
 	return client.ServerConfig{
 		Type:    s.Transport,
-		Command: s.Command,
-		Args:    s.Args,
-		Env:     s.Env,
+		Command: command,
+		Args:    args,
+		Env:     env,
 		URL:     s.URL,
 		Headers: s.Headers,
 	}

@@ -71,6 +71,44 @@ No frontmatter here.`)
 	}
 }
 
+func TestParseFrontmatter_ArrayArguments(t *testing.T) {
+	content := []byte(`---
+name: test-cmd
+arguments:
+  - name
+  - target
+  - region
+---
+Body`)
+
+	fm, body, err := parseFrontmatter(content)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if fm["arguments"] != "name,target,region" {
+		t.Errorf("expected arguments 'name,target,region', got %q", fm["arguments"])
+	}
+	if string(body) != "Body" {
+		t.Errorf("expected body 'Body', got %q", string(body))
+	}
+}
+
+func TestParseFrontmatter_InlineArray(t *testing.T) {
+	content := []byte(`---
+name: test-cmd
+arguments: [name, target]
+---
+Body`)
+
+	fm, _, err := parseFrontmatter(content)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if fm["arguments"] != "name,target" {
+		t.Errorf("expected arguments 'name,target', got %q", fm["arguments"])
+	}
+}
+
 func TestParseFrontmatter_QuotedValues(t *testing.T) {
 	content := []byte(`---
 name: "quoted-name"

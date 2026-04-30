@@ -334,6 +334,60 @@ func TestServerRegistryCloseAll(t *testing.T) {
 	r.CloseAll()
 }
 
+func TestServerRegistry_Clear(t *testing.T) {
+	r := NewServerRegistry()
+	r.LoadConfigs(map[string]client.ServerConfig{
+		"a": {Command: "echo"},
+		"b": {Command: "cat"},
+	})
+
+	if err := r.Clear(); err != nil {
+		t.Fatalf("Clear() error: %v", err)
+	}
+
+	if len(r.List()) != 0 {
+		t.Fatalf("expected empty registry after Clear, got %d entries", len(r.List()))
+	}
+}
+
+func TestServerRegistry_ClearEmpty(t *testing.T) {
+	r := NewServerRegistry()
+	if err := r.Clear(); err != nil {
+		t.Fatalf("Clear() on empty registry error: %v", err)
+	}
+}
+
+func TestServerRegistry_ClearClosesClients(t *testing.T) {
+	server := newRegistryHTTPServer(t)
+	defer server.Close()
+
+	r := NewServerRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := r.ConnectDynamicServer(ctx, "dynamic-http", client.ServerConfig{
+		Type:    "http",
+		URL:     server.URL,
+		Headers: map[string]string{"X-Test": "ok"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectDynamicServer failed: %v", err)
+	}
+
+	before, ok := r.GetEntry("dynamic-http")
+	if !ok || before.Client == nil {
+		t.Fatal("expected entry with active client before Clear")
+	}
+
+	if err := r.Clear(); err != nil {
+		t.Fatalf("Clear() error: %v", err)
+	}
+
+	if len(r.List()) != 0 {
+		t.Fatalf("expected empty registry after Clear, got %d entries", len(r.List()))
+	}
+}
+
 func TestServerRegistryConnected(t *testing.T) {
 	r := NewServerRegistry()
 	r.LoadConfigs(map[string]client.ServerConfig{

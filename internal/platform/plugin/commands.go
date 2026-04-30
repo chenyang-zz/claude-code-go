@@ -94,6 +94,15 @@ func buildCommand(plugin *LoadedPlugin, filePath, baseDir string, isSkill bool) 
 		description = firstParagraph(body)
 	}
 
+	// Parse argument names from the frontmatter arguments field.
+	var argumentNames []string
+	if argsStr := frontmatter["arguments"]; argsStr != "" {
+		argumentNames = strings.Split(argsStr, ",")
+		for i := range argumentNames {
+			argumentNames[i] = strings.TrimSpace(argumentNames[i])
+		}
+	}
+
 	cmd := &PluginCommand{
 		Name:                   cmdName,
 		DisplayName:            displayName,
@@ -105,6 +114,8 @@ func buildCommand(plugin *LoadedPlugin, filePath, baseDir string, isSkill bool) 
 		RawContent:             string(body),
 		AllowedTools:           frontmatter["allowed-tools"],
 		ArgumentHint:           frontmatter["argument-hint"],
+		ArgumentNames:          argumentNames,
+		PluginSource:           plugin.Name,
 		WhenToUse:              frontmatter["when_to_use"],
 		Version:                frontmatter["version"],
 		Model:                  frontmatter["model"],
@@ -206,8 +217,9 @@ func commandName(filePath, baseDir, pluginName string, isSkill bool) string {
 }
 
 // parseFrontmatter extracts YAML frontmatter delimited by "---" from markdown
-// content. It returns a map of key-value pairs (only simple string values are
-// parsed), the remaining markdown body, and any error.
+// content. It returns a map of key-value pairs, the remaining markdown body,
+// and any error. Array values (e.g. arguments:) are flattened into a
+// comma-separated string.
 func parseFrontmatter(content []byte) (map[string]string, []byte, error) {
 	text := string(content)
 	if !strings.HasPrefix(text, "---") {
@@ -216,25 +228,58 @@ func parseFrontmatter(content []byte) (map[string]string, []byte, error) {
 
 	// Find the closing "---".
 	rest := text[3:]
-	endIdx := strings.Index(rest, "\n---")
-	if endIdx < 0 {
+	fmText, bodyText, found := strings.Cut(rest, "\n---")
+	if !found {
 		// No closing delimiter; treat entire content as body.
 		return make(map[string]string), content, nil
 	}
-
-	fmText := rest[:endIdx]
-	body := []byte(strings.TrimSpace(rest[endIdx+4:]))
+	body := []byte(strings.TrimSpace(bodyText))
 
 	frontmatter := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(fmText))
-	for scanner.Scan() {
-		line := scanner.Text()
-		colonIdx := strings.Index(line, ":")
-		if colonIdx < 0 {
+	lines := strings.Split(fmText, "\n")
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(line[:colonIdx])
-		value := strings.TrimSpace(line[colonIdx+1:])
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+
+		// Handle multi-line array values (YAML list syntax).
+		if value == "" && (key == "arguments" || key == "allowed-tools") {
+			var items []string
+			for i+1 < len(lines) {
+				nextLine := strings.TrimSpace(lines[i+1])
+				if !strings.HasPrefix(nextLine, "- ") {
+					break
+				}
+				item := strings.TrimSpace(nextLine[2:])
+				item = strings.Trim(item, "\"'")
+				if item != "" {
+					items = append(items, item)
+				}
+				i++
+			}
+			if len(items) > 0 {
+				value = strings.Join(items, ",")
+			}
+		} else if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+			// Handle inline array: [item1, item2]
+			inner := value[1 : len(value)-1]
+			parts := strings.Split(inner, ",")
+			var cleaned []string
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				p = strings.Trim(p, "\"'")
+				if p != "" {
+					cleaned = append(cleaned, p)
+				}
+			}
+			value = strings.Join(cleaned, ",")
+		}
+
 		// Strip surrounding quotes if present.
 		value = strings.Trim(value, "\"'")
 		if key != "" {

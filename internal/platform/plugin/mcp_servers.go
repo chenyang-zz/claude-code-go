@@ -29,7 +29,8 @@ func ExtractMcpServers(plugin *LoadedPlugin) ([]*McpServerConfig, error) {
 
 	for _, cfg := range configs {
 		cfg.PluginName = plugin.Name
-		cfg.PluginSource = plugin.Source.Value
+		cfg.PluginPath = plugin.Path
+		cfg.PluginSource = plugin.Name
 		cfg.Scope = "dynamic"
 	}
 

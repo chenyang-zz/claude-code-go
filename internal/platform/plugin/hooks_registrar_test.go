@@ -125,7 +125,7 @@ func TestConvertHookMatcher(t *testing.T) {
 		},
 	}
 
-	hm, err := convertHookMatcher(entry, "/plugins/test", "my-plugin")
+	hm, err := convertHookMatcher(entry, "/plugins/test", "my-plugin", "my-plugin")
 	require.NoError(t, err)
 	assert.Equal(t, "my-tool", hm.Matcher)
 	require.Len(t, hm.Hooks, 1)
@@ -137,7 +137,7 @@ func TestConvertHookMatcher(t *testing.T) {
 	assert.Equal(t, hook.TypeCommand, cmdHook.Type)
 	assert.Equal(t, "echo hello", cmdHook.Command)
 	assert.Equal(t, 3, cmdHook.Timeout) // 3000ms -> 3s
-	assert.Equal(t, "plugin:my-plugin:/plugins/test", cmdHook.If)
+	assert.Equal(t, "plugin:my-plugin:/plugins/test:my-plugin", cmdHook.If)
 }
 
 func TestConvertHookMatcher_NoPluginRoot(t *testing.T) {
@@ -146,7 +146,7 @@ func TestConvertHookMatcher_NoPluginRoot(t *testing.T) {
 		Hooks:   []HookCommand{{Command: "echo"}},
 	}
 
-	hm, err := convertHookMatcher(entry, "", "plugin")
+	hm, err := convertHookMatcher(entry, "", "plugin", "plugin")
 	require.NoError(t, err)
 
 	var cmdHook hook.CommandHook

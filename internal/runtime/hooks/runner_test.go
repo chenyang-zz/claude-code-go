@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,4 +163,119 @@ func TestBlockingErrors(t *testing.T) {
 	if len(errs) != 1 || errs[0] != "blocked error" {
 		t.Errorf("BlockingErrors = %v, want [blocked error]", errs)
 	}
+}
+
+func TestExtractPluginInfo(t *testing.T) {
+	tests := []struct {
+		input         string
+		wantName      string
+		wantRoot      string
+		wantSource    string
+	}{
+		{"plugin:my-plugin:/path/to/plugin:my-plugin", "my-plugin", "/path/to/plugin", "my-plugin"},
+		{"plugin:name:/root", "name", "/root", ""},
+		{"plugin:only-name", "only-name", "", ""},
+		{"Bash(git *)", "", "", ""},
+		{"", "", "", ""},
+	}
+
+	for _, tt := range tests {
+		name, root, source := extractPluginInfo(tt.input)
+		if name != tt.wantName || root != tt.wantRoot || source != tt.wantSource {
+			t.Errorf("extractPluginInfo(%q) = (%q, %q, %q), want (%q, %q, %q)",
+				tt.input, name, root, source, tt.wantName, tt.wantRoot, tt.wantSource)
+		}
+	}
+}
+
+func TestInjectPluginEnv(t *testing.T) {
+	 runner := NewRunner()
+	 base := []string{"PATH=/usr/bin", "HOME=/home/user"}
+
+	 env := runner.injectPluginEnv(base, "/plugin/root", "my-plugin", "/project/dir")
+
+	 envMap := make(map[string]string)
+	 for _, e := range env {
+		 if k, v, ok := strings.Cut(e, "="); ok {
+			 envMap[k] = v
+		 }
+	 }
+
+	 if envMap["PATH"] != "/usr/bin" {
+		 t.Errorf("expected PATH=/usr/bin, got %q", envMap["PATH"])
+	 }
+	 if envMap["CLAUDE_PROJECT_DIR"] != "/project/dir" {
+		 t.Errorf("expected CLAUDE_PROJECT_DIR=/project/dir, got %q", envMap["CLAUDE_PROJECT_DIR"])
+	 }
+	 if envMap["CLAUDE_PLUGIN_ROOT"] != "/plugin/root" {
+		 t.Errorf("expected CLAUDE_PLUGIN_ROOT=/plugin/root, got %q", envMap["CLAUDE_PLUGIN_ROOT"])
+	 }
+	 if _, ok := envMap["CLAUDE_PLUGIN_DATA"]; !ok {
+		 t.Error("expected CLAUDE_PLUGIN_DATA to be set")
+	 }
+}
+
+func TestInjectPluginEnv_NoOverwrite(t *testing.T) {
+	 runner := NewRunner()
+	 base := []string{"PATH=/usr/bin", "CLAUDE_PLUGIN_ROOT=/existing"}
+
+	 env := runner.injectPluginEnv(base, "/plugin/root", "my-plugin", "/project/dir")
+
+	 envMap := make(map[string]string)
+	 for _, e := range env {
+		 if k, v, ok := strings.Cut(e, "="); ok {
+			 envMap[k] = v
+		 }
+	 }
+
+	 if envMap["CLAUDE_PLUGIN_ROOT"] != "/existing" {
+		 t.Errorf("expected CLAUDE_PLUGIN_ROOT=/existing, got %q", envMap["CLAUDE_PLUGIN_ROOT"])
+	 }
+}
+
+func TestRunCommand_PluginVariableSubstitution(t *testing.T) {
+	 if _, err := exec.LookPath("bash"); err != nil {
+		 t.Skip("bash not available")
+	 }
+	 runner := NewRunner()
+	 cmdHook := hook.CommandHook{
+		 Type: hook.TypeCommand,
+		 Command: `echo "root=${CLAUDE_PLUGIN_ROOT}"`,
+		 If: "plugin:test-plugin:/tmp/test-plugin:test-plugin",
+	 }
+
+	 result, err := runner.RunCommand(context.Background(), cmdHook, nil, "")
+	 if err != nil {
+		 t.Fatalf("RunCommand: %v", err)
+	 }
+	 if !result.IsSuccess() {
+		 t.Fatalf("expected success, got exit code %d", result.ExitCode)
+	 }
+	 if !strings.Contains(result.Stdout, "root=/tmp/test-plugin") {
+		 t.Errorf("expected plugin root substitution in stdout, got %q", result.Stdout)
+	 }
+}
+
+func TestRunCommand_PluginEnvInjection(t *testing.T) {
+	 if _, err := exec.LookPath("bash"); err != nil {
+		 t.Skip("bash not available")
+	 }
+	 runner := NewRunner()
+	 cmdHook := hook.CommandHook{
+		 Type: hook.TypeCommand,
+		 Command: `echo "project=$CLAUDE_PROJECT_DIR"`,
+		 If: "plugin:test-plugin:/tmp/test-plugin:test-plugin",
+	 }
+
+	 projectDir := t.TempDir()
+	 result, err := runner.RunCommand(context.Background(), cmdHook, nil, projectDir)
+	 if err != nil {
+		 t.Fatalf("RunCommand: %v", err)
+	 }
+	 if !result.IsSuccess() {
+		 t.Fatalf("expected success, got exit code %d", result.ExitCode)
+	 }
+	 if !strings.Contains(result.Stdout, "project="+projectDir) {
+		 t.Errorf("expected CLAUDE_PROJECT_DIR in stdout, got %q", result.Stdout)
+	 }
 }

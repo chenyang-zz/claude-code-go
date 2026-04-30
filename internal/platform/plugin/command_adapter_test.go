@@ -114,6 +114,125 @@ func TestCommandAdapter_Execute_Nil(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCommandAdapter_Metadata_ArgumentHint(t *testing.T) {
+	pc := &PluginCommand{
+		Name:          "test-cmd",
+		Description:   "A test command",
+		ArgumentHint:  "[file] [line]",
+		UserInvocable: true,
+	}
+	adapter := NewCommandAdapter(pc)
+
+	meta := adapter.Metadata()
+	assert.Equal(t, "/test-cmd [file] [line]", meta.Usage)
+}
+
+func TestCommandAdapter_Execute_PluginVariableSubstitution(t *testing.T) {
+	pc := &PluginCommand{
+		Name:         "test-cmd",
+		RawContent:   "Root: ${CLAUDE_PLUGIN_ROOT}",
+		PluginPath:   "/path/to/plugin",
+		PluginName:   "test-plugin",
+		PluginSource: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Root: /path/to/plugin", result.Output)
+}
+
+func TestCommandAdapter_Execute_SkillDirSubstitution(t *testing.T) {
+	pc := &PluginCommand{
+		Name:         "test-skill",
+		RawContent:   "Skill dir: ${CLAUDE_SKILL_DIR}",
+		PluginPath:   "/path/to/plugin",
+		SourcePath:   "/path/to/plugin/skills/build/SKILL.md",
+		IsSkill:      true,
+		PluginName:   "test-plugin",
+		PluginSource: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Skill dir: /path/to/plugin/skills/build", result.Output)
+}
+
+func TestCommandAdapter_Execute_ArgumentsSubstitution(t *testing.T) {
+	pc := &PluginCommand{
+		Name:         "test-cmd",
+		RawContent:   "All: $ARGUMENTS, First: $1",
+		PluginName:   "test-plugin",
+		PluginSource: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{
+		Raw: []string{"alpha", "beta"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "All: alpha beta, First: alpha", result.Output)
+}
+
+func TestCommandAdapter_Execute_NamedArgumentSubstitution(t *testing.T) {
+	pc := &PluginCommand{
+		Name:          "test-cmd",
+		RawContent:    "Hello $name",
+		PluginName:    "test-plugin",
+		PluginSource:  "test-plugin",
+		ArgumentNames: []string{"name"},
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{
+		Raw: []string{"Alice"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello Alice", result.Output)
+}
+
+func TestCommandAdapter_Execute_AppendIfNoPlaceholder(t *testing.T) {
+	pc := &PluginCommand{
+		Name:         "test-cmd",
+		RawContent:   "Plain text",
+		PluginName:   "test-plugin",
+		PluginSource: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{
+		Raw: []string{"extra"},
+	})
+	assert.NoError(t, err)
+	// With appendIfNoPlaceholder=false in Execute, arguments are not appended
+	// when no placeholder is present (substituteSimpleArgs handles ${n} patterns).
+	assert.Equal(t, "Plain text", result.Output)
+}
+
+func TestCommandAdapter_ParsedAllowedTools(t *testing.T) {
+	pc := &PluginCommand{
+		Name:         "test-cmd",
+		AllowedTools: "read, write, edit",
+		PluginName:   "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	tools := adapter.ParsedAllowedTools()
+	assert.Equal(t, []string{"read", "write", "edit"}, tools)
+}
+
+func TestCommandAdapter_ParsedAllowedTools_Empty(t *testing.T) {
+	pc := &PluginCommand{
+		Name:       "test-cmd",
+		PluginName: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	tools := adapter.ParsedAllowedTools()
+	assert.Nil(t, tools)
+}
+
 func TestSubstituteSimpleArgs(t *testing.T) {
 	assert.Equal(t, "a b", substituteSimpleArgs("${1} ${2}", []string{"a", "b"}))
 	assert.Equal(t, "hello", substituteSimpleArgs("${1}", []string{"hello"}))

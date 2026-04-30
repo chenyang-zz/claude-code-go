@@ -76,6 +76,8 @@ type App struct {
 	Runner *repl.Runner
 	// Scheduler runs cron scheduled tasks.
 	Scheduler *cron.Scheduler
+	// PluginWatcher monitors plugin directories for changes.
+	PluginWatcher *plugin.Watcher
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -173,30 +175,58 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		assembly.McpRegistry,
 		nil, // LspManager not wired in bootstrap yet
 	)
+
+	// Build the reloader pipeline for both manual /reload-plugins and
+	// automatic file-watcher-triggered reloads.
+	var reloader *plugin.Reloader
+	if pluginLoader != nil && registrar != nil {
+		reloader = plugin.NewReloader(pluginLoader, registrar, cfg.Hooks)
+	}
+
 	if err := commandRegistry.Unregister("reload-plugins"); err != nil {
 		logger.WarnCF("bootstrap", "failed to unregister reload-plugins", map[string]any{"error": err.Error()})
 	}
 	if err := commandRegistry.Register(servicecommands.ReloadPluginsCommand{
+		Reloader:  reloader,
 		Loader:    pluginLoader,
 		Registrar: registrar,
 	}); err != nil {
-		logger.WarnCF("bootstrap", "failed to register reload-plugins with registrar", map[string]any{"error": err.Error()})
+		logger.WarnCF("bootstrap", "failed to register reload-plugins with reloader", map[string]any{"error": err.Error()})
 	}
 
 	// Auto-load plugins at startup.
-	if pluginLoader != nil && registrar != nil {
-		if result, err := pluginLoader.RefreshActivePlugins(); err == nil {
-			if _, regErr := registrar.RegisterAll(result, cfg.Hooks); regErr != nil {
-				logger.WarnCF("bootstrap", "failed to register plugins at startup", map[string]any{"error": regErr.Error()})
-			} else {
-				logger.InfoCF("bootstrap", "plugins auto-loaded at startup", map[string]any{
-					"enabled":  result.EnabledCount,
-					"commands": result.CommandCount,
-					"agents":   result.AgentCount,
-				})
-			}
+	if reloader != nil {
+		if summary, err := reloader.Reload(); err != nil {
+			logger.WarnCF("bootstrap", "failed to reload plugins at startup", map[string]any{"error": err.Error()})
+		} else if summary != nil {
+			logger.InfoCF("bootstrap", "plugins auto-loaded at startup", map[string]any{
+				"agents":   summary.AgentsRegistered,
+				"commands": summary.CommandsRegistered,
+				"mcp":      summary.McpServersLoaded,
+				"lsp":      summary.LspServersRegistered,
+				"errors":   len(summary.Errors),
+			})
+		}
+	}
+
+	// Start the plugin directory watcher for automatic hot-reload.
+	var pluginWatcher *plugin.Watcher
+	if reloader != nil {
+		pluginWatcher = plugin.NewWatcher(func() {
+			logger.DebugCF("bootstrap", "plugin directory change detected, triggering reload", nil)
+			_, _ = reloader.Reload()
+		})
+		var watchDirs []string
+		if cfg.HomeDir != "" {
+			watchDirs = append(watchDirs, filepath.Join(cfg.HomeDir, ".claude", "plugins"))
+		}
+		if cfg.ProjectPath != "" {
+			watchDirs = append(watchDirs, filepath.Join(cfg.ProjectPath, ".claude", "plugins"))
+		}
+		if err := pluginWatcher.Start(watchDirs); err != nil {
+			logger.WarnCF("bootstrap", "failed to start plugin watcher", map[string]any{"error": err.Error()})
 		} else {
-			logger.WarnCF("bootstrap", "failed to refresh plugins at startup", map[string]any{"error": err.Error()})
+			logger.DebugCF("bootstrap", "plugin watcher started", nil)
 		}
 	}
 
@@ -214,9 +244,10 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	scheduler.Start()
 
 	return &App{
-		Config:    cfg,
-		Runner:    runner,
-		Scheduler: scheduler,
+		Config:        cfg,
+		Runner:        runner,
+		Scheduler:     scheduler,
+		PluginWatcher: pluginWatcher,
 	}, nil
 }
 
@@ -1316,5 +1347,8 @@ func buildUsageLimitsProbe(cfg *coreconfig.Config) servicecommands.UsageLimitsPr
 // Run forwards execution to the configured runner.
 func (a *App) Run(ctx context.Context, args []string) error {
 	defer a.Scheduler.Stop()
+	if a.PluginWatcher != nil {
+		defer a.PluginWatcher.Stop()
+	}
 	return a.Runner.Run(ctx, args)
 }
