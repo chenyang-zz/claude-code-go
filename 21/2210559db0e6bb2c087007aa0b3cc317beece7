@@ -1,0 +1,43 @@
+internal/platform/plugin/variables.go
+  cf7902d20dbecc87 10-67
+internal/core/command/command.go
+  cf7902d20dbecc87 25-29
+internal/platform/plugin/command_adapter.go
+  cf7902d20dbecc87 84-90,102-111,113-114
+internal/app/bootstrap/app.go
+  cf7902d20dbecc87 171,177
+internal/runtime/repl/runner.go
+  cf7902d20dbecc87 189-198
+internal/platform/plugin/command_adapter_test.go
+  cf7902d20dbecc87 242-327
+internal/platform/plugin/commands.go
+  cf7902d20dbecc87 126
+internal/platform/plugin/registrar.go
+  cf7902d20dbecc87 9,35-38,49-63,71,101-105
+internal/platform/plugin/types.go
+  cf7902d20dbecc87 45-60,82-86,204-210
+internal/platform/plugin/variables_test.go
+  cf7902d20dbecc87 360-496
+docs/analysis/batch-208/analysis-m1.md
+  cf7902d20dbecc87 1-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "212210559db0e6bb2c087007aa0b3cc317beece7",
+  "prompts": {
+    "cf7902d20dbecc87": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "16586743-8d55-41da-b9ec-1cb0e6776405",
+        "model": "glm-5.1"
+      },
+      "human_author": "chenyang",
+      "messages": [],
+      "total_additions": 598,
+      "total_deletions": 7,
+      "accepted_lines": 593,
+      "overriden_lines": 0
+    }
+  }
+}
