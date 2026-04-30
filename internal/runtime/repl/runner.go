@@ -186,6 +186,16 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 			"session_id": r.SessionID,
 		})
 	}
+	if result.ShouldQuery {
+		history, err := r.restoreHistory(ctx, parsed.ContinueLatest, parsed.ForkSession)
+		if err != nil {
+			if errors.Is(err, errContinueHandled) {
+				return nil
+			}
+			return err
+		}
+		return r.runPrompt(ctx, history, result.Output)
+	}
 	if result.Output != "" {
 		return r.Renderer.RenderLine(result.Output)
 	}

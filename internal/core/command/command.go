@@ -22,6 +22,11 @@ type Result struct {
 	Output string
 	// NewSessionID asks the REPL to switch subsequent turns onto a fresh session.
 	NewSessionID string
+	// ShouldQuery indicates that Output should be treated as a user prompt and
+	// sent to the engine for a model query, rather than rendered as a static
+	// text response. Used by plugin prompt commands to inject their rendered
+	// content into the conversation flow.
+	ShouldQuery bool
 }
 
 // Command describes one executable slash command implementation.

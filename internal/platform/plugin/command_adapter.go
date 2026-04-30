@@ -81,6 +81,13 @@ func (a *CommandAdapter) Execute(ctx context.Context, args command.Args) (comman
 			// handles positional ${n} placeholders.
 			content = SubstituteArguments(content, args.Raw, a.pluginCmd.ArgumentNames, false)
 		}
+
+		// 4. User config substitution (${user_config.X}).
+		// Uses the content-safe variant (sensitive keys → placeholder) because
+		// command content goes to the model prompt.
+		if len(a.pluginCmd.UserConfigValues) > 0 {
+			content = SubstituteUserConfigInContent(content, a.pluginCmd.UserConfigValues, a.pluginCmd.UserConfigSchema)
+		}
 	}
 
 	// If no content is available, return a descriptive fallback.
@@ -92,8 +99,19 @@ func (a *CommandAdapter) Execute(ctx context.Context, args command.Args) (comman
 		)
 	}
 
+	// When disable-model-invocation is set, return the rendered content as a
+	// static text response (e.g. for read-only / informational commands).
+	// Otherwise, return ShouldQuery=true so the REPL injects the content as a
+	// user message and queries the engine.
+	if a.pluginCmd.DisableModelInvocation {
+		return command.Result{
+			Output: content,
+		}, nil
+	}
+
 	return command.Result{
-		Output: content,
+		Output:      content,
+		ShouldQuery: true,
 	}, nil
 }
 

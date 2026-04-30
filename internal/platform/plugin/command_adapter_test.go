@@ -239,3 +239,89 @@ func TestSubstituteSimpleArgs(t *testing.T) {
 	assert.Equal(t, "${1}", substituteSimpleArgs("${1}", []string{}))
 	assert.Equal(t, "no placeholders", substituteSimpleArgs("no placeholders", []string{"a", "b"}))
 }
+
+func TestCommandAdapter_Execute_ShouldQuery(t *testing.T) {
+	pc := &PluginCommand{
+		Name:       "test-cmd",
+		RawContent: "Analyze this code",
+		PluginName: "test-plugin",
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Analyze this code", result.Output)
+	assert.True(t, result.ShouldQuery, "default command should request engine query")
+}
+
+func TestCommandAdapter_Execute_DisableModelInvocation(t *testing.T) {
+	pc := &PluginCommand{
+		Name:                   "test-cmd",
+		RawContent:             "Show help text",
+		PluginName:             "test-plugin",
+		DisableModelInvocation: true,
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Show help text", result.Output)
+	assert.False(t, result.ShouldQuery, "disable-model-invocation should not query engine")
+}
+
+func TestCommandAdapter_Execute_UserConfigSubstitution(t *testing.T) {
+	pc := &PluginCommand{
+		Name:       "test-cmd",
+		RawContent: "Theme: ${user_config.theme}",
+		PluginName: "test-plugin",
+		UserConfigValues: map[string]any{
+			"theme": "dark",
+		},
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Theme: dark", result.Output)
+	assert.True(t, result.ShouldQuery)
+}
+
+func TestCommandAdapter_Execute_UserConfigSensitive(t *testing.T) {
+	pc := &PluginCommand{
+		Name:       "test-cmd",
+		RawContent: "Key: ${user_config.api_key}",
+		PluginName: "test-plugin",
+		UserConfigValues: map[string]any{
+			"api_key": "secret123",
+		},
+		UserConfigSchema: map[string]PluginConfigOption{
+			"api_key": {Sensitive: true},
+		},
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{})
+	assert.NoError(t, err)
+	assert.Equal(t, "Key: [sensitive option 'api_key' not available in skill content]", result.Output)
+}
+
+func TestCommandAdapter_Execute_FullSubstitutionChain(t *testing.T) {
+	pc := &PluginCommand{
+		Name:       "test-cmd",
+		RawContent: "Root: ${CLAUDE_PLUGIN_ROOT}, Args: $ARGUMENTS, Theme: ${user_config.theme}",
+		PluginPath: "/path/to/plugin",
+		PluginName: "test-plugin",
+		UserConfigValues: map[string]any{
+			"theme": "dark",
+		},
+	}
+	adapter := NewCommandAdapter(pc)
+
+	result, err := adapter.Execute(context.Background(), command.Args{
+		Raw: []string{"hello", "world"},
+	})
+	assert.NoError(t, err)
+	want := "Root: /path/to/plugin, Args: hello world, Theme: dark"
+	assert.Equal(t, want, result.Output)
+	assert.True(t, result.ShouldQuery)
+}

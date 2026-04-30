@@ -6,6 +6,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	"github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/platform/lsp"
@@ -31,6 +32,10 @@ type PluginRegistrar struct {
 	HooksConfig     *hook.HooksConfig
 	McpRegistry     *mcpregistry.ServerRegistry
 	LspManager      *lsp.Manager
+	// PluginConfigs holds per-plugin configuration blobs keyed by plugin id,
+	// sourced from the merged settings. Used to resolve ${user_config.X}
+	// placeholders during command execution.
+	PluginConfigs map[string]config.PluginConfig
 }
 
 // NewPluginRegistrar creates a PluginRegistrar with the given subsystem references.
@@ -42,12 +47,28 @@ func NewPluginRegistrar(
 	mcpRegistry *mcpregistry.ServerRegistry,
 	lspManager *lsp.Manager,
 ) *PluginRegistrar {
+	return NewPluginRegistrarWithConfigs(agentRegistry, commandRegistry, hooksConfig, mcpRegistry, lspManager, nil)
+}
+
+// NewPluginRegistrarWithConfigs creates a PluginRegistrar with the given subsystem
+// references and per-plugin configuration blobs. The pluginConfigs map is keyed by
+// plugin id and holds user-configurable option values used to resolve ${user_config.X}
+// placeholders during command execution.
+func NewPluginRegistrarWithConfigs(
+	agentRegistry agent.Registry,
+	commandRegistry command.Registry,
+	hooksConfig *hook.HooksConfig,
+	mcpRegistry *mcpregistry.ServerRegistry,
+	lspManager *lsp.Manager,
+	pluginConfigs map[string]config.PluginConfig,
+) *PluginRegistrar {
 	return &PluginRegistrar{
 		AgentRegistry:   agentRegistry,
 		CommandRegistry: commandRegistry,
 		HooksConfig:     hooksConfig,
 		McpRegistry:     mcpRegistry,
 		LspManager:      lspManager,
+		PluginConfigs:   pluginConfigs,
 	}
 }
 
@@ -76,6 +97,11 @@ func (r *PluginRegistrar) RegisterAll(result *RefreshResult, baseHooks hook.Hook
 		for _, pc := range result.Commands {
 			if pc == nil {
 				continue
+			}
+			// Inject user config values from the merged settings so that
+			// CommandAdapter can resolve ${user_config.X} placeholders.
+			if r.PluginConfigs != nil {
+				pc.UserConfigValues = r.PluginConfigs[pc.PluginName]
 			}
 			adapter := NewCommandAdapter(pc)
 			if err := r.CommandRegistry.Register(adapter); err != nil {

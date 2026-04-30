@@ -123,6 +123,7 @@ func buildCommand(plugin *LoadedPlugin, filePath, baseDir string, isSkill bool) 
 		UserInvocable:          parseBool(frontmatter["user-invocable"], true),
 		DisableModelInvocation: parseBool(frontmatter["disable-model-invocation"], false),
 		Shell:                  defaultString(frontmatter["shell"], "bash"),
+		UserConfigSchema:       plugin.Manifest.UserConfig,
 	}
 
 	return cmd, nil

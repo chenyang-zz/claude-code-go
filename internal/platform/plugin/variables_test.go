@@ -357,3 +357,140 @@ func TestSubstituteArguments_WindowsPathNormalization(t *testing.T) {
 		t.Errorf("SubstitutePluginVariables() = %q, want %q", got, want)
 	}
 }
+
+func TestSubstituteUserConfigVariables(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		userConfig map[string]any
+		want       string
+		wantErr    bool
+	}{
+		{
+			name:       "simple substitution",
+			value:      "theme is ${user_config.theme}",
+			userConfig: map[string]any{"theme": "dark"},
+			want:       "theme is dark",
+		},
+		{
+			name:       "multiple substitutions",
+			value:      "${user_config.a} and ${user_config.b}",
+			userConfig: map[string]any{"a": "hello", "b": "world"},
+			want:       "hello and world",
+		},
+		{
+			name:       "number value",
+			value:      "timeout: ${user_config.timeout}",
+			userConfig: map[string]any{"timeout": 30},
+			want:       "timeout: 30",
+		},
+		{
+			name:       "boolean value",
+			value:      "enabled: ${user_config.enabled}",
+			userConfig: map[string]any{"enabled": true},
+			want:       "enabled: true",
+		},
+		{
+			name:       "missing key errors",
+			value:      "theme: ${user_config.theme}",
+			userConfig: map[string]any{},
+			want:       "theme: ${user_config.theme}",
+			wantErr:    true,
+		},
+		{
+			name:       "partial missing key",
+			value:      "${user_config.a} and ${user_config.b}",
+			userConfig: map[string]any{"a": "x"},
+			want:       "x and ${user_config.b}",
+			wantErr:    true,
+		},
+		{
+			name:       "no placeholders",
+			value:      "plain text",
+			userConfig: map[string]any{"theme": "dark"},
+			want:       "plain text",
+		},
+		{
+			name:       "empty config",
+			value:      "theme: ${user_config.theme}",
+			userConfig: nil,
+			want:       "theme: ${user_config.theme}",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := SubstituteUserConfigVariables(tt.value, tt.userConfig)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SubstituteUserConfigVariables() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("SubstituteUserConfigVariables() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubstituteUserConfigInContent(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		userConfig map[string]any
+		schema     map[string]PluginConfigOption
+		want       string
+	}{
+		{
+			name:       "simple substitution",
+			content:    "theme is ${user_config.theme}",
+			userConfig: map[string]any{"theme": "dark"},
+			schema:     nil,
+			want:       "theme is dark",
+		},
+		{
+			name:       "sensitive key placeholder",
+			content:    "key: ${user_config.api_key}",
+			userConfig: map[string]any{"api_key": "secret123"},
+			schema:     map[string]PluginConfigOption{"api_key": {Sensitive: true}},
+			want:       "key: [sensitive option 'api_key' not available in skill content]",
+		},
+		{
+			name:       "unknown key stays literal",
+			content:    "val: ${user_config.unknown}",
+			userConfig: map[string]any{"theme": "dark"},
+			schema:     nil,
+			want:       "val: ${user_config.unknown}",
+		},
+		{
+			name:       "multiple mixed",
+			content:    "${user_config.a} and ${user_config.b}",
+			userConfig: map[string]any{"a": "hello"},
+			schema:     map[string]PluginConfigOption{"b": {Sensitive: true}},
+			want:       "hello and [sensitive option 'b' not available in skill content]",
+		},
+		{
+			name:       "no placeholders",
+			content:    "plain text",
+			userConfig: map[string]any{"theme": "dark"},
+			schema:     nil,
+			want:       "plain text",
+		},
+		{
+			name:       "empty config",
+			content:    "theme: ${user_config.theme}",
+			userConfig: nil,
+			schema:     nil,
+			want:       "theme: ${user_config.theme}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SubstituteUserConfigInContent(tt.content, tt.userConfig, tt.schema)
+			if got != tt.want {
+				t.Errorf("SubstituteUserConfigInContent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

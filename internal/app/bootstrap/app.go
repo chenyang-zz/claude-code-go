@@ -168,12 +168,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	// Two-phase assembly: build the full PluginRegistrar now that engine
 	// subsystems are available, then replace the stub reload-plugins command.
-	registrar := plugin.NewPluginRegistrar(
+	registrar := plugin.NewPluginRegistrarWithConfigs(
 		agentRegistry,
 		commandRegistry,
 		assembly.Hooks,
 		assembly.McpRegistry,
 		nil, // LspManager not wired in bootstrap yet
+		cfg.PluginConfigs,
 	)
 
 	// Build the reloader pipeline for both manual /reload-plugins and

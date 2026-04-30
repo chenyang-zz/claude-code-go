@@ -42,6 +42,22 @@ type PluginAuthor struct {
 	URL string `json:"url,omitempty"`
 }
 
+// PluginConfigOption defines a single user-configurable option declared in a
+// plugin manifest. It controls how the option is presented to the user and
+// how its value is substituted into plugin content.
+type PluginConfigOption struct {
+	// Sensitive indicates whether the option value should be treated as secret.
+	// When true, the value is replaced with a descriptive placeholder in skill/
+	// agent content instead of the actual value.
+	Sensitive bool `json:"sensitive,omitempty"`
+	// Type is the option's data type (e.g. "string", "number", "boolean").
+	Type string `json:"type,omitempty"`
+	// Description is a user-facing explanation of what this option controls.
+	Description string `json:"description,omitempty"`
+	// Default is the fallback value when the user has not configured this option.
+	Default any `json:"default,omitempty"`
+}
+
 // PluginManifest holds the metadata for a plugin as defined in its manifest file
 // (plugin.json or package.json). Only metadata fields are included; capability
 // definitions (hooks, commands, agents, MCP servers, LSP servers) are loaded
@@ -63,6 +79,11 @@ type PluginManifest struct {
 	License string `json:"license,omitempty"`
 	// Keywords are optional tags for plugin discovery and categorization.
 	Keywords []string `json:"keywords,omitempty"`
+	// UserConfig declares user-configurable values the plugin needs. Values are
+	// available as ${user_config.KEY} in plugin content, MCP/LSP config, and hook
+	// commands. Sensitive values are filtered when substituted into skill/agent
+	// content that goes to the model prompt.
+	UserConfig map[string]PluginConfigOption `json:"userConfig,omitempty"`
 }
 
 // LoadedPlugin represents a plugin that has been discovered and loaded into
@@ -180,6 +201,13 @@ type PluginCommand struct {
 	DisableModelInvocation bool `json:"disableModelInvocation"`
 	// Shell is the shell frontmatter field (defaults to "bash").
 	Shell string `json:"shell,omitempty"`
+	// UserConfigValues holds the resolved user configuration values for this
+	// plugin, keyed by option name. Populated at registration time from the
+	// global PluginConfigs settings.
+	UserConfigValues map[string]any `json:"-"`
+	// UserConfigSchema holds the userConfig schema from the plugin manifest,
+	// used to determine which keys are sensitive when substituting into content.
+	UserConfigSchema map[string]PluginConfigOption `json:"-"`
 }
 
 // OutputStyleConfig represents an output style extracted from a plugin's

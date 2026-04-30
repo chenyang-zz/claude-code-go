@@ -7,6 +7,64 @@ import (
 	"strings"
 )
 
+// userConfigRegex matches ${user_config.KEY} placeholders.
+var userConfigRegex = regexp.MustCompile(`\$\{user_config\.([^}]+)\}`)
+
+// SubstituteUserConfigVariables replaces ${user_config.KEY} placeholders in value
+// with their resolved counterparts from userConfig.
+//
+// This is the strict variant used for MCP/LSP server config and hook commands.
+// Missing keys produce an error — callers should only invoke this after user
+// config has been validated, so a miss indicates a plugin authoring bug.
+func SubstituteUserConfigVariables(value string, userConfig map[string]any) (string, error) {
+	var missing []string
+	result := userConfigRegex.ReplaceAllStringFunc(value, func(match string) string {
+		submatches := userConfigRegex.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		key := submatches[1]
+		v, ok := userConfig[key]
+		if !ok {
+			missing = append(missing, key)
+			return match
+		}
+		return fmt.Sprintf("%v", v)
+	})
+	if len(missing) > 0 {
+		return result, fmt.Errorf("missing required user configuration value(s): %s", strings.Join(missing, ", "))
+	}
+	return result, nil
+}
+
+// SubstituteUserConfigInContent replaces ${user_config.KEY} placeholders in content
+// with their resolved values from userConfig.
+//
+// This is the content-safe variant used for skill/agent prose that goes to the
+// model prompt. Differences from SubstituteUserConfigVariables:
+//
+//   - Sensitive-marked keys substitute to a descriptive placeholder instead of
+//     the actual value — we don't put secrets in the model's context.
+//   - Unknown keys stay literal (no throw) — matches how ${VAR} env refs behave
+//     when the var is unset.
+func SubstituteUserConfigInContent(content string, userConfig map[string]any, schema map[string]PluginConfigOption) string {
+	return userConfigRegex.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := userConfigRegex.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		key := submatches[1]
+		if opt, ok := schema[key]; ok && opt.Sensitive {
+			return fmt.Sprintf("[sensitive option '%s' not available in skill content]", key)
+		}
+		v, ok := userConfig[key]
+		if !ok {
+			return match
+		}
+		return fmt.Sprintf("%v", v)
+	})
+}
+
 // SubstitutePluginVariables replaces plugin-specific placeholders in value with
 // their resolved counterparts.
 //
