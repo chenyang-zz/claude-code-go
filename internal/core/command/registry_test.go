@@ -57,6 +57,44 @@ func TestInMemoryRegistryRegisterAndLookup(t *testing.T) {
 	}
 }
 
+// TestInMemoryRegistryUnregister removes a command and its aliases.
+func TestInMemoryRegistryUnregister(t *testing.T) {
+	registry := NewInMemoryRegistry()
+
+	first := stubCommand{meta: Metadata{Name: "help", Description: "show help"}}
+	second := stubCommand{meta: Metadata{Name: "resume", Aliases: []string{"continue"}, Description: "resume session"}}
+
+	if err := registry.Register(first); err != nil {
+		t.Fatalf("Register(first) error = %v", err)
+	}
+	if err := registry.Register(second); err != nil {
+		t.Fatalf("Register(second) error = %v", err)
+	}
+
+	if err := registry.Unregister("resume"); err != nil {
+		t.Fatalf("Unregister(resume) error = %v", err)
+	}
+
+	if _, ok := registry.Get("resume"); ok {
+		t.Fatal("Get(resume) ok = true, want false after unregister")
+	}
+	if _, ok := registry.Get("continue"); ok {
+		t.Fatal("Get(continue) ok = true, want false after unregister")
+	}
+	if _, ok := registry.Get("help"); !ok {
+		t.Fatal("Get(help) ok = false, want true")
+	}
+
+	list := registry.List()
+	if len(list) != 1 {
+		t.Fatalf("List() len = %d, want 1", len(list))
+	}
+
+	if err := registry.Unregister("nonexistent"); err == nil {
+		t.Fatal("Unregister(nonexistent) error = nil, want error")
+	}
+}
+
 // TestInMemoryRegistryRejectsInvalidCommands verifies empty names and duplicates are rejected.
 func TestInMemoryRegistryRejectsInvalidCommands(t *testing.T) {
 	registry := NewInMemoryRegistry()

@@ -108,15 +108,15 @@ func TestNewAppWithDependenciesSeedSessionsCommandUsesConfiguredStorage(t *testi
 		},
 	}
 
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error) {
 		_ = cfg
 		_ = backgroundTaskStore
 		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return stubEngine{}, policy, nil
+		return &EngineAssembly{Engine: stubEngine{}, Policy: policy}, nil
 	})
 	if err != nil {
 		t.Fatalf("NewAppWithDependencies() error = %v", err)
@@ -168,14 +168,14 @@ func TestDefaultEngineFactoryWiresHookRuntimeConfig(t *testing.T) {
 		},
 	}
 
-	eng, _, err := DefaultEngineFactory(cfg, nil, nil)
+	assembly, err := DefaultEngineFactory(cfg, nil, nil)
 	if err != nil {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
 
-	runtime, ok := eng.(*engine.Runtime)
+	runtime, ok := assembly.Engine.(*engine.Runtime)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() engine type = %T, want *engine.Runtime", eng)
+		t.Fatalf("DefaultEngineFactory() engine type = %T, want *engine.Runtime", assembly.Engine)
 	}
 	if runtime.HookRunner == nil {
 		t.Fatal("DefaultEngineFactory() HookRunner = nil, want runner")
@@ -203,7 +203,7 @@ func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
 		},
 	}
 
-	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	_, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error) {
 		if got := os.Getenv(envKey); got != "settings" {
 			t.Fatalf("engineFactory observed %s = %q, want settings", envKey, got)
 		}
@@ -211,9 +211,9 @@ func TestNewAppWithDependenciesAppliesSettingsEnv(t *testing.T) {
 		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return stubEngine{}, policy, nil
+		return &EngineAssembly{Engine: stubEngine{}, Policy: policy}, nil
 	})
 	if err != nil {
 		t.Fatalf("NewAppWithDependencies() error = %v", err)
@@ -271,7 +271,7 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 	}
 
 	called := false
-	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+	app, err := NewAppWithDependencies(loader, func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error) {
 		called = true
 		if cfg.APIKey != "test-key" {
 			t.Fatalf("engine factory cfg = %#v, want api key", cfg)
@@ -280,9 +280,9 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 		_ = taskStore
 		policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return stubEngine{}, policy, nil
+		return &EngineAssembly{Engine: stubEngine{}, Policy: policy}, nil
 	})
 	if err != nil {
 		t.Fatalf("NewAppWithDependencies() error = %v", err)
@@ -649,7 +649,7 @@ func TestNewAppWithDependenciesLoadsConfig(t *testing.T) {
 
 // TestDefaultEngineFactoryInjectsApprovalService verifies the production engine wiring now carries a minimal approval service.
 func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
-	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+	assembly, err := DefaultEngineFactory(coreconfig.Config{
 		Provider:     "anthropic",
 		Model:        "claude-sonnet-4-5",
 		ApprovalMode: approval.ModeBypassPermissions,
@@ -658,9 +658,9 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
 
-	runtime, ok := eng.(*engine.Runtime)
+	runtime, ok := assembly.Engine.(*engine.Runtime)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
 	if runtime.ApprovalService == nil {
 		t.Fatal("DefaultEngineFactory() approval service = nil, want injected service")
@@ -668,7 +668,7 @@ func TestDefaultEngineFactoryInjectsApprovalService(t *testing.T) {
 }
 
 func TestDefaultEngineFactoryMarksAnthropicClientFirstParty(t *testing.T) {
-	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+	assembly, err := DefaultEngineFactory(coreconfig.Config{
 		Provider:     coreconfig.ProviderAnthropic,
 		Model:        "claude-sonnet-4-5",
 		ApprovalMode: approval.ModeBypassPermissions,
@@ -677,9 +677,9 @@ func TestDefaultEngineFactoryMarksAnthropicClientFirstParty(t *testing.T) {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
 
-	runtime, ok := eng.(*engine.Runtime)
+	runtime, ok := assembly.Engine.(*engine.Runtime)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
 	client, ok := runtime.Client.(*anthropic.Client)
 	if !ok {
@@ -692,7 +692,7 @@ func TestDefaultEngineFactoryMarksAnthropicClientFirstParty(t *testing.T) {
 
 // TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime verifies bootstrap can wire the OpenAI-compatible provider.
 func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
-	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+	assembly, err := DefaultEngineFactory(coreconfig.Config{
 		Provider:     coreconfig.ProviderOpenAICompatible,
 		Model:        "gpt-5",
 		ApprovalMode: approval.ModeBypassPermissions,
@@ -701,9 +701,9 @@ func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
 
-	runtime, ok := eng.(*engine.Runtime)
+	runtime, ok := assembly.Engine.(*engine.Runtime)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
 	if _, ok := runtime.Client.(*openai.Client); !ok {
 		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)
@@ -712,7 +712,7 @@ func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
 
 // TestDefaultEngineFactoryBuildsGLMRuntime verifies bootstrap routes the GLM alias through the OpenAI-compatible runtime.
 func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
-	eng, _, err := DefaultEngineFactory(coreconfig.Config{
+	assembly, err := DefaultEngineFactory(coreconfig.Config{
 		Provider:     coreconfig.ProviderGLM,
 		Model:        "glm-4.5",
 		ApprovalMode: approval.ModeBypassPermissions,
@@ -721,9 +721,9 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 		t.Fatalf("DefaultEngineFactory() error = %v", err)
 	}
 
-	runtime, ok := eng.(*engine.Runtime)
+	runtime, ok := assembly.Engine.(*engine.Runtime)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", eng)
+		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
 	if _, ok := runtime.Client.(*openai.Client); !ok {
 		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)

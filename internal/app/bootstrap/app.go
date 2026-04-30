@@ -14,6 +14,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
@@ -53,8 +54,19 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
+// EngineAssembly bundles the engine runtime together with the subsystems created
+// inside the engine factory so that bootstrap can wire them into downstream
+// components such as the PluginRegistrar.
+type EngineAssembly struct {
+	Engine      engine.Engine
+	Policy      *corepermission.FilesystemPolicy
+	McpRegistry *mcpregistry.ServerRegistry
+	HookRunner  engine.HookRunner
+	Hooks       *hook.HooksConfig
+}
+
 // EngineFactory constructs the engine selected by the resolved runtime config together with the shared filesystem policy.
-type EngineFactory func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error)
+type EngineFactory func(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error)
 
 // App wires together the minimum batch-07 runtime needed by cmd/cc.
 type App struct {
@@ -93,10 +105,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	backgroundTaskStore := runtimesession.NewBackgroundTaskStore()
 	taskStore := resolveTaskStore(loader, cfg.HomeDir)
-	eng, policy, err := engineFactory(cfg, backgroundTaskStore, taskStore)
+	assembly, err := engineFactory(cfg, backgroundTaskStore, taskStore)
 	if err != nil {
 		return nil, err
 	}
+	eng := assembly.Engine
+	policy := assembly.Policy
 
 	var renderer console.EventRenderer
 	if cfg.OutputFormat == "stream-json" {
@@ -149,6 +163,42 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		return nil, err
 	}
 	runner.Commands = commandRegistry
+
+	// Two-phase assembly: build the full PluginRegistrar now that engine
+	// subsystems are available, then replace the stub reload-plugins command.
+	registrar := plugin.NewPluginRegistrar(
+		agentRegistry,
+		commandRegistry,
+		assembly.Hooks,
+		assembly.McpRegistry,
+		nil, // LspManager not wired in bootstrap yet
+	)
+	if err := commandRegistry.Unregister("reload-plugins"); err != nil {
+		logger.WarnCF("bootstrap", "failed to unregister reload-plugins", map[string]any{"error": err.Error()})
+	}
+	if err := commandRegistry.Register(servicecommands.ReloadPluginsCommand{
+		Loader:    pluginLoader,
+		Registrar: registrar,
+	}); err != nil {
+		logger.WarnCF("bootstrap", "failed to register reload-plugins with registrar", map[string]any{"error": err.Error()})
+	}
+
+	// Auto-load plugins at startup.
+	if pluginLoader != nil && registrar != nil {
+		if result, err := pluginLoader.RefreshActivePlugins(); err == nil {
+			if _, regErr := registrar.RegisterAll(result, cfg.Hooks); regErr != nil {
+				logger.WarnCF("bootstrap", "failed to register plugins at startup", map[string]any{"error": regErr.Error()})
+			} else {
+				logger.InfoCF("bootstrap", "plugins auto-loaded at startup", map[string]any{
+					"enabled":  result.EnabledCount,
+					"commands": result.CommandCount,
+					"agents":   result.AgentCount,
+				})
+			}
+		} else {
+			logger.WarnCF("bootstrap", "failed to refresh plugins at startup", map[string]any{"error": err.Error()})
+		}
+	}
 
 	logger.DebugCF("bootstrap", "constructed application", map[string]any{
 		"provider":            cfg.Provider,
@@ -695,16 +745,16 @@ func resolveTaskStore(loader coreconfig.Loader, homeDir string) coretask.Store {
 }
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
-func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (engine.Engine, *corepermission.FilesystemPolicy, error) {
+func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error) {
 	filesystem := platformfs.NewLocalFS()
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, configured := range cfg.Permissions.AdditionalDirectories {
 		expanded, err := platformfs.ExpandPath(configured, cfg.ProjectPath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("expand configured additional directory %q: %w", configured, err)
+			return nil, fmt.Errorf("expand configured additional directory %q: %w", configured, err)
 		}
 		policy.AddReadRoot(expanded)
 	}
@@ -712,7 +762,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	hookRunner := runtimehooks.NewRunner()
 	modules, err := wiring.NewBaseWorkspaceModulesWithHooks(filesystem, policy, cfg.Permissions, backgroundTaskStore, taskStore, hookRunner, cfg.Hooks, cfg.DisableAllHooks, cfg.HomeDir, cfg.ProjectPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Connect MCP servers and register their tools into the workspace registry.
@@ -807,7 +857,13 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 		}
 
-		return runtime, policy, nil
+		return &EngineAssembly{
+			Engine:      runtime,
+			Policy:      policy,
+			McpRegistry: mcpServerRegistry,
+			HookRunner:  hookRunner,
+			Hooks:       &runtime.Hooks,
+		}, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
 		if cfg.Provider == "openai" && openai.UseResponsesAPI(cfg.Model) {
@@ -858,9 +914,15 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 		}
 
-		return runtime, policy, nil
+		return &EngineAssembly{
+			Engine:      runtime,
+			Policy:      policy,
+			McpRegistry: mcpServerRegistry,
+			HookRunner:  hookRunner,
+			Hooks:       &runtime.Hooks,
+		}, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
+		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
 }
 

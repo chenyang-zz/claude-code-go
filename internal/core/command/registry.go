@@ -9,6 +9,8 @@ import (
 type Registry interface {
 	// Register adds one command using its canonical metadata name.
 	Register(cmd Command) error
+	// Unregister removes a command and all its aliases from the registry.
+	Unregister(name string) error
 	// Get resolves one command by slash name and reports whether it exists.
 	Get(name string) (Command, bool)
 	// List returns all commands in registration order for stable help output.
@@ -72,6 +74,35 @@ func (r *InMemoryRegistry) Get(name string) (Command, bool) {
 	}
 	cmd, ok := r.commands[NormalizeName(name)]
 	return cmd, ok
+}
+
+// Unregister removes a command and all its aliases from the registry.
+func (r *InMemoryRegistry) Unregister(name string) error {
+	if r == nil {
+		return fmt.Errorf("command registry is nil")
+	}
+	normalized := NormalizeName(name)
+	if normalized == "" {
+		return fmt.Errorf("command name is empty")
+	}
+	cmd, ok := r.commands[normalized]
+	if !ok {
+		return fmt.Errorf("command %q not found", normalized)
+	}
+
+	meta := cmd.Metadata()
+	identifiers := append([]string{meta.Name}, meta.Aliases...)
+	for _, identifier := range identifiers {
+		delete(r.commands, NormalizeName(identifier))
+	}
+
+	for i, n := range r.order {
+		if NormalizeName(n) == NormalizeName(meta.Name) {
+			r.order = append(r.order[:i], r.order[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 // List returns a stable registration-ordered snapshot of registered commands.
