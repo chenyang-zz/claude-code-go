@@ -302,6 +302,143 @@ func TestBuildNestedMap(t *testing.T) {
 	}
 }
 
+func TestSettingsWriter_Unset_SimpleKey(t *testing.T) {
+	dir := t.TempDir()
+	w := NewSettingsWriter(dir, dir)
+
+	ctx := context.Background()
+	if err := w.Set(ctx, "user", "theme", "dark"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := w.Unset(ctx, "user", "theme"); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+
+	val, err := w.Get(ctx, "user", "theme")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if val != nil {
+		t.Errorf("theme = %v, want nil after Unset", val)
+	}
+}
+
+func TestSettingsWriter_Unset_NestedKey(t *testing.T) {
+	dir := t.TempDir()
+	w := NewSettingsWriter(dir, dir)
+
+	ctx := context.Background()
+	if err := w.Set(ctx, "user", "permissions.defaultMode", "plan"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := w.Unset(ctx, "user", "permissions.defaultMode"); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+
+	val, err := w.Get(ctx, "user", "permissions.defaultMode")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if val != nil {
+		t.Errorf("permissions.defaultMode = %v, want nil after Unset", val)
+	}
+}
+
+func TestSettingsWriter_Unset_NonExistentKey(t *testing.T) {
+	dir := t.TempDir()
+	w := NewSettingsWriter(dir, dir)
+
+	ctx := context.Background()
+	if err := w.Unset(ctx, "user", "nonexistent"); err != nil {
+		t.Fatalf("Unset non-existent key should succeed, got %v", err)
+	}
+}
+
+func TestSettingsWriter_Unset_EmptyDocumentRemovesFile(t *testing.T) {
+	dir := t.TempDir()
+	w := NewSettingsWriter(dir, dir)
+
+	ctx := context.Background()
+	if err := w.Set(ctx, "user", "theme", "dark"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := w.Unset(ctx, "user", "theme"); err != nil {
+		t.Fatalf("Unset: %v", err)
+	}
+
+	settingsPath := filepath.Join(dir, ".claude", "settings.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Errorf("settings file should be removed when empty, stat err=%v", err)
+	}
+}
+
+func TestSettingsWriter_Unset_PreservesOtherFields(t *testing.T) {
+	dir := t.TempDir()
+	w := NewSettingsWriter(dir, dir)
+
+	ctx := context.Background()
+	if err := w.Set(ctx, "user", "theme", "dark"); err != nil {
+		t.Fatalf("Set theme: %v", err)
+	}
+	if err := w.Set(ctx, "user", "model", "sonnet"); err != nil {
+		t.Fatalf("Set model: %v", err)
+	}
+	if err := w.Unset(ctx, "user", "theme"); err != nil {
+		t.Fatalf("Unset theme: %v", err)
+	}
+
+	model, err := w.Get(ctx, "user", "model")
+	if err != nil {
+		t.Fatalf("Get model: %v", err)
+	}
+	if model != "sonnet" {
+		t.Errorf("model = %v, want sonnet", model)
+	}
+}
+
+func TestUnsetNestedKey(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  map[string]any
+		path []string
+		want map[string]any
+	}{
+		{
+			name: "simple key",
+			doc:  map[string]any{"theme": "dark"},
+			path: []string{"theme"},
+			want: map[string]any{},
+		},
+		{
+			name: "nested key",
+			doc:  map[string]any{"permissions": map[string]any{"defaultMode": "plan"}},
+			path: []string{"permissions", "defaultMode"},
+			want: map[string]any{},
+		},
+		{
+			name: "nested key keeps siblings",
+			doc:  map[string]any{"permissions": map[string]any{"defaultMode": "plan", "other": true}},
+			path: []string{"permissions", "defaultMode"},
+			want: map[string]any{"permissions": map[string]any{"other": true}},
+		},
+		{
+			name: "non-existent key",
+			doc:  map[string]any{"theme": "dark"},
+			path: []string{"nonexistent"},
+			want: map[string]any{"theme": "dark"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetNestedKey(tt.doc, tt.path)
+			if !mapsEqual(tt.doc, tt.want) {
+				t.Errorf("doc = %v, want %v", tt.doc, tt.want)
+			}
+		})
+	}
+}
+
 func mapsEqual(a, b map[string]any) bool {
 	if len(a) != len(b) {
 		return false

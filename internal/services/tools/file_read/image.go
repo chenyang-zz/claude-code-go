@@ -106,6 +106,10 @@ func (t *Tool) readImage(ctx context.Context, filePath string, size int64, worki
 		Output: summary,
 		Meta: map[string]any{
 			"data": output,
+			"image": coretool.ImageData{
+				MediaType: output.MediaType,
+				Base64:    output.Base64,
+			},
 		},
 	}, nil
 }

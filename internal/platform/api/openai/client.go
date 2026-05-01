@@ -507,22 +507,32 @@ func resolveChatCompletionsPath(provider string) string {
 
 // streamUsageOption returns stream_options with include_usage only when targeting the standard OpenAI API.
 // Other OpenAI-compatible providers may not support this parameter.
+// isOfficialOpenAI reports whether the client targets the official OpenAI API.
+// It matches when the base URL is the canonical api.openai.com host.
+func (c *Client) isOfficialOpenAI() bool {
+	return c.baseURL == defaultBaseURL
+}
+
 func (c *Client) streamUsageOption() *streamOptionsBody {
-	if c.baseURL == defaultBaseURL {
-		return &streamOptionsBody{IncludeUsage: true}
+	// GLM does not support stream_options; skip for that provider.
+	if coreconfig.NormalizeProvider(c.provider) == coreconfig.ProviderGLM {
+		return nil
 	}
-	return nil
+	return &streamOptionsBody{IncludeUsage: true}
 }
 
 func (c *Client) maxCompletionTokens(req model.Request) int {
-	if c.provider != coreconfig.ProviderGLM && req.MaxOutputTokens > 0 {
+	// Official OpenAI API prefers max_completion_tokens (introduced 2024-12).
+	if c.isOfficialOpenAI() && req.MaxOutputTokens > 0 {
 		return req.MaxOutputTokens
 	}
 	return 0
 }
 
 func (c *Client) maxTokens(req model.Request) int {
-	if req.MaxOutputTokens > 0 {
+	// Non-offinal OpenAI-compatible providers (including GLM) typically use
+	// the legacy max_tokens field.
+	if !c.isOfficialOpenAI() && req.MaxOutputTokens > 0 {
 		return req.MaxOutputTokens
 	}
 	return 0

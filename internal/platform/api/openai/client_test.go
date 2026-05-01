@@ -155,14 +155,16 @@ func TestClientStreamMapsToolLoopMessages(t *testing.T) {
 	}
 }
 
-func TestClientStreamSendsOpenAICompatibleTokenLimits(t *testing.T) {
+// TestClientStreamSendsMaxTokensForCompatibleProvider verifies that a non-official
+// OpenAI-compatible provider receives only the legacy max_tokens field.
+func TestClientStreamSendsMaxTokensForCompatibleProvider(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("Decode() error = %v", err)
 		}
-		if got := int(body["max_completion_tokens"].(float64)); got != 20000 {
-			t.Fatalf("request max_completion_tokens = %d, want 20000", got)
+		if _, ok := body["max_completion_tokens"]; ok {
+			t.Fatalf("request should not contain max_completion_tokens for compatible provider")
 		}
 		if got := int(body["max_tokens"].(float64)); got != 20000 {
 			t.Fatalf("request max_tokens = %d, want 20000", got)
@@ -177,6 +179,53 @@ func TestClientStreamSendsOpenAICompatibleTokenLimits(t *testing.T) {
 		Provider:   "openai-compatible",
 		APIKey:     "test-key",
 		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model:           "gpt-5",
+		MaxOutputTokens: 20000,
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("hello"),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	for range stream {
+	}
+}
+
+// TestClientStreamSendsMaxCompletionTokensForOfficialOpenAI verifies that the
+// official OpenAI API receives only max_completion_tokens.
+func TestClientStreamSendsMaxCompletionTokensForOfficialOpenAI(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if _, ok := body["max_tokens"]; ok {
+			t.Fatalf("request should not contain max_tokens for official OpenAI API")
+		}
+		if got := int(body["max_completion_tokens"].(float64)); got != 20000 {
+			t.Fatalf("request max_completion_tokens = %d, want 20000", got)
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		Provider:   "openai-compatible",
+		APIKey:     "test-key",
+		BaseURL:    defaultBaseURL, // official OpenAI endpoint
 		HTTPClient: server.Client(),
 	})
 

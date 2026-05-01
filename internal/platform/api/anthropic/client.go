@@ -144,19 +144,26 @@ type anthropicMessage struct {
 	Content []anthropicContentBlock `json:"content"`
 }
 
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
 type anthropicContentBlock struct {
-	Type         string         `json:"type"`
-	Text         string         `json:"text,omitempty"`
-	Thinking     string         `json:"thinking,omitempty"`
-	Signature    string         `json:"signature,omitempty"`
-	Data         string         `json:"data,omitempty"`
-	ID           string         `json:"id,omitempty"`
-	Name         string         `json:"name,omitempty"`
-	Input        map[string]any `json:"input,omitempty"`
-	ToolUseID    string         `json:"tool_use_id,omitempty"`
-	Content      any            `json:"content,omitempty"`
-	IsError      bool           `json:"is_error,omitempty"`
-	CacheControl *cacheControl  `json:"cache_control,omitempty"`
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text,omitempty"`
+	Thinking     string                 `json:"thinking,omitempty"`
+	Signature    string                 `json:"signature,omitempty"`
+	Data         string                 `json:"data,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        map[string]any         `json:"input,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      any                    `json:"content,omitempty"`
+	IsError      bool                   `json:"is_error,omitempty"`
+	CacheControl *cacheControl          `json:"cache_control,omitempty"`
+	Source       *anthropicImageSource  `json:"source,omitempty"`
 }
 
 // cacheControl carries the Anthropic cache_control marker used for prompt caching.
@@ -336,6 +343,10 @@ func NewClient(cfg Config) *Client {
 // Stream opens one Anthropic streaming request and converts SSE payloads into model events.
 func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
 	var endpoint string
+
+	if mediaCount := CountMediaItems(req.Messages); mediaCount > MaxMediaPerRequest {
+		return nil, fmt.Errorf("request contains %d media items, exceeding the maximum of %d", mediaCount, MaxMediaPerRequest)
+	}
 
 	body, err := json.Marshal(c.buildMessagesRequest(req))
 	if err != nil {
@@ -1006,6 +1017,15 @@ func mapMessages(messages []message.Message, enablePromptCaching bool) []anthrop
 				item.Content = append(item.Content, anthropicContentBlock{
 					Type: "redacted_thinking",
 					Data: part.Data,
+				})
+			case "image":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type: "image",
+					Source: &anthropicImageSource{
+						Type:      "base64",
+						MediaType: part.MediaType,
+						Data:      part.Base64Data,
+					},
 				})
 			}
 		}

@@ -23,6 +23,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
+	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
 	mcpbridge "github.com/sheepzhao/claude-code-go/internal/platform/mcp/bridge"
@@ -370,10 +371,35 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	})); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.LoginCommand{Config: dereferenceConfig(cfg)}); err != nil {
+	loginRunner, loginRunnerErr := servicecommands.NewLoginRunner(servicecommands.LoginRunnerDeps{
+		HomeDir:    dereferenceConfig(cfg).HomeDir,
+		ProjectDir: dereferenceConfig(cfg).ProjectPath,
+	})
+	if loginRunnerErr != nil {
+		logger.WarnCF("commands", "interactive /login OAuth runner unavailable; falling back to placeholder text", map[string]any{
+			"error": loginRunnerErr.Error(),
+		})
+		loginRunner = nil
+	}
+	if err := registry.Register(servicecommands.LoginCommand{
+		Config: dereferenceConfig(cfg),
+		Login:  loginRunner,
+	}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.LogoutCommand{Config: dereferenceConfig(cfg)}); err != nil {
+	var logoutCredentialStore *oauth.OAuthCredentialStore
+	if dereferenceConfig(cfg).HomeDir != "" {
+		logoutCredentialStore, _ = oauth.NewOAuthCredentialStore(dereferenceConfig(cfg).HomeDir)
+	}
+	var logoutSettingsWriter *platformconfig.SettingsWriter
+	if dereferenceConfig(cfg).HomeDir != "" {
+		logoutSettingsWriter = platformconfig.NewSettingsWriter(dereferenceConfig(cfg).HomeDir, dereferenceConfig(cfg).ProjectPath)
+	}
+	if err := registry.Register(servicecommands.LogoutCommand{
+		Config:          dereferenceConfig(cfg),
+		CredentialStore: logoutCredentialStore,
+		SettingsWriter:  logoutSettingsWriter,
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.CostCommand{}); err != nil {
@@ -628,7 +654,10 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.OnboardingCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.OAuthRefreshCommand{}); err != nil {
+	if err := registry.Register(servicecommands.OAuthRefreshCommand{
+		CredentialStore: logoutCredentialStore,
+		SettingsWriter:  logoutSettingsWriter,
+	}); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.IssueCommand{}); err != nil {
@@ -1002,6 +1031,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
 		runtime.EnablePromptCaching = cfg.EnablePromptCaching
+		runtime.Source = "repl_main_thread"
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
@@ -1158,6 +1188,24 @@ func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.P
 		prompts.ScratchpadSection{},
 		prompts.FunctionResultClearingSection{},
 		prompts.ToolResultsReminderSection{},
+		prompts.NotebookEditPromptSection{},
+		prompts.WorktreePromptSection{},
+		prompts.TodoV2PromptSection{},
+		prompts.CronPromptSection{},
+		prompts.TeamPromptSection{},
+		prompts.AskUserQuestionPromptSection{},
+		prompts.PlanModePromptSection{},
+		prompts.SendMessagePromptSection{},
+		prompts.RemoteTriggerPromptSection{},
+		prompts.WebSearchPromptSection{},
+		prompts.SkillPromptSection{},
+		prompts.ToolSearchPromptSection{},
+		prompts.MCPResourcePromptSection{},
+		prompts.LSPPromptSection{},
+		prompts.ConfigPromptSection{},
+		prompts.BriefToolPromptSection{},
+		prompts.SleepPromptSection{},
+		prompts.TodoWritePromptSection{},
 		prompts.BriefSection{},
 		prompts.ProactiveSection{},
 	)

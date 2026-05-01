@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
 )
 
 func TestAPIErrorIsRetryable(t *testing.T) {
@@ -651,6 +653,105 @@ func TestAPIErrorErrorString(t *testing.T) {
 			got := tt.err.Error()
 			if got != tt.want {
 				t.Errorf("Error() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsImageSizeError(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"image exceeds maximum", "image exceeds 5 MB maximum: 5316852 bytes > 5242880 bytes", true},
+		{"no match", "some other error", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsImageSizeError(tt.msg); got != tt.want {
+				t.Errorf("IsImageSizeError(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsManyImageDimensionError(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"many-image dimension", "image dimensions exceed 2000px for many-image requests", true},
+		{"no match", "some other error", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsManyImageDimensionError(tt.msg); got != tt.want {
+				t.Errorf("IsManyImageDimensionError(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsMediaSizeError(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{"image size", "image exceeds 5 MB maximum", true},
+		{"many-image", "image dimensions exceed 2000px for many-image", true},
+		{"PDF pages", "maximum of 20 PDF pages exceeded", true},
+		{"no match", "some other error", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsMediaSizeError(tt.msg); got != tt.want {
+				t.Errorf("IsMediaSizeError(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCountMediaItems(t *testing.T) {
+	tests := []struct {
+		name string
+		msgs []message.Message
+		want int
+	}{
+		{
+			name: "no media",
+			msgs: []message.Message{
+				{Content: []message.ContentPart{message.TextPart("hello")}},
+			},
+			want: 0,
+		},
+		{
+			name: "one image",
+			msgs: []message.Message{
+				{Content: []message.ContentPart{message.ImagePart("image/jpeg", "abc")}},
+			},
+			want: 1,
+		},
+		{
+			name: "mixed content",
+			msgs: []message.Message{
+				{Content: []message.ContentPart{
+					message.TextPart("hello"),
+					message.ImagePart("image/jpeg", "a"),
+					message.ImagePart("image/png", "b"),
+					{Type: "document"},
+				}},
+			},
+			want: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CountMediaItems(tt.msgs); got != tt.want {
+				t.Errorf("CountMediaItems() = %d, want %d", got, tt.want)
 			}
 		})
 	}

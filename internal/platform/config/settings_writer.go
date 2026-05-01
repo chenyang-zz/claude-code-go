@@ -118,6 +118,48 @@ func (w *SettingsWriter) Set(ctx context.Context, scope, key string, value any) 
 	return writeSettingsDocument(path, doc)
 }
 
+// Unset removes a key (and its subtree) from the settings document at the
+// specified scope. The key may be a simple field name or a dotted path.
+// Intermediate maps that become empty after deletion are also removed.
+func (w *SettingsWriter) Unset(ctx context.Context, scope, key string) error {
+	_ = ctx
+
+	path, err := w.resolvePath(scope)
+	if err != nil {
+		return err
+	}
+
+	doc, err := loadSettingsDocument(path)
+	if err != nil {
+		return err
+	}
+
+	keyPath := strings.Split(key, ".")
+	if !unsetNestedKey(doc, keyPath) {
+		// Key not found — nothing to do, but we still validate and write
+		// so the call is idempotent.
+	}
+
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("encode settings for validation: %w", err)
+	}
+	result := ValidateSettingsContent(string(encoded))
+	if !result.IsValid {
+		return fmt.Errorf("settings validation failed: %s", result.Error)
+	}
+
+	if len(doc) == 0 {
+		// Document is empty after deletion — remove the file entirely.
+		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("remove empty settings file %s: %w", path, rmErr)
+		}
+		return nil
+	}
+
+	return writeSettingsDocument(path, doc)
+}
+
 // setNestedKey sets a value at a dot-separated key path within a settings document.
 // Intermediate maps are created as needed.
 func setNestedKey(doc map[string]any, path []string, value any) {
@@ -142,6 +184,29 @@ func setNestedKey(doc map[string]any, path []string, value any) {
 		return
 	}
 	setNestedKey(childMap, path[1:], value)
+}
+
+// unsetNestedKey removes a key at a dot-separated path. Returns true if a key
+// was actually deleted.
+func unsetNestedKey(doc map[string]any, path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+	if len(path) == 1 {
+		_, existed := doc[path[0]]
+		delete(doc, path[0])
+		return existed
+	}
+
+	childMap, ok := doc[path[0]].(map[string]any)
+	if !ok {
+		return false
+	}
+	deleted := unsetNestedKey(childMap, path[1:])
+	if deleted && len(childMap) == 0 {
+		delete(doc, path[0])
+	}
+	return deleted
 }
 
 // getNestedValue retrieves a value at a dot-separated key path from a settings document.
