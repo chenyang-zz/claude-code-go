@@ -846,7 +846,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
-	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex, coreconfig.ProviderBedrock:
+	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex, coreconfig.ProviderBedrock, coreconfig.ProviderFoundry:
 		var client model.Client
 		switch coreconfig.NormalizeProvider(cfg.Provider) {
 		case coreconfig.ProviderVertex:
@@ -872,6 +872,19 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				BedrockRegion:   cfg.BedrockRegion,
 				BedrockModelID:  cfg.BedrockModelID,
 				BedrockSkipAuth: cfg.BedrockSkipAuth,
+			})
+		case coreconfig.ProviderFoundry:
+			client = anthropic.NewClient(anthropic.Config{
+				APIKey:          cfg.APIKey,
+				AuthToken:       cfg.AuthToken,
+				BaseURL:         cfg.APIBaseURL,
+				HTTPClient:      nil,
+				IsFirstParty:    false,
+				FoundryEnabled:  true,
+				FoundryResource: cfg.FoundryResource,
+				FoundryBaseURL:  cfg.FoundryBaseURL,
+				FoundryAPIKey:   cfg.FoundryAPIKey,
+				FoundrySkipAuth: cfg.FoundrySkipAuth,
 			})
 		default:
 			client = anthropic.NewClient(anthropic.Config{
@@ -1348,7 +1361,7 @@ func buildStatusProbe(cfg *coreconfig.Config) servicecommands.APIConnectivityPro
 	}
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
-	case coreconfig.ProviderAnthropic:
+	case coreconfig.ProviderAnthropic, coreconfig.ProviderFoundry:
 		return anthropic.NewStatusProbe(anthropic.StatusProbeConfig{})
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		return openai.NewStatusProbe(openai.StatusProbeConfig{

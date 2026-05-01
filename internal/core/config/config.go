@@ -168,6 +168,18 @@ type Config struct {
 	// BedrockSkipAuth bypasses AWS authentication for Bedrock.
 	// Used for testing and proxy scenarios.
 	BedrockSkipAuth bool
+	// FoundryResource is the Azure resource name for Foundry provider.
+	// Used to construct the endpoint: https://{resource}.services.ai.azure.com
+	FoundryResource string
+	// FoundryBaseURL optionally overrides the full base URL for Foundry requests.
+	// When set, it takes precedence over FoundryResource.
+	FoundryBaseURL string
+	// FoundryAPIKey is the API key for Foundry authentication.
+	// When empty, the client falls back to ANTHROPIC_FOUNDRY_API_KEY.
+	FoundryAPIKey string
+	// FoundrySkipAuth bypasses Foundry authentication for testing
+	// and proxy scenarios.
+	FoundrySkipAuth bool
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.

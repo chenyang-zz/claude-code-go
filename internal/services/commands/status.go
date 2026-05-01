@@ -10,6 +10,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -34,6 +35,9 @@ type StatusCommand struct {
 	ToolRegistry coretool.Registry
 	// APIProbe performs provider-specific connectivity checks when available.
 	APIProbe APIConnectivityProber
+	// HealthChecker performs provider health checks for the status summary.
+	// When nil, provider health is omitted from the output.
+	HealthChecker *model.HealthChecker
 	// Stat inspects local filesystem paths so tests can provide stable storage diagnostics.
 	Stat func(string) (os.FileInfo, error)
 	// ReadFile inspects memory files for shared local diagnostics.
@@ -89,6 +93,11 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 	})...)
 	lines = append(lines,
 		fmt.Sprintf("- API connectivity check: %s", apiProbe.Summary),
+	)
+	if healthLines := c.providerHealthStatus(ctx); len(healthLines) > 0 {
+		lines = append(lines, healthLines...)
+	}
+	lines = append(lines,
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),
 		"- Settings status UI: not available in Claude Code Go yet",
 	)
@@ -152,6 +161,22 @@ func (c StatusCommand) apiConnectivityStatus(ctx context.Context) APIConnectivit
 		}
 	}
 	return c.APIProbe.Probe(ctx, c.Config)
+}
+
+// providerHealthStatus queries the HealthChecker and returns formatted status lines.
+func (c StatusCommand) providerHealthStatus(ctx context.Context) []string {
+	if c.HealthChecker == nil {
+		return nil
+	}
+	results := c.HealthChecker.CheckAll(ctx)
+	if len(results) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(results))
+	for _, r := range results {
+		parts = append(parts, fmt.Sprintf("%s=%s", r.Provider, r.Status))
+	}
+	return []string{fmt.Sprintf("- Provider health: %s", strings.Join(parts, ", "))}
 }
 
 // statusToolSummary reports the currently wired tool registry in one stable text line.

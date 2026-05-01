@@ -69,6 +69,25 @@ type Config struct {
 	// BedrockAuth allows tests to inject a mock AWSAuthenticator.
 	// When nil, the client builds a DefaultAWSAuthenticator.
 	BedrockAuth AWSAuthenticator
+	// FoundryEnabled switches the client to Azure Foundry mode.
+	// When true, the client sends requests to the Azure AI Foundry
+	// endpoint instead of the first-party Anthropic API.
+	FoundryEnabled bool
+	// FoundryResource is the Azure resource name for Foundry requests.
+	// Used to construct the endpoint: https://{resource}.services.ai.azure.com
+	FoundryResource string
+	// FoundryBaseURL optionally overrides the full base URL for Foundry requests.
+	// When set, it takes precedence over FoundryResource.
+	FoundryBaseURL string
+	// FoundryAPIKey is the API key for Foundry authentication.
+	// When empty, the client falls back to ANTHROPIC_FOUNDRY_API_KEY.
+	FoundryAPIKey string
+	// FoundrySkipAuth bypasses Foundry authentication. Used for testing
+	// and proxy scenarios.
+	FoundrySkipAuth bool
+	// FoundryAuth allows tests to inject a mock FoundryAuthenticator.
+	// When nil, the client builds a DefaultFoundryAuthenticator.
+	FoundryAuth FoundryAuthenticator
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -99,6 +118,14 @@ type Client struct {
 	bedrockModelID string
 	// bedrockAuth signs requests with AWS Signature V4.
 	bedrockAuth AWSAuthenticator
+	// foundryEnabled switches the client to Azure Foundry mode.
+	foundryEnabled bool
+	// foundryResource is the Azure resource name for Foundry requests.
+	foundryResource string
+	// foundryBaseURL is the full base URL override for Foundry requests.
+	foundryBaseURL string
+	// foundryAuth authenticates Foundry requests with an API key.
+	foundryAuth FoundryAuthenticator
 }
 
 type messagesRequest struct {
@@ -292,6 +319,17 @@ func NewClient(cfg Config) *Client {
 		}
 	}
 
+	if cfg.FoundryEnabled {
+		client.foundryEnabled = true
+		client.foundryResource = cfg.FoundryResource
+		client.foundryBaseURL = cfg.FoundryBaseURL
+		if cfg.FoundryAuth != nil {
+			client.foundryAuth = cfg.FoundryAuth
+		} else {
+			client.foundryAuth = newFoundryAuthenticator(cfg.FoundrySkipAuth, cfg.FoundryAPIKey)
+		}
+	}
+
 	return client
 }
 
@@ -359,6 +397,29 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			httpReq.Header.Set("accept", "application/vnd.amazon.eventstream")
 			if err := c.bedrockAuth.SignRequest(httpReq, region, body); err != nil {
 				return nil, fmt.Errorf("bedrock auth: %w", err)
+			}
+			return httpReq, nil
+		}
+
+		if c.foundryEnabled {
+			baseURL, err := resolveFoundryBaseURL(c.foundryResource, c.foundryBaseURL)
+			if err != nil {
+				return nil, err
+			}
+			// Allow BaseURL override for testing (e.g. httptest server).
+			if c.baseURL != "" && c.baseURL != defaultBaseURL {
+				baseURL = c.baseURL
+			}
+			endpoint = buildFoundryEndpoint(baseURL)
+
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, fmt.Errorf("build foundry request: %w", err)
+			}
+			httpReq.Header.Set("content-type", "application/json")
+			httpReq.Header.Set("accept", "text/event-stream")
+			if err := c.foundryAuth.Authenticate(httpReq); err != nil {
+				return nil, fmt.Errorf("foundry auth: %w", err)
 			}
 			return httpReq, nil
 		}

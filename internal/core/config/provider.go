@@ -13,6 +13,8 @@ const (
 	ProviderVertex = "vertex"
 	// ProviderBedrock identifies the AWS Bedrock runtime provider.
 	ProviderBedrock = "bedrock"
+	// ProviderFoundry identifies the Azure AI Foundry runtime provider.
+	ProviderFoundry = "foundry"
 )
 
 // NormalizeProvider folds provider aliases into the stable runtime provider identifiers.
@@ -28,6 +30,8 @@ func NormalizeProvider(value string) string {
 		return ProviderVertex
 	case ProviderBedrock:
 		return ProviderBedrock
+	case ProviderFoundry:
+		return ProviderFoundry
 	default:
 		return strings.TrimSpace(strings.ToLower(value))
 	}

@@ -57,6 +57,9 @@ type Runtime struct {
 	DefaultModel string
 	// FallbackModel is an optional secondary model used when the primary model fails after exhausting retries.
 	FallbackModel string
+	// FallbackClients is an ordered list of alternate provider clients used when
+	// the primary Client fails. Each client is tried in order after FallbackModel.
+	FallbackClients []model.Client
 	// FallbackAfterAttempts is the number of retry attempts after which fallback is triggered.
 	// Zero (default) means fallback only happens after all retries are exhausted.
 	FallbackAfterAttempts int

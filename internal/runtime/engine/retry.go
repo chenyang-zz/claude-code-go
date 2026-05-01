@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"net"
@@ -133,28 +134,42 @@ type fallbackResult struct {
 	stream model.Stream
 }
 
-// tryFallback attempts to switch to the fallback model when the primary model fails.
-// Returns nil if no fallback is configured or the error is not eligible for fallback.
+// tryFallback attempts to switch to the fallback model or alternate provider
+// client when the primary model fails. Returns nil if no fallback is configured
+// or the error is not eligible for fallback.
 func (e *Runtime) tryFallback(ctx context.Context, req model.Request, primaryErr error) *fallbackResult {
-	if e.FallbackModel == "" {
-		return nil
-	}
 	if !isRetriableError(primaryErr) {
 		return nil
 	}
 
-	fbReq := req
-	fbReq.Model = e.FallbackModel
-
-	stream, err := e.Client.Stream(ctx, fbReq)
-	if err != nil {
-		return nil
+	// 1. Try the in-provider fallback model first (existing behaviour).
+	if e.FallbackModel != "" {
+		fbReq := req
+		fbReq.Model = e.FallbackModel
+		stream, err := e.Client.Stream(ctx, fbReq)
+		if err == nil {
+			return &fallbackResult{
+				model:  e.FallbackModel,
+				stream: stream,
+			}
+		}
 	}
 
-	return &fallbackResult{
-		model:  e.FallbackModel,
-		stream: stream,
+	// 2. Try cross-provider fallback clients in order.
+	for i, client := range e.FallbackClients {
+		if client == nil {
+			continue
+		}
+		stream, err := client.Stream(ctx, req)
+		if err == nil {
+			return &fallbackResult{
+				model:  fmt.Sprintf("fallback-client-%d", i),
+				stream: stream,
+			}
+		}
 	}
+
+	return nil
 }
 
 // shouldFallbackAfterAttempts reports whether fallback should be triggered after
