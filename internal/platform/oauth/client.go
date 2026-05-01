@@ -247,6 +247,11 @@ type RefreshTokenOptions struct {
 	Scopes []string
 	// TokenURL overrides DefaultTokenURL.
 	TokenURL string
+	// ProfileURL, when non-empty, is forwarded to the post-refresh
+	// FetchProfileInfo call so callers can route profile fetches through
+	// the same mock server during tests. When empty DefaultProfileURL is
+	// used by the profile fetch.
+	ProfileURL string
 	// ClientID overrides DefaultClientID.
 	ClientID string
 	// HTTPClient, when non-nil, is used to issue the refresh POST.
