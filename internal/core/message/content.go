@@ -91,3 +91,15 @@ func ImagePart(mediaType, base64Data string) ContentPart {
 		Base64Data: base64Data,
 	}
 }
+
+// DocumentPart builds one document content block for multimodal input,
+// such as a PDF passed inline as base64 alongside the image content blocks.
+// MediaType identifies the document MIME type (e.g., application/pdf) and
+// Base64Data carries the base64-encoded document payload.
+func DocumentPart(mediaType, base64Data string) ContentPart {
+	return ContentPart{
+		Type:       "document",
+		MediaType:  mediaType,
+		Base64Data: base64Data,
+	}
+}
