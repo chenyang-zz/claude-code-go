@@ -1031,6 +1031,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
 		runtime.EnablePromptCaching = cfg.EnablePromptCaching
+		runtime.Source = "repl_main_thread"
 		runtime.ApprovalService = approval.NewPromptingService(
 			cfg.ApprovalMode,
 			console.NewApprovalRenderer(approvalPrinterForConfig(cfg), nil),
