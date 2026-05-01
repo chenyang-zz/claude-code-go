@@ -35,6 +35,23 @@ type Config struct {
 	// Anthropic API (as opposed to Vertex AI or Bedrock). First-party-only
 	// beta headers like task-budgets are only included when true.
 	IsFirstParty bool
+	// VertexEnabled switches the client to Vertex AI mode.
+	// When true, the client sends requests to the Google Cloud Vertex AI
+	// endpoint instead of the first-party Anthropic API.
+	VertexEnabled bool
+	// VertexProjectID is the GCP project ID for Vertex AI requests.
+	// When empty, the client falls back to GCLOUD_PROJECT, GOOGLE_CLOUD_PROJECT,
+	// or ANTHROPIC_VERTEX_PROJECT_ID environment variables.
+	VertexProjectID string
+	// VertexRegion is the GCP region for Vertex AI requests.
+	// When empty, the client falls back to CLOUD_ML_REGION or the default us-east5.
+	VertexRegion string
+	// VertexSkipAuth bypasses Google Cloud authentication. Used for testing
+	// and proxy scenarios.
+	VertexSkipAuth bool
+	// VertexAuth allows tests to inject a mock GoogleAuthenticator.
+	// When nil, the client builds a DefaultGoogleAuthenticator.
+	VertexAuth GoogleAuthenticator
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -49,6 +66,14 @@ type Client struct {
 	httpClient *http.Client
 	// isFirstParty indicates first-party Anthropic API for beta header gating.
 	isFirstParty bool
+	// vertexEnabled switches the client to Vertex AI mode.
+	vertexEnabled bool
+	// vertexProjectID is the GCP project ID for Vertex AI requests.
+	vertexProjectID string
+	// vertexRegion is the GCP region for Vertex AI requests.
+	vertexRegion string
+	// vertexAuth obtains OAuth tokens for Vertex AI authentication.
+	vertexAuth GoogleAuthenticator
 }
 
 type messagesRequest struct {
@@ -203,45 +228,102 @@ func NewClient(cfg Config) *Client {
 		httpClient = http.DefaultClient
 	}
 
-	return &Client{
+	client := &Client{
 		apiKey:       cfg.APIKey,
 		authToken:    cfg.AuthToken,
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		httpClient:   httpClient,
 		isFirstParty: cfg.IsFirstParty,
 	}
+
+	if cfg.VertexEnabled {
+		client.vertexEnabled = true
+		client.vertexProjectID = cfg.VertexProjectID
+		if client.vertexProjectID == "" {
+			client.vertexProjectID = getVertexProjectID()
+		}
+		client.vertexRegion = cfg.VertexRegion
+		if client.vertexRegion == "" {
+			client.vertexRegion = resolveVertexRegion("")
+		}
+		if cfg.VertexAuth != nil {
+			client.vertexAuth = cfg.VertexAuth
+		} else {
+			client.vertexAuth = newGoogleAuthenticator(cfg.VertexSkipAuth)
+		}
+	}
+
+	return client
 }
 
 // Stream opens one Anthropic streaming request and converts SSE payloads into model events.
 func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
-	if c.apiKey == "" && c.authToken == "" {
-		return nil, fmt.Errorf("missing Anthropic auth credential")
-	}
+	var endpoint string
 
 	body, err := json.Marshal(c.buildMessagesRequest(req))
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+	httpReq, err := func() (*http.Request, error) {
+		if c.vertexEnabled {
+			region := c.vertexRegion
+			if req.Model != "" {
+				region = resolveVertexRegion(req.Model)
+			}
+			if c.vertexProjectID == "" {
+				return nil, fmt.Errorf("missing Vertex project ID")
+			}
+			// Allow BaseURL override for testing (e.g., httptest server).
+			host := ""
+			if c.baseURL != "" && c.baseURL != defaultBaseURL {
+				host = c.baseURL
+			}
+			endpoint = buildVertexEndpointWithHost(host, region, c.vertexProjectID, req.Model)
+
+			token, err := c.vertexAuth.GetToken(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("vertex auth: %w", err)
+			}
+
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, fmt.Errorf("build vertex request: %w", err)
+			}
+			httpReq.Header.Set("content-type", "application/json")
+			httpReq.Header.Set("accept", "text/event-stream")
+			httpReq.Header.Set("authorization", "Bearer "+token)
+			return httpReq, nil
+		}
+
+		if c.apiKey == "" && c.authToken == "" {
+			return nil, fmt.Errorf("missing Anthropic auth credential")
+		}
+		endpoint = c.baseURL + "/v1/messages"
+
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("build anthropic request: %w", err)
+		}
+		httpReq.Header.Set("content-type", "application/json")
+		httpReq.Header.Set("accept", "text/event-stream")
+		if c.apiKey != "" {
+			httpReq.Header.Set("x-api-key", c.apiKey)
+		}
+		if c.authToken != "" {
+			httpReq.Header.Set("authorization", "Bearer "+c.authToken)
+		}
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+		// Inject task-budgets beta header when task budget is configured
+		// and this is a first-party Anthropic request.
+		if req.TaskBudget != nil && c.isFirstParty {
+			httpReq.Header.Set("anthropic-beta", taskBudgetsBetaHeader)
+		}
+		return httpReq, nil
+	}()
 	if err != nil {
-		return nil, fmt.Errorf("build anthropic request: %w", err)
-	}
-
-	httpReq.Header.Set("content-type", "application/json")
-	httpReq.Header.Set("accept", "text/event-stream")
-	if c.apiKey != "" {
-		httpReq.Header.Set("x-api-key", c.apiKey)
-	}
-	if c.authToken != "" {
-		httpReq.Header.Set("authorization", "Bearer "+c.authToken)
-	}
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-
-	// Inject task-budgets beta header when task budget is configured
-	// and this is a first-party Anthropic request.
-	if req.TaskBudget != nil && c.isFirstParty {
-		httpReq.Header.Set("anthropic-beta", taskBudgetsBetaHeader)
+		return nil, err
 	}
 
 	logger.DebugCF("anthropic_client", "starting anthropic stream", map[string]any{

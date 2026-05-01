@@ -154,6 +154,13 @@ type Config struct {
 	// cache_control markers to API requests for prompt caching. It defaults to
 	// true and can be disabled via the DISABLE_PROMPT_CACHING environment variable.
 	EnablePromptCaching bool
+	// VertexProjectID is the GCP project ID for Vertex AI provider.
+	VertexProjectID string
+	// VertexRegion is the GCP region for Vertex AI provider.
+	VertexRegion string
+	// VertexSkipAuth bypasses Google Cloud authentication for Vertex AI.
+	// Used for testing and proxy scenarios.
+	VertexSkipAuth bool
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.

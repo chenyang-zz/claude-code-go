@@ -9,6 +9,8 @@ const (
 	ProviderOpenAICompatible = "openai-compatible"
 	// ProviderGLM identifies the GLM-compatible runtime provider alias.
 	ProviderGLM = "glm"
+	// ProviderVertex identifies the Google Cloud Vertex AI runtime provider.
+	ProviderVertex = "vertex"
 )
 
 // NormalizeProvider folds provider aliases into the stable runtime provider identifiers.
@@ -20,6 +22,8 @@ func NormalizeProvider(value string) string {
 		return ProviderOpenAICompatible
 	case "zhipu", "zhipuai", ProviderGLM:
 		return ProviderGLM
+	case ProviderVertex:
+		return ProviderVertex
 	default:
 		return strings.TrimSpace(strings.ToLower(value))
 	}

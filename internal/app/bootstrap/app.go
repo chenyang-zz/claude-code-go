@@ -846,14 +846,29 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
-	case coreconfig.ProviderAnthropic:
-		client := anthropic.NewClient(anthropic.Config{
-			APIKey:       cfg.APIKey,
-			AuthToken:    cfg.AuthToken,
-			BaseURL:      cfg.APIBaseURL,
-			HTTPClient:   nil,
-			IsFirstParty: true,
-		})
+	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex:
+		var client model.Client
+		if coreconfig.NormalizeProvider(cfg.Provider) == coreconfig.ProviderVertex {
+			client = anthropic.NewClient(anthropic.Config{
+				APIKey:          cfg.APIKey,
+				AuthToken:       cfg.AuthToken,
+				BaseURL:         cfg.APIBaseURL,
+				HTTPClient:      nil,
+				IsFirstParty:    false,
+				VertexEnabled:   true,
+				VertexProjectID: cfg.VertexProjectID,
+				VertexRegion:    cfg.VertexRegion,
+				VertexSkipAuth:  cfg.VertexSkipAuth,
+			})
+		} else {
+			client = anthropic.NewClient(anthropic.Config{
+				APIKey:       cfg.APIKey,
+				AuthToken:    cfg.AuthToken,
+				BaseURL:      cfg.APIBaseURL,
+				HTTPClient:   nil,
+				IsFirstParty: true,
+			})
+		}
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
