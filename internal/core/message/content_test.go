@@ -18,6 +18,19 @@ func TestImagePart(t *testing.T) {
 	}
 }
 
+func TestDocumentPart(t *testing.T) {
+	part := DocumentPart("application/pdf", "JVBERi0xLjQK")
+	if part.Type != "document" {
+		t.Errorf("Type = %q, want %q", part.Type, "document")
+	}
+	if part.MediaType != "application/pdf" {
+		t.Errorf("MediaType = %q, want %q", part.MediaType, "application/pdf")
+	}
+	if part.Base64Data != "JVBERi0xLjQK" {
+		t.Errorf("Base64Data = %q, want %q", part.Base64Data, "JVBERi0xLjQK")
+	}
+}
+
 func TestContentPartSerialization(t *testing.T) {
 	cases := []struct {
 		name string
@@ -43,6 +56,11 @@ func TestContentPartSerialization(t *testing.T) {
 			name: "image",
 			part: ImagePart("image/png", "dGVzdA=="),
 			want: `{"type":"image","media_type":"image/png","base64_data":"dGVzdA=="}`,
+		},
+		{
+			name: "document",
+			part: DocumentPart("application/pdf", "JVBERi0xLjQK"),
+			want: `{"type":"document","media_type":"application/pdf","base64_data":"JVBERi0xLjQK"}`,
 		},
 		{
 			name: "thinking",
@@ -74,6 +92,11 @@ func TestContentPartDeserialization(t *testing.T) {
 			name: "image",
 			json: `{"type":"image","media_type":"image/jpeg","base64_data":"abc"}`,
 			want: ImagePart("image/jpeg", "abc"),
+		},
+		{
+			name: "document",
+			json: `{"type":"document","media_type":"application/pdf","base64_data":"xyz"}`,
+			want: DocumentPart("application/pdf", "xyz"),
 		},
 		{
 			name: "text",

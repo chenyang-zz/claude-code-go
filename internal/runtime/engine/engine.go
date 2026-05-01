@@ -1518,8 +1518,16 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 			}
 			content, isError := renderToolResult(outcome.result, outcome.invokeErr)
 			resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(outcome.toolUse.ID, content, isError))
-			if img := toolResultImage(outcome.result); img != nil && !isError {
-				resultMessage.Content = append(resultMessage.Content, message.ImagePart(img.MediaType, img.Base64))
+			if !isError {
+				if img := toolResultImage(outcome.result); img != nil {
+					resultMessage.Content = append(resultMessage.Content, message.ImagePart(img.MediaType, img.Base64))
+				}
+				for _, img := range toolResultImages(outcome.result) {
+					resultMessage.Content = append(resultMessage.Content, message.ImagePart(img.MediaType, img.Base64))
+				}
+				if doc := toolResultDocument(outcome.result); doc != nil {
+					resultMessage.Content = append(resultMessage.Content, message.DocumentPart(doc.MediaType, doc.Base64))
+				}
 			}
 			out <- event.Event{
 				Type:      event.TypeToolCallFinished,
@@ -1804,6 +1812,35 @@ func toolResultImage(result coretool.Result) *coretool.ImageData {
 		return nil
 	}
 	return &img
+}
+
+// toolResultImages extracts a slice of ImageData payloads from a tool result's Meta field.
+// PDF page extraction and notebook output normalization use the "images" key to carry
+// multiple image content blocks in a single tool result so the engine can append each
+// as a separate image content block alongside the tool_result block.
+func toolResultImages(result coretool.Result) []coretool.ImageData {
+	if result.Meta == nil {
+		return nil
+	}
+	imgs, ok := result.Meta["images"].([]coretool.ImageData)
+	if !ok {
+		return nil
+	}
+	return imgs
+}
+
+// toolResultDocument extracts a DocumentData payload from a tool result's Meta field.
+// Inline PDF reading uses the "document" key so the engine can append a document
+// content block (PDF base64) alongside the tool_result block.
+func toolResultDocument(result coretool.Result) *coretool.DocumentData {
+	if result.Meta == nil {
+		return nil
+	}
+	doc, ok := result.Meta["document"].(coretool.DocumentData)
+	if !ok {
+		return nil
+	}
+	return &doc
 }
 
 func (e *Runtime) requestHookApproval(ctx context.Context, call coretool.Call, reason string, out chan<- event.Event) (bool, coretool.Result, error) {

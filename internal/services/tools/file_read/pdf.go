@@ -215,6 +215,7 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 
 		// Build image blocks from extracted pages
 		var imageBlocks []map[string]any
+		var images []coretool.ImageData
 		for _, imgFile := range imageFiles {
 			imgPath := filepath.Join(outputDir, imgFile)
 			imgData, err := os.ReadFile(imgPath)
@@ -233,6 +234,10 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 					"data":       base64Data,
 				},
 			})
+			images = append(images, coretool.ImageData{
+				MediaType: "image/jpeg",
+				Base64:    base64Data,
+			})
 		}
 
 		output := PartsOutput{
@@ -250,9 +255,13 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 			},
 		}
 
-		// Include image blocks as meta message data if any were produced
+		// Include image blocks as meta message data if any were produced.
+		// "image_blocks" is the legacy raw-map representation retained for
+		// backwards-compatible tests; "images" is the typed key consumed by
+		// the runtime engine to inject ImagePart blocks alongside tool_result.
 		if len(imageBlocks) > 0 {
 			result.Meta["image_blocks"] = imageBlocks
+			result.Meta["images"] = images
 		}
 
 		return result, nil
@@ -297,6 +306,7 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 				sort.Strings(imageFiles)
 
 				var imageBlocks []map[string]any
+				var images []coretool.ImageData
 				for _, imgFile := range imageFiles {
 					imgPath := filepath.Join(outputDir, imgFile)
 					imgData, err := os.ReadFile(imgPath)
@@ -311,6 +321,10 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 							"media_type": "image/jpeg",
 							"data":       base64Data,
 						},
+					})
+					images = append(images, coretool.ImageData{
+						MediaType: "image/jpeg",
+						Base64:    base64Data,
 					})
 				}
 
@@ -330,6 +344,7 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 				}
 				if len(imageBlocks) > 0 {
 					result.Meta["image_blocks"] = imageBlocks
+					result.Meta["images"] = images
 				}
 				return result, nil
 			}
@@ -367,7 +382,10 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 		OriginalSize: int(size),
 	}
 
-	// Build document block for meta message
+	// Build document block for meta message.
+	// "document_block" is the legacy raw-map representation retained for
+	// backwards-compatible tests; "document" is the typed key consumed by the
+	// runtime engine to inject a DocumentPart block alongside tool_result.
 	documentBlock := map[string]any{
 		"type": "document",
 		"source": map[string]any{
@@ -382,6 +400,10 @@ func (t *Tool) readPDF(ctx context.Context, filePath string, size int64, pages s
 		Meta: map[string]any{
 			"data":           output,
 			"document_block": documentBlock,
+			"document": coretool.DocumentData{
+				MediaType: "application/pdf",
+				Base64:    base64Data,
+			},
 		},
 	}, nil
 }
