@@ -73,9 +73,24 @@ type streamOptionsBody struct {
 // chatMessage stores one OpenAI-compatible conversation message payload.
 type chatMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
+	Content    any            `json:"content,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolCalls  []toolCallBody `json:"tool_calls,omitempty"`
+}
+
+// chatContentPart stores one element of an OpenAI-compatible structured user content array.
+// OpenAI Chat Completions accepts either a string content or an array of these parts.
+type chatContentPart struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *chatImageURLBody `json:"image_url,omitempty"`
+}
+
+// chatImageURLBody stores the OpenAI Chat Completions image_url object embedded inside a content part.
+// The url field carries either an external URL or a base64 data URL constructed from local image bytes.
+type chatImageURLBody struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // toolEnvelope stores one function tool definition for OpenAI-compatible requests.
@@ -401,11 +416,11 @@ func mapMessages(system string, history []message.Message) []chatMessage {
 	for _, item := range history {
 		switch item.Role {
 		case message.RoleUser:
-			text := collectText(item.Content)
-			if text != "" {
+			content := buildUserContent(item.Content)
+			if content != nil {
 				out = append(out, chatMessage{
 					Role:    string(message.RoleUser),
-					Content: text,
+					Content: content,
 				})
 			}
 			for _, part := range item.Content {
@@ -437,13 +452,77 @@ func mapMessages(system string, history []message.Message) []chatMessage {
 					},
 				})
 			}
-			if assistant.Content != "" || len(assistant.ToolCalls) > 0 {
+			if assistantContentNonEmpty(assistant.Content) || len(assistant.ToolCalls) > 0 {
 				out = append(out, assistant)
 			}
 		}
 	}
 
 	return out
+}
+
+// buildUserContent renders one normalized user message Content slice as the appropriate OpenAI
+// Chat Completions content payload: a string when only text parts are present, or a structured
+// array when image content blocks are mixed in. DocumentPart entries are degraded with a warning
+// because OpenAI Chat Completions does not support PDF document content blocks; the structured
+// array preserves text + image_url ordering for vision-capable models. Returns nil when no
+// renderable content is present so the caller can skip emitting an empty message.
+func buildUserContent(parts []message.ContentPart) any {
+	hasMedia := false
+	for _, part := range parts {
+		if part.Type == "image" || part.Type == "document" {
+			hasMedia = true
+			break
+		}
+	}
+	if !hasMedia {
+		text := collectText(parts)
+		if text == "" {
+			return nil
+		}
+		return text
+	}
+
+	out := make([]chatContentPart, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			if part.Text == "" {
+				continue
+			}
+			out = append(out, chatContentPart{Type: "text", Text: part.Text})
+		case "image":
+			if part.MediaType == "" || part.Base64Data == "" {
+				continue
+			}
+			out = append(out, chatContentPart{
+				Type: "image_url",
+				ImageURL: &chatImageURLBody{
+					URL: fmt.Sprintf("data:%s;base64,%s", part.MediaType, part.Base64Data),
+				},
+			})
+		case "document":
+			logger.WarnCF("openai_client", "OpenAI provider does not support PDF document parts; document was skipped", map[string]any{
+				"media_type": part.MediaType,
+			})
+			continue
+		default:
+			continue
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// assistantContentNonEmpty reports whether one assistant chatMessage Content payload still carries
+// any text after collectText flattening; used by mapMessages to decide whether to emit the message.
+func assistantContentNonEmpty(content any) bool {
+	if s, ok := content.(string); ok {
+		return s != ""
+	}
+	return content != nil
 }
 
 // mapTools converts one normalized tool list into OpenAI-compatible function declarations.

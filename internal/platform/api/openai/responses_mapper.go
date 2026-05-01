@@ -7,6 +7,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 // buildResponsesRequest converts a normalized engine request into an OpenAI
@@ -83,11 +84,11 @@ func mapMessagesToResponsesInput(system string, history []message.Message) []res
 	for _, item := range history {
 		switch item.Role {
 		case message.RoleUser:
-			text := collectText(item.Content)
-			if text != "" {
+			content := buildResponsesUserContent(item.Content)
+			if content != nil {
 				out = append(out, responsesInputItem{
 					Role:    string(message.RoleUser),
-					Content: text,
+					Content: content,
 				})
 			}
 			for _, part := range item.Content {
@@ -124,6 +125,60 @@ func mapMessagesToResponsesInput(system string, history []message.Message) []res
 		}
 	}
 
+	return out
+}
+
+// buildResponsesUserContent renders one normalized user message Content slice as the
+// appropriate Responses API input payload: a string when only text parts are present,
+// or a structured input_text / input_image array when image parts are mixed in.
+// DocumentPart entries are degraded with a warning because the Responses API on its
+// own (without the Files API upload step) does not accept inline PDF document blocks.
+// Returns nil when no renderable content is present so the caller can skip emitting
+// an empty input item.
+func buildResponsesUserContent(parts []message.ContentPart) any {
+	hasMedia := false
+	for _, part := range parts {
+		if part.Type == "image" || part.Type == "document" {
+			hasMedia = true
+			break
+		}
+	}
+	if !hasMedia {
+		text := collectText(parts)
+		if text == "" {
+			return nil
+		}
+		return text
+	}
+
+	out := make([]responsesInputContentPart, 0, len(parts))
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			if part.Text == "" {
+				continue
+			}
+			out = append(out, responsesInputContentPart{Type: "input_text", Text: part.Text})
+		case "image":
+			if part.MediaType == "" || part.Base64Data == "" {
+				continue
+			}
+			out = append(out, responsesInputContentPart{
+				Type:     "input_image",
+				ImageURL: fmt.Sprintf("data:%s;base64,%s", part.MediaType, part.Base64Data),
+			})
+		case "document":
+			logger.WarnCF("openai_responses", "OpenAI Responses API does not support inline PDF document parts; document was skipped (use Files API for full PDF input)", map[string]any{
+				"media_type": part.MediaType,
+			})
+			continue
+		default:
+			continue
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 
