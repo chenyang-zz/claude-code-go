@@ -1120,6 +1120,15 @@ func mapMessages(messages []message.Message, enablePromptCaching bool) []anthrop
 						Data:      part.Base64Data,
 					},
 				})
+			case "document":
+				item.Content = append(item.Content, anthropicContentBlock{
+					Type: "document",
+					Source: &anthropicImageSource{
+						Type:      "base64",
+						MediaType: part.MediaType,
+						Data:      part.Base64Data,
+					},
+				})
 			}
 		}
 		if len(item.Content) == 0 {
