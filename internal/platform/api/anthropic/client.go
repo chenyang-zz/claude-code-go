@@ -52,6 +52,23 @@ type Config struct {
 	// VertexAuth allows tests to inject a mock GoogleAuthenticator.
 	// When nil, the client builds a DefaultGoogleAuthenticator.
 	VertexAuth GoogleAuthenticator
+	// BedrockEnabled switches the client to AWS Bedrock mode.
+	// When true, the client sends requests to the AWS Bedrock Runtime
+	// endpoint instead of the first-party Anthropic API.
+	BedrockEnabled bool
+	// BedrockRegion is the AWS region for Bedrock requests.
+	// When empty, the client falls back to AWS_REGION, AWS_DEFAULT_REGION,
+	// or the default us-east-1.
+	BedrockRegion string
+	// BedrockModelID is the Bedrock model ID override.
+	// When empty, the client maps the canonical model ID using toBedrockModelID.
+	BedrockModelID string
+	// BedrockSkipAuth bypasses AWS authentication. Used for testing
+	// and proxy scenarios.
+	BedrockSkipAuth bool
+	// BedrockAuth allows tests to inject a mock AWSAuthenticator.
+	// When nil, the client builds a DefaultAWSAuthenticator.
+	BedrockAuth AWSAuthenticator
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -74,6 +91,14 @@ type Client struct {
 	vertexRegion string
 	// vertexAuth obtains OAuth tokens for Vertex AI authentication.
 	vertexAuth GoogleAuthenticator
+	// bedrockEnabled switches the client to AWS Bedrock mode.
+	bedrockEnabled bool
+	// bedrockRegion is the AWS region for Bedrock requests.
+	bedrockRegion string
+	// bedrockModelID is the Bedrock model ID for requests.
+	bedrockModelID string
+	// bedrockAuth signs requests with AWS Signature V4.
+	bedrockAuth AWSAuthenticator
 }
 
 type messagesRequest struct {
@@ -253,6 +278,20 @@ func NewClient(cfg Config) *Client {
 		}
 	}
 
+	if cfg.BedrockEnabled {
+		client.bedrockEnabled = true
+		client.bedrockRegion = cfg.BedrockRegion
+		if client.bedrockRegion == "" {
+			client.bedrockRegion = resolveBedrockRegion()
+		}
+		client.bedrockModelID = cfg.BedrockModelID
+		if cfg.BedrockAuth != nil {
+			client.bedrockAuth = cfg.BedrockAuth
+		} else {
+			client.bedrockAuth = newAWSAuthenticator(cfg.BedrockSkipAuth)
+		}
+	}
+
 	return client
 }
 
@@ -293,6 +332,34 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			httpReq.Header.Set("content-type", "application/json")
 			httpReq.Header.Set("accept", "text/event-stream")
 			httpReq.Header.Set("authorization", "Bearer "+token)
+			return httpReq, nil
+		}
+
+		if c.bedrockEnabled {
+			region := c.bedrockRegion
+			modelID := c.bedrockModelID
+			if modelID == "" {
+				modelID = toBedrockModelID(req.Model)
+			}
+			if modelID == "" {
+				return nil, fmt.Errorf("missing Bedrock model ID")
+			}
+			// Allow BaseURL override for testing (e.g., httptest server).
+			host := ""
+			if c.baseURL != "" && c.baseURL != defaultBaseURL {
+				host = c.baseURL
+			}
+			endpoint = buildBedrockEndpointWithHost(host, region, modelID)
+
+			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, fmt.Errorf("build bedrock request: %w", err)
+			}
+			httpReq.Header.Set("content-type", "application/json")
+			httpReq.Header.Set("accept", "application/vnd.amazon.eventstream")
+			if err := c.bedrockAuth.SignRequest(httpReq, region, body); err != nil {
+				return nil, fmt.Errorf("bedrock auth: %w", err)
+			}
 			return httpReq, nil
 		}
 

@@ -846,9 +846,10 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
-	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex:
+	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex, coreconfig.ProviderBedrock:
 		var client model.Client
-		if coreconfig.NormalizeProvider(cfg.Provider) == coreconfig.ProviderVertex {
+		switch coreconfig.NormalizeProvider(cfg.Provider) {
+		case coreconfig.ProviderVertex:
 			client = anthropic.NewClient(anthropic.Config{
 				APIKey:          cfg.APIKey,
 				AuthToken:       cfg.AuthToken,
@@ -860,7 +861,19 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				VertexRegion:    cfg.VertexRegion,
 				VertexSkipAuth:  cfg.VertexSkipAuth,
 			})
-		} else {
+		case coreconfig.ProviderBedrock:
+			client = anthropic.NewClient(anthropic.Config{
+				APIKey:          cfg.APIKey,
+				AuthToken:       cfg.AuthToken,
+				BaseURL:         cfg.APIBaseURL,
+				HTTPClient:      nil,
+				IsFirstParty:    false,
+				BedrockEnabled:  true,
+				BedrockRegion:   cfg.BedrockRegion,
+				BedrockModelID:  cfg.BedrockModelID,
+				BedrockSkipAuth: cfg.BedrockSkipAuth,
+			})
+		default:
 			client = anthropic.NewClient(anthropic.Config{
 				APIKey:       cfg.APIKey,
 				AuthToken:    cfg.AuthToken,

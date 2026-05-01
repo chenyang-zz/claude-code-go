@@ -161,6 +161,13 @@ type Config struct {
 	// VertexSkipAuth bypasses Google Cloud authentication for Vertex AI.
 	// Used for testing and proxy scenarios.
 	VertexSkipAuth bool
+	// BedrockRegion is the AWS region for Bedrock provider.
+	BedrockRegion string
+	// BedrockModelID is the Bedrock model ID override.
+	BedrockModelID string
+	// BedrockSkipAuth bypasses AWS authentication for Bedrock.
+	// Used for testing and proxy scenarios.
+	BedrockSkipAuth bool
 }
 
 // PolicySettingsOrigin identifies the highest-priority managed settings origin currently represented in the Go host.

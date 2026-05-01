@@ -11,6 +11,8 @@ const (
 	ProviderGLM = "glm"
 	// ProviderVertex identifies the Google Cloud Vertex AI runtime provider.
 	ProviderVertex = "vertex"
+	// ProviderBedrock identifies the AWS Bedrock runtime provider.
+	ProviderBedrock = "bedrock"
 )
 
 // NormalizeProvider folds provider aliases into the stable runtime provider identifiers.
@@ -24,6 +26,8 @@ func NormalizeProvider(value string) string {
 		return ProviderGLM
 	case ProviderVertex:
 		return ProviderVertex
+	case ProviderBedrock:
+		return ProviderBedrock
 	default:
 		return strings.TrimSpace(strings.ToLower(value))
 	}
