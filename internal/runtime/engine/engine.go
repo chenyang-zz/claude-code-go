@@ -1518,6 +1518,9 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 			}
 			content, isError := renderToolResult(outcome.result, outcome.invokeErr)
 			resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(outcome.toolUse.ID, content, isError))
+			if img := toolResultImage(outcome.result); img != nil && !isError {
+				resultMessage.Content = append(resultMessage.Content, message.ImagePart(img.MediaType, img.Base64))
+			}
 			out <- event.Event{
 				Type:      event.TypeToolCallFinished,
 				Timestamp: time.Now(),
@@ -1787,6 +1790,20 @@ func toolAdditionalContext(result coretool.Result) string {
 	}
 	additionalContext, _ := result.Meta[additionalContextMetaKey].(string)
 	return additionalContext
+}
+
+// toolResultImage extracts an ImageData payload from a tool result's Meta field.
+// When a tool (e.g. FileReadTool) produces image output, it stores a coretool.ImageData
+// under the "image" key so the engine can append an image content block.
+func toolResultImage(result coretool.Result) *coretool.ImageData {
+	if result.Meta == nil {
+		return nil
+	}
+	img, ok := result.Meta["image"].(coretool.ImageData)
+	if !ok {
+		return nil
+	}
+	return &img
 }
 
 func (e *Runtime) requestHookApproval(ctx context.Context, call coretool.Call, reason string, out chan<- event.Event) (bool, coretool.Result, error) {

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sheepzhao/claude-code-go/internal/core/message"
 )
 
 // APIErrorType represents the Anthropic API error.type field values.
@@ -260,4 +262,41 @@ func IsFatalStatusCode(statusCode int) bool {
 	default:
 		return false
 	}
+}
+
+// IsImageSizeError returns true when the API error message indicates a single
+// image exceeds the maximum allowed size.
+func IsImageSizeError(msg string) bool {
+	return strings.Contains(msg, "image exceeds") && strings.Contains(msg, "maximum")
+}
+
+// IsManyImageDimensionError returns true when the API error message indicates
+// an image exceeds the stricter 2000px dimension limit for many-image requests.
+func IsManyImageDimensionError(msg string) bool {
+	return strings.Contains(msg, "image dimensions exceed") && strings.Contains(msg, "many-image")
+}
+
+// IsMediaSizeError returns true for any media-size rejection including image
+// size, many-image dimensions, or PDF page limits.
+func IsMediaSizeError(msg string) bool {
+	return IsImageSizeError(msg) || IsManyImageDimensionError(msg) ||
+		strings.Contains(msg, "maximum of") && strings.Contains(msg, "PDF pages")
+}
+
+// MaxMediaPerRequest is the maximum number of media items (images + documents)
+// allowed in a single Anthropic API request.
+const MaxMediaPerRequest = 100
+
+// CountMediaItems counts the total number of image and document content blocks
+// across all messages in a request.
+func CountMediaItems(messages []message.Message) int {
+	count := 0
+	for _, msg := range messages {
+		for _, part := range msg.Content {
+			if part.Type == "image" || part.Type == "document" {
+				count++
+			}
+		}
+	}
+	return count
 }

@@ -359,6 +359,9 @@ func (e *StreamingToolExecutor) BuildToolResultMessage() message.Message {
 		}
 		content, isError := renderToolResult(tool.result, tool.invokeErr)
 		resultMessage.Content = append(resultMessage.Content, message.ToolResultPart(tool.toolUse.ID, content, isError))
+		if img := toolResultImage(tool.result); img != nil && !isError {
+			resultMessage.Content = append(resultMessage.Content, message.ImagePart(img.MediaType, img.Base64))
+		}
 	}
 	return resultMessage
 }
