@@ -22,6 +22,10 @@ type ContentPart struct {
 	ToolInput map[string]any `json:"tool_input,omitempty"`
 	// IsError reports whether a tool_result block represents an errored tool execution.
 	IsError bool `json:"is_error,omitempty"`
+	// MediaType stores the MIME type for image content blocks (e.g., image/jpeg).
+	MediaType string `json:"media_type,omitempty"`
+	// Base64Data stores the base64-encoded payload for image content blocks.
+	Base64Data string `json:"base64_data,omitempty"`
 }
 
 // TextPart builds one normalized text content block.
@@ -76,5 +80,14 @@ func RedactedThinkingPart(data string) ContentPart {
 	return ContentPart{
 		Type: "redacted_thinking",
 		Data: data,
+	}
+}
+
+// ImagePart builds one image content block for multimodal input.
+func ImagePart(mediaType, base64Data string) ContentPart {
+	return ContentPart{
+		Type:       "image",
+		MediaType:  mediaType,
+		Base64Data: base64Data,
 	}
 }

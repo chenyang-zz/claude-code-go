@@ -1276,6 +1276,87 @@ func TestClientStreamWebSearchResult(t *testing.T) {
 	}
 }
 
+// TestClientStreamMapsImageMessages verifies image content blocks are correctly
+// serialized into Anthropic image blocks with base64 source.
+func TestClientStreamMapsImageMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+
+		messages, ok := body["messages"].([]any)
+		if !ok || len(messages) != 1 {
+			t.Fatalf("request messages = %#v, want 1 message", body["messages"])
+		}
+
+		msg, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("message = %#v, want object", messages[0])
+		}
+		content, ok := msg["content"].([]any)
+		if !ok || len(content) != 2 {
+			t.Fatalf("message content length = %d, want 2", len(content))
+		}
+
+		textBlock, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("first block = %#v, want object", content[0])
+		}
+		if textBlock["type"] != "text" || textBlock["text"] != "look at this image" {
+			t.Fatalf("text block = %#v", textBlock)
+		}
+
+		imageBlock, ok := content[1].(map[string]any)
+		if !ok {
+			t.Fatalf("second block = %#v, want object", content[1])
+		}
+		if imageBlock["type"] != "image" {
+			t.Fatalf("image block type = %q, want image", imageBlock["type"])
+		}
+		source, ok := imageBlock["source"].(map[string]any)
+		if !ok {
+			t.Fatalf("image source = %#v, want object", imageBlock["source"])
+		}
+		if source["type"] != "base64" {
+			t.Fatalf("source.type = %q, want base64", source["type"])
+		}
+		if source["media_type"] != "image/jpeg" {
+			t.Fatalf("source.media_type = %q, want image/jpeg", source["media_type"])
+		}
+		if source["data"] != "dGVzdA==" {
+			t.Fatalf("source.data = %q, want dGVzdA==", source["data"])
+		}
+
+		w.Header().Set("content-type", "text/event-stream")
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	})
+
+	stream, err := client.Stream(context.Background(), model.Request{
+		Model: "claude-sonnet-4-5",
+		Messages: []message.Message{
+			{
+				Role: message.RoleUser,
+				Content: []message.ContentPart{
+					message.TextPart("look at this image"),
+					message.ImagePart("image/jpeg", "dGVzdA=="),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for range stream {
+	}
+}
+
 // TestClientStreamWebSearchResultError verifies error web_search_tool_result
 // with error_code is properly handled.
 func TestClientStreamWebSearchResultError(t *testing.T) {
