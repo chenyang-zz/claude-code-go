@@ -60,6 +60,13 @@ func classifyOpenAIError(apiErr *APIError) model.ProviderErrorKind {
 		return model.ProviderErrorAuthError
 	case "context_length_exceeded":
 		return model.ProviderErrorInvalidRequest
+	case "invalid_image", "invalid_image_url", "image_url_invalid", "image_parse_error",
+		"unsupported_image", "unsupported_image_format",
+		"image_too_large", "media_size_exceeded", "request_too_large":
+		// Vision input rejections. They are non-retryable invalid requests; the
+		// concrete reason can still be inspected via IsImageSizeError /
+		// IsImageFormatError / IsMediaSizeError on the underlying APIError.
+		return model.ProviderErrorInvalidRequest
 	}
 
 	// Check specific error types — they may have ambiguous status codes

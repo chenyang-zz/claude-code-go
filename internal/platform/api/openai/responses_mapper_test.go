@@ -180,3 +180,111 @@ func TestParseResponsesOutputInvalidJSON(t *testing.T) {
 		t.Error("expected error for invalid JSON arguments")
 	}
 }
+
+// TestResponsesMapperPureText confirms plain text user messages still serialize
+// as a string Content for the Responses API, preserving back-compat.
+func TestResponsesMapperPureText(t *testing.T) {
+	input := mapMessagesToResponsesInput("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("hello"),
+			},
+		},
+	})
+
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %d", len(input))
+	}
+	if s, ok := input[0].Content.(string); !ok || s != "hello" {
+		t.Fatalf("expected string Content \"hello\", got %T %v", input[0].Content, input[0].Content)
+	}
+}
+
+// TestResponsesMapperInputImage verifies a single ImagePart is serialized into
+// the Responses API input_image content part with a string image_url.
+func TestResponsesMapperInputImage(t *testing.T) {
+	input := mapMessagesToResponsesInput("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.ImagePart("image/png", "iVBORw0K"),
+			},
+		},
+	})
+
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %d", len(input))
+	}
+	parts, ok := input[0].Content.([]responsesInputContentPart)
+	if !ok {
+		t.Fatalf("expected []responsesInputContentPart, got %T", input[0].Content)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 content part, got %d", len(parts))
+	}
+	if parts[0].Type != "input_image" {
+		t.Fatalf("expected input_image part, got %q", parts[0].Type)
+	}
+	if got, want := parts[0].ImageURL, "data:image/png;base64,iVBORw0K"; got != want {
+		t.Fatalf("ImageURL = %q, want %q", got, want)
+	}
+}
+
+// TestResponsesMapperMixedTextAndImage verifies text and image parts coexist as
+// a structured input array using input_text + input_image element types.
+func TestResponsesMapperMixedTextAndImage(t *testing.T) {
+	input := mapMessagesToResponsesInput("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("describe:"),
+				message.ImagePart("image/jpeg", "/9j/4AAQ"),
+			},
+		},
+	})
+
+	parts, ok := input[0].Content.([]responsesInputContentPart)
+	if !ok {
+		t.Fatalf("expected []responsesInputContentPart, got %T", input[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0].Type != "input_text" || parts[0].Text != "describe:" {
+		t.Fatalf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "input_image" || parts[1].ImageURL != "data:image/jpeg;base64,/9j/4AAQ" {
+		t.Fatalf("unexpected second part: %+v", parts[1])
+	}
+}
+
+// TestResponsesMapperDocumentDegrade verifies DocumentPart entries are silently
+// skipped (with a logger warning) on the Responses API path while sibling
+// image / text parts continue to render normally.
+func TestResponsesMapperDocumentDegrade(t *testing.T) {
+	input := mapMessagesToResponsesInput("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("PDF preview:"),
+				message.DocumentPart("application/pdf", "JVBERi0x"),
+				message.ImagePart("image/jpeg", "pageOne"),
+			},
+		},
+	})
+
+	parts, ok := input[0].Content.([]responsesInputContentPart)
+	if !ok {
+		t.Fatalf("expected []responsesInputContentPart, got %T", input[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (text + image, document skipped), got %d", len(parts))
+	}
+	if parts[0].Type != "input_text" || parts[0].Text != "PDF preview:" {
+		t.Fatalf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "input_image" || parts[1].ImageURL != "data:image/jpeg;base64,pageOne" {
+		t.Fatalf("unexpected second part: %+v", parts[1])
+	}
+}

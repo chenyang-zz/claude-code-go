@@ -23,9 +23,20 @@ type responsesRequest struct {
 }
 
 // responsesInputItem stores one conversation turn in the Responses API input array.
+// Content accepts either a plain string (back-compat) or a []responsesInputContentPart
+// array when multimodal inputs (input_image) need to be attached.
 type responsesInputItem struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// responsesInputContentPart stores one element of an OpenAI Responses API structured
+// input content array. The Responses API uses input_text / input_image element types,
+// and unlike Chat Completions the image_url field is a plain string (not an object).
+type responsesInputContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 // responsesToolInputItem stores one function call result returned to the model.

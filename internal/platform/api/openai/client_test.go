@@ -377,3 +377,219 @@ func TestClientStreamSendsGLMMaxTokens(t *testing.T) {
 	for range stream {
 	}
 }
+
+// TestMapMessagesPureTextStillString confirms mapMessages preserves the legacy
+// string-form Content for plain-text user messages so existing callers and
+// JSON consumers see no behavior change.
+func TestMapMessagesPureTextStillString(t *testing.T) {
+	out := mapMessages("system", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("hello world"),
+			},
+		},
+	})
+
+	if len(out) != 2 {
+		t.Fatalf("expected 2 messages (system + user), got %d", len(out))
+	}
+	user := out[1]
+	if user.Role != string(message.RoleUser) {
+		t.Fatalf("expected user role, got %q", user.Role)
+	}
+	if s, ok := user.Content.(string); !ok || s != "hello world" {
+		t.Fatalf("expected plain string Content, got %T %v", user.Content, user.Content)
+	}
+}
+
+// TestMapMessagesImageUrlSingle verifies a single ImagePart is serialized into
+// the OpenAI Chat Completions image_url object form with a base64 data URL.
+func TestMapMessagesImageUrlSingle(t *testing.T) {
+	out := mapMessages("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.ImagePart("image/png", "iVBORw0K"),
+			},
+		},
+	})
+
+	if len(out) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(out))
+	}
+	parts, ok := out[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("expected []chatContentPart, got %T", out[0].Content)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 content part, got %d", len(parts))
+	}
+	if parts[0].Type != "image_url" {
+		t.Fatalf("expected image_url part, got %q", parts[0].Type)
+	}
+	if parts[0].ImageURL == nil {
+		t.Fatalf("expected ImageURL body to be non-nil")
+	}
+	if got, want := parts[0].ImageURL.URL, "data:image/png;base64,iVBORw0K"; got != want {
+		t.Fatalf("URL = %q, want %q", got, want)
+	}
+
+	body, err := json.Marshal(out[0])
+	if err != nil {
+		t.Fatalf("Marshal error = %v", err)
+	}
+	if !contains(body, []byte(`"type":"image_url"`)) || !contains(body, []byte(`"image_url":{"url":"data:image/png;base64,iVBORw0K"}`)) {
+		t.Fatalf("unexpected JSON shape: %s", string(body))
+	}
+}
+
+// TestMapMessagesMixedTextAndImage verifies text and image parts coexist as a
+// structured Content array following the original part order.
+func TestMapMessagesMixedTextAndImage(t *testing.T) {
+	out := mapMessages("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("describe this:"),
+				message.ImagePart("image/jpeg", "/9j/4AAQ"),
+			},
+		},
+	})
+
+	if len(out) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(out))
+	}
+	parts, ok := out[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("expected []chatContentPart, got %T", out[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "describe this:" {
+		t.Fatalf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/jpeg;base64,/9j/4AAQ" {
+		t.Fatalf("unexpected second part: %+v", parts[1])
+	}
+}
+
+// TestMapMessagesMultipleImages verifies multiple image parts in one user
+// message are emitted as multiple image_url parts in original order.
+func TestMapMessagesMultipleImages(t *testing.T) {
+	out := mapMessages("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("page summary:"),
+				message.ImagePart("image/jpeg", "page1Data"),
+				message.ImagePart("image/jpeg", "page2Data"),
+				message.ImagePart("image/jpeg", "page3Data"),
+			},
+		},
+	})
+
+	parts, ok := out[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("expected []chatContentPart, got %T", out[0].Content)
+	}
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 parts, got %d", len(parts))
+	}
+	expected := []string{
+		"data:image/jpeg;base64,page1Data",
+		"data:image/jpeg;base64,page2Data",
+		"data:image/jpeg;base64,page3Data",
+	}
+	for i, want := range expected {
+		got := parts[i+1]
+		if got.Type != "image_url" || got.ImageURL == nil || got.ImageURL.URL != want {
+			t.Fatalf("part %d = %+v, want image_url URL=%q", i+1, got, want)
+		}
+	}
+}
+
+// TestMapMessagesDocumentDegradeChatCompletions verifies DocumentPart entries
+// are silently skipped (with a logger warning) while sibling text and image
+// parts continue to render through the OpenAI Chat Completions content array.
+func TestMapMessagesDocumentDegradeChatCompletions(t *testing.T) {
+	out := mapMessages("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart("read this PDF:"),
+				message.DocumentPart("application/pdf", "JVBERi0x"),
+				message.ImagePart("image/jpeg", "fallbackPageData"),
+			},
+		},
+	})
+
+	parts, ok := out[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("expected []chatContentPart, got %T", out[0].Content)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (text + image, document skipped), got %d", len(parts))
+	}
+	if parts[0].Type != "text" || parts[0].Text != "read this PDF:" {
+		t.Fatalf("unexpected first part: %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/jpeg;base64,fallbackPageData" {
+		t.Fatalf("unexpected second part: %+v", parts[1])
+	}
+}
+
+// TestMapMessagesToolResultRouting confirms tool_result parts go to a separate
+// tool-role message while sibling images are attached to the user message.
+func TestMapMessagesToolResultRouting(t *testing.T) {
+	out := mapMessages("", []message.Message{
+		{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.ToolResultPart("call_1", "tool output", false),
+				message.ImagePart("image/png", "afterToolImage"),
+			},
+		},
+	})
+
+	if len(out) != 2 {
+		t.Fatalf("expected 2 messages (user + tool), got %d", len(out))
+	}
+	parts, ok := out[0].Content.([]chatContentPart)
+	if !ok {
+		t.Fatalf("expected user Content to be []chatContentPart, got %T", out[0].Content)
+	}
+	if len(parts) != 1 || parts[0].Type != "image_url" {
+		t.Fatalf("unexpected user parts: %+v", parts)
+	}
+	if out[1].Role != string(message.RoleTool) {
+		t.Fatalf("expected tool role, got %q", out[1].Role)
+	}
+	if s, ok := out[1].Content.(string); !ok || s != "tool output" {
+		t.Fatalf("expected tool string Content, got %T %v", out[1].Content, out[1].Content)
+	}
+	if out[1].ToolCallID != "call_1" {
+		t.Fatalf("ToolCallID = %q, want call_1", out[1].ToolCallID)
+	}
+}
+
+// contains is a tiny byte-slice substring helper used by JSON shape assertions.
+func contains(haystack, needle []byte) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}

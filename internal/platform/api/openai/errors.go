@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -164,6 +165,95 @@ func (e *APIError) IsAuthError() bool {
 	}
 	return e.Status == 401 || e.Status == 403 ||
 		e.Type == ErrorTypeAuthentication || e.Type == ErrorTypePermission
+}
+
+// IsImageSizeError reports whether this error indicates an OpenAI Vision input
+// rejected for being too large (file size exceeds the per-image upload limit).
+// Mirrors the semantics of the Anthropic-side IsImageSizeError introduced in
+// batch-224 so cross-Provider retry / fallback decisions stay consistent.
+func (e *APIError) IsImageSizeError() bool {
+	if e == nil {
+		return false
+	}
+	code := strings.ToLower(e.Code)
+	if code == "image_too_large" || code == "media_size_exceeded" {
+		return true
+	}
+	msg := strings.ToLower(e.Message)
+	return strings.Contains(msg, "image too large") ||
+		strings.Contains(msg, "image is too large") ||
+		strings.Contains(msg, "media size exceeded") ||
+		strings.Contains(msg, "exceeds the maximum allowed size")
+}
+
+// IsImageFormatError reports whether this error indicates an OpenAI Vision input
+// rejected for an unsupported MIME type or malformed image payload (e.g. corrupt
+// base64, unsupported codec, broken image_url).
+func (e *APIError) IsImageFormatError() bool {
+	if e == nil {
+		return false
+	}
+	code := strings.ToLower(e.Code)
+	switch code {
+	case "invalid_image", "invalid_image_url", "image_url_invalid", "image_parse_error",
+		"unsupported_image", "unsupported_image_format":
+		return true
+	}
+	msg := strings.ToLower(e.Message)
+	return strings.Contains(msg, "invalid image") ||
+		strings.Contains(msg, "unsupported image") ||
+		strings.Contains(msg, "could not parse image") ||
+		strings.Contains(msg, "image_url is invalid")
+}
+
+// IsMediaSizeError reports whether this error indicates total media payload (sum
+// of all images / documents) exceeded the per-request budget. Surfaced separately
+// from IsImageSizeError so a multi-image request can decide whether to drop one
+// image or fall back to a smaller variant.
+func (e *APIError) IsMediaSizeError() bool {
+	if e == nil {
+		return false
+	}
+	code := strings.ToLower(e.Code)
+	if code == "media_size_exceeded" || code == "request_too_large" {
+		return true
+	}
+	msg := strings.ToLower(e.Message)
+	return strings.Contains(msg, "request too large") ||
+		strings.Contains(msg, "total media size") ||
+		strings.Contains(msg, "media size limit")
+}
+
+// IsOpenAIImageSizeError reports whether the error chain contains an OpenAI
+// APIError flagged as an image size violation. Provided as a free function so
+// callers operating on `error` values (not concrete *APIError) can check the
+// condition without manual unwrapping.
+func IsOpenAIImageSizeError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.IsImageSizeError()
+}
+
+// IsOpenAIImageFormatError reports whether the error chain contains an OpenAI
+// APIError flagged as an image format / payload violation.
+func IsOpenAIImageFormatError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.IsImageFormatError()
+}
+
+// IsOpenAIMediaSizeError reports whether the error chain contains an OpenAI
+// APIError flagged as a total media payload size violation.
+func IsOpenAIMediaSizeError(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.IsMediaSizeError()
 }
 
 // openaiErrorBody is the wire-format error response from the OpenAI API.
