@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -88,6 +90,14 @@ type Config struct {
 	// FoundryAuth allows tests to inject a mock FoundryAuthenticator.
 	// When nil, the client builds a DefaultFoundryAuthenticator.
 	FoundryAuth FoundryAuthenticator
+
+	// TokenRefresher, when non-nil, enables OAuth credential auto-refresh
+	// for first-party Anthropic requests. The client invokes MaybeRefresh
+	// before each request so credentials within OAuthRefreshBuffer of expiry
+	// are rotated transparently, and reacts to HTTP 401 responses by
+	// calling Refresh + retrying the request once. When nil the client
+	// behaves exactly as in batch-218/219 (no auto-refresh).
+	TokenRefresher *oauth.TokenRefresher
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -126,6 +136,9 @@ type Client struct {
 	foundryBaseURL string
 	// foundryAuth authenticates Foundry requests with an API key.
 	foundryAuth FoundryAuthenticator
+	// tokenRefresher coordinates OAuth credential refresh for first-party
+	// Anthropic requests. nil disables auto-refresh.
+	tokenRefresher *oauth.TokenRefresher
 }
 
 type messagesRequest struct {
@@ -288,11 +301,12 @@ func NewClient(cfg Config) *Client {
 	}
 
 	client := &Client{
-		apiKey:       cfg.APIKey,
-		authToken:    cfg.AuthToken,
-		baseURL:      strings.TrimRight(baseURL, "/"),
-		httpClient:   httpClient,
-		isFirstParty: cfg.IsFirstParty,
+		apiKey:         cfg.APIKey,
+		authToken:      cfg.AuthToken,
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		httpClient:     httpClient,
+		isFirstParty:   cfg.IsFirstParty,
+		tokenRefresher: cfg.TokenRefresher,
 	}
 
 	if cfg.VertexEnabled {
@@ -340,6 +354,35 @@ func NewClient(cfg Config) *Client {
 	return client
 }
 
+// isOAuthAutoRefreshEnabled reports whether the client should perform OAuth
+// preemptive / reactive refresh for the upcoming request. The hooks only
+// engage for first-party Anthropic OAuth traffic — third-party providers
+// (Vertex/Bedrock/Foundry) and pure api-key requests skip them entirely.
+func (c *Client) isOAuthAutoRefreshEnabled() bool {
+	if c.tokenRefresher == nil {
+		return false
+	}
+	if c.vertexEnabled || c.bedrockEnabled || c.foundryEnabled {
+		return false
+	}
+	return true
+}
+
+// wrapOAuthRefreshFailure normalises any OAuth refresh-time error into a
+// model.ProviderError so the runtime engine treats it as an authentication
+// failure (terminal, not retryable). When the underlying error already
+// chains ErrOAuthRefreshFailed it is preserved verbatim so callers can
+// errors.Is against the sentinel.
+func (c *Client) wrapOAuthRefreshFailure(err error) error {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, oauth.ErrOAuthRefreshFailed) {
+		err = fmt.Errorf("%w: %s", oauth.ErrOAuthRefreshFailed, err.Error())
+	}
+	return model.WrapProviderError(model.ProviderErrorAuthError, "anthropic", http.StatusUnauthorized, err)
+}
+
 // Stream opens one Anthropic streaming request and converts SSE payloads into model events.
 func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
 	var endpoint string
@@ -353,7 +396,28 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
 
-	httpReq, err := func() (*http.Request, error) {
+	// accessToken tracks the bearer token used for the current attempt.
+	// First-party Anthropic OAuth requests may rotate this value during the
+	// request via the TokenRefresher hook (preemptive refresh) and after a
+	// 401 response (reactive refresh + single retry). Non-OAuth code paths
+	// (Vertex/Bedrock/Foundry/api-key) ignore it entirely.
+	accessToken := c.authToken
+
+	// Preemptive refresh: when an OAuth refresher is configured and the
+	// stored credentials are within OAuthRefreshBuffer of expiry, rotate
+	// before sending so we do not waste a round trip on an about-to-fail
+	// access token.
+	if c.isOAuthAutoRefreshEnabled() {
+		refreshed, refErr := c.tokenRefresher.MaybeRefresh(ctx)
+		if refErr != nil {
+			return nil, c.wrapOAuthRefreshFailure(refErr)
+		}
+		if refreshed != nil && refreshed.AccessToken != "" {
+			accessToken = refreshed.AccessToken
+		}
+	}
+
+	buildRequest := func(currentAccessToken string) (*http.Request, error) {
 		if c.vertexEnabled {
 			region := c.vertexRegion
 			if req.Model != "" {
@@ -435,7 +499,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			return httpReq, nil
 		}
 
-		if c.apiKey == "" && c.authToken == "" {
+		if c.apiKey == "" && currentAccessToken == "" {
 			return nil, model.WrapProviderError(model.ProviderErrorAuthError, "anthropic", 0, fmt.Errorf("missing Anthropic auth credential"))
 		}
 		endpoint = c.baseURL + "/v1/messages"
@@ -449,8 +513,8 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		if c.apiKey != "" {
 			httpReq.Header.Set("x-api-key", c.apiKey)
 		}
-		if c.authToken != "" {
-			httpReq.Header.Set("authorization", "Bearer "+c.authToken)
+		if currentAccessToken != "" {
+			httpReq.Header.Set("authorization", "Bearer "+currentAccessToken)
 		}
 		httpReq.Header.Set("anthropic-version", "2023-06-01")
 
@@ -460,7 +524,9 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			httpReq.Header.Set("anthropic-beta", taskBudgetsBetaHeader)
 		}
 		return httpReq, nil
-	}()
+	}
+
+	httpReq, err := buildRequest(accessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -474,6 +540,33 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("execute anthropic request: %w", err)
+	}
+
+	// Reactive 401 refresh + single retry. We close the original response
+	// body, request a refresh, and replay the request once with the new
+	// access token. Subsequent failures fall through to the regular error
+	// handling so the caller sees the unauthorized response.
+	if resp.StatusCode == http.StatusUnauthorized && c.isOAuthAutoRefreshEnabled() && accessToken != "" {
+		_ = resp.Body.Close()
+
+		refreshed, refErr := c.tokenRefresher.Refresh(ctx, accessToken)
+		if refErr != nil {
+			return nil, c.wrapOAuthRefreshFailure(refErr)
+		}
+		if refreshed == nil || refreshed.AccessToken == "" {
+			return nil, c.wrapOAuthRefreshFailure(fmt.Errorf("oauth refresh returned empty access token"))
+		}
+		accessToken = refreshed.AccessToken
+
+		retryReq, err := buildRequest(accessToken)
+		if err != nil {
+			return nil, err
+		}
+		retryResp, err := c.httpClient.Do(retryReq)
+		if err != nil {
+			return nil, fmt.Errorf("execute anthropic request (after oauth refresh): %w", err)
+		}
+		resp = retryResp
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
