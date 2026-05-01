@@ -275,6 +275,7 @@ func (s *OAuthService) Refresh(ctx context.Context, refreshToken string, opts Re
 	// OAuthTokens with the refreshed access/refresh tokens.
 	profileInfo, profileErr := FetchProfileInfo(ctx, FetchProfileInfoOptions{
 		AccessToken: tokenResp.AccessToken,
+		ProfileURL:  opts.ProfileURL,
 		HTTPClient:  opts.HTTPClient,
 	})
 	if profileErr != nil {
