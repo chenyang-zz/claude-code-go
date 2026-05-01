@@ -130,3 +130,76 @@ type Client interface {
 3. **健康探测复用现有 HTTP client** — 各 provider 已有 `HTTPClient` 配置，probe 直接使用
 4. **Provider 优先级由 bootstrap 配置决定** — 默认只有一个 provider 激活，fallback 列表由配置扩展
 5. **不修改 `model.Client` 接口** — 保持接口稳定，跨 provider 切换在 Engine 层通过多 client 管理实现
+
+---
+
+## §4 实现细节
+
+### 4.1 阶段 2：Provider 健康探测基础设施
+
+**`core/model/provider_health.go`**（新建，~95 行）：
+- `HealthStatus` 枚举 — `healthy` / `degraded` / `unhealthy` / `unknown` / `not_configured`
+- `HealthResult` 结构体 — Provider + Status + Message + CheckedAt
+- `ProviderHealth` 接口 — `Check(ctx) HealthResult`
+- `HealthChecker` 结构体 — 注册表 + `CheckAll(ctx)` 并发探测 + `Get(provider)` 查询
+- 6 个单元测试全部通过
+
+**`platform/api/anthropic/health_probe.go`**（新建，~200 行）：
+- `anthropicHealthProbe` — HTTP GET `/v1/messages`，3 秒超时，x-api-key / auth-token / anthropic-version 头
+- `vertexHealthProbe` — HTTP GET `aiplatform.googleapis.com/v1/projects/{projectId}/locations/{region}`，GoogleAuthenticator token 注入
+- `bedrockHealthProbe` — HTTP HEAD `bedrock-runtime.{region}.amazonaws.com`，接受 403 作为可达信号（unsigned probe）
+- `foundryHealthProbe` — HTTP GET `{baseURL}/anthropic/v1/messages`，api-key 头
+- `RegisterHealthProbes(hc, cfg, httpClient)` — 根据 provider 配置自动注册对应 probe
+- 10 个单元测试全部通过
+
+**`platform/api/openai/health_probe.go`**（新建，~60 行）：
+- `openAIHealthProbe` — HTTP GET `{baseURL}{chatPath}`，authorization Bearer 头
+- `RegisterHealthProbes(hc, cfg, httpClient)` — 为 OpenAI-compatible / GLM provider 注册
+- 5 个单元测试全部通过
+
+### 4.2 阶段 3：跨 Provider Fallback 决策引擎与集成
+
+**`runtime/engine/engine.go`**（修改）：
+- `Runtime` 结构体新增 `FallbackClients []model.Client` 字段
+- 向后兼容：原有 `FallbackModel` 行为不变
+
+**`runtime/engine/retry.go`**（修改，`tryFallback` 方法）：
+- 步骤 1：尝试现有 `FallbackModel`（同 Client 切换 Model）
+- 步骤 2：按顺序尝试 `FallbackClients`（跨 provider 切换 Client）
+- 跳过 nil client，避免 panic
+- 7 个单元测试全部通过
+
+**`services/commands/status.go`**（修改）：
+- `StatusCommand` 新增 `HealthChecker *model.HealthChecker` 字段（可选）
+- 新增 `providerHealthStatus(ctx)` 方法 — 调用 `CheckAll` 并格式化为 `- Provider health: anthropic=healthy, openai-compatible=unhealthy`
+- `Execute` 在 API connectivity 行后插入 provider health 行（仅当 HealthChecker 非 nil 时）
+- 4 个单元测试全部通过
+
+### 4.3 阶段 4：验证结果
+
+| 验证项 | 方式 | 结果 |
+|--------|------|------|
+| `go build ./...` | 全量编译 | 零错误 |
+| `go test ./... -count=1` | 全量测试 | 86+ 包全部通过，零回归 |
+| 新增测试 | `go test ./internal/core/model/... ./internal/platform/api/anthropic/... ./internal/platform/api/openai/... ./internal/runtime/engine/... ./internal/services/commands/...` | 25+ 新增测试全部通过 |
+
+### 4.4 新增文件清单
+
+| 文件 | 行数 | 说明 |
+|------|------|------|
+| `internal/core/model/provider_health.go` | ~95 | ProviderHealth 接口 + HealthChecker |
+| `internal/core/model/provider_health_test.go` | ~80 | HealthChecker 单元测试 |
+| `internal/platform/api/anthropic/health_probe.go` | ~200 | 4 个 provider 健康探测实现 |
+| `internal/platform/api/anthropic/health_probe_test.go` | ~130 | 4 个 provider probe 测试 |
+| `internal/platform/api/openai/health_probe.go` | ~60 | OpenAI 健康探测实现 |
+| `internal/platform/api/openai/health_probe_test.go` | ~70 | OpenAI probe 测试 |
+| `internal/runtime/engine/fallback_test.go` | ~140 | tryFallback 跨 provider 测试 |
+| `internal/services/commands/status_health_test.go` | ~80 | status 健康摘要测试 |
+
+### 4.5 修改文件清单
+
+| 文件 | 修改点 |
+|------|--------|
+| `internal/runtime/engine/engine.go` | Runtime 新增 `FallbackClients []model.Client` |
+| `internal/runtime/engine/retry.go` | `tryFallback` 扩展为先 FallbackModel 后 FallbackClients；新增 `fmt` 导入 |
+| `internal/services/commands/status.go` | 新增 `HealthChecker` 字段 + `providerHealthStatus` 方法 + `model` 导入 |

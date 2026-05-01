@@ -32,6 +32,9 @@ type HealthResult struct {
 	Message string
 	// CheckedAt is the time the check was performed.
 	CheckedAt time.Time
+	// ErrorKind is the classified error type when the check failed.
+	// Empty when the check succeeded or the error could not be classified.
+	ErrorKind ProviderErrorKind
 }
 
 // ProviderHealth is implemented by components that can check the runtime

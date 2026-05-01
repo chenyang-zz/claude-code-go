@@ -135,14 +135,17 @@ var runtimeProviderManagedPrefixes = []string{
 }
 
 // buildRuntimeSettingsEnv composes the settings-sourced environment visible to the Go runtime.
-func buildRuntimeSettingsEnv(sourceEnvs map[SettingSource]map[string]string, hostManagedProvider bool) map[string]string {
+// When trustAccepted is true, project/local settings env vars are applied without the safe-only restriction.
+func buildRuntimeSettingsEnv(sourceEnvs map[SettingSource]map[string]string, hostManagedProvider bool, trustAccepted bool) map[string]string {
 	merged := map[string]string{}
 	for _, source := range []SettingSource{
 		SettingSourceUserSettings,
 		SettingSourceProjectSettings,
 		SettingSourceLocalSettings,
 	} {
-		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, source == SettingSourceProjectSettings || source == SettingSourceLocalSettings)
+		// For project/local sources: restrict to safe env vars unless the workspace is trusted.
+		safeOnly := (source == SettingSourceProjectSettings || source == SettingSourceLocalSettings) && !trustAccepted
+		mergeRuntimeEnvLayer(merged, sourceEnvs[source], hostManagedProvider, safeOnly)
 	}
 	for _, source := range []SettingSource{
 		SettingSourcePolicySettings,

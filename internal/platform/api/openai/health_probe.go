@@ -74,6 +74,7 @@ func (p *openAIHealthProbe) Check(ctx context.Context) model.HealthResult {
 			Status:    model.HealthStatusUnhealthy,
 			Message:   fmt.Sprintf("unreachable (%v)", err),
 			CheckedAt: time.Now(),
+			ErrorKind: model.ProviderErrorNetworkError,
 		}
 	}
 	defer resp.Body.Close()
@@ -87,6 +88,23 @@ func (p *openAIHealthProbe) Check(ctx context.Context) model.HealthResult {
 		Status:    status,
 		Message:   fmt.Sprintf("reachable (HTTP %d from %s)", resp.StatusCode, path),
 		CheckedAt: time.Now(),
+		ErrorKind: openaiHealthErrorKind(resp.StatusCode),
+	}
+}
+
+// openaiHealthErrorKind maps an HTTP status code to a ProviderErrorKind.
+func openaiHealthErrorKind(statusCode int) model.ProviderErrorKind {
+	switch statusCode {
+	case 401, 403:
+		return model.ProviderErrorAuthError
+	case 429:
+		return model.ProviderErrorRateLimit
+	case 408:
+		return model.ProviderErrorTimeout
+	case 500, 502, 503, 504:
+		return model.ProviderErrorServerError
+	default:
+		return model.ProviderErrorUnknown
 	}
 }
 

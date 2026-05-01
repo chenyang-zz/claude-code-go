@@ -58,11 +58,12 @@ import (
 // inside the engine factory so that bootstrap can wire them into downstream
 // components such as the PluginRegistrar.
 type EngineAssembly struct {
-	Engine      engine.Engine
-	Policy      *corepermission.FilesystemPolicy
-	McpRegistry *mcpregistry.ServerRegistry
-	HookRunner  engine.HookRunner
-	Hooks       *hook.HooksConfig
+	Engine         engine.Engine
+	Policy         *corepermission.FilesystemPolicy
+	McpRegistry    *mcpregistry.ServerRegistry
+	HookRunner     engine.HookRunner
+	Hooks          *hook.HooksConfig
+	StatsCollector *model.RuntimeStats
 }
 
 // EngineFactory constructs the engine selected by the resolved runtime config together with the shared filesystem policy.
@@ -102,6 +103,43 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	if err != nil {
 		return nil, err
 	}
+
+	// Workspace trust dialog: prompt the user in interactive sessions when the
+	// current directory has not been explicitly trusted. Untrusted directories
+	// receive only the safe-env subset from project/local settings.
+	if fileLoader, ok := loader.(*platformconfig.FileLoader); ok {
+		trustState, err := platformconfig.LoadTrustState(fileLoader.HomeDir)
+		if err != nil {
+			logger.WarnF("failed to load trust state", map[string]any{"error": err})
+			trustState = platformconfig.NewTrustState()
+		}
+
+		if !platformconfig.IsTrustAccepted(trustState, fileLoader.CWD, fileLoader.HomeDir) {
+			result, shown, err := console.TrustDialog(fileLoader.CWD)
+			if err != nil {
+				return nil, fmt.Errorf("trust dialog: %w", err)
+			}
+			if shown && result == console.TrustResultRejected {
+				return nil, fmt.Errorf("workspace trust declined")
+			}
+			if result == console.TrustResultAccepted {
+				platformconfig.AcceptTrust(trustState, fileLoader.CWD)
+				if err := platformconfig.SaveTrustState(fileLoader.HomeDir, trustState); err != nil {
+					logger.WarnF("failed to save trust state", map[string]any{"error": err})
+				}
+				fileLoader.TrustAccepted = true
+				// Re-load configuration so that project/local env vars are no longer
+				// restricted to the safe-only allowlist.
+				cfg, err = loader.Load(context.Background())
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			fileLoader.TrustAccepted = true
+		}
+	}
+
 	configureConsoleLogging(cfg.OutputFormat)
 	applyRuntimeEnvironment(cfg.Env)
 
@@ -160,7 +198,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	agentRegistry := resolveAgentRegistry(cfg)
 	pluginLoader := plugin.NewPluginLoader(plugin.NewInstalledPluginsStore())
-	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore, agentRegistry, pluginLoader)
+	commandRegistry, err := newCommandRegistry(&cfg, runner, globalSettingsStore, projectSettingsStore, localSettingsStore, policy, backgroundTaskStore, taskStore, agentRegistry, pluginLoader, assembly.StatsCollector)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +299,7 @@ func configureConsoleLogging(outputFormat string) {
 }
 
 // newCommandRegistry wires the minimum slash commands available in the current migration stage.
-func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, agentRegistry agent.Registry, pluginLoader *plugin.PluginLoader) (command.Registry, error) {
+func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSettingsStore *platformconfig.GlobalSettingsStore, projectSettingsStore *platformconfig.ProjectSettingsStore, localSettingsStore *platformconfig.LocalSettingsStore, policy *corepermission.FilesystemPolicy, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, agentRegistry agent.Registry, pluginLoader *plugin.PluginLoader, statsCollector *model.RuntimeStats) (command.Registry, error) {
 	registry := command.NewInMemoryRegistry()
 	var sessionRepository coresession.Repository
 	if runner != nil && runner.SessionManager != nil {
@@ -342,9 +380,10 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.StatusCommand{
-		Config:       dereferenceConfig(cfg),
-		ToolRegistry: statusToolRegistry.Tools,
-		APIProbe:     buildStatusProbe(cfg),
+		Config:         dereferenceConfig(cfg),
+		ToolRegistry:   statusToolRegistry.Tools,
+		APIProbe:       buildStatusProbe(cfg),
+		StatsCollector: statsCollector,
 	}); err != nil {
 		return nil, err
 	}
@@ -778,6 +817,7 @@ func resolveTaskStore(loader coreconfig.Loader, homeDir string) coretask.Store {
 
 // DefaultEngineFactory selects the minimum provider implementation supported by batch-07.
 func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store) (*EngineAssembly, error) {
+	sharedRuntimeStats := &model.RuntimeStats{}
 	filesystem := platformfs.NewLocalFS()
 	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{})
 	if err != nil {
@@ -896,6 +936,8 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			})
 		}
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.StatsCollector = sharedRuntimeStats
+		runtime.StatsCollector = sharedRuntimeStats
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
@@ -931,11 +973,12 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		}
 
 		return &EngineAssembly{
-			Engine:      runtime,
-			Policy:      policy,
-			McpRegistry: mcpServerRegistry,
-			HookRunner:  hookRunner,
-			Hooks:       &runtime.Hooks,
+			Engine:         runtime,
+			Policy:         policy,
+			McpRegistry:    mcpServerRegistry,
+			HookRunner:     hookRunner,
+			Hooks:          &runtime.Hooks,
+			StatsCollector: sharedRuntimeStats,
 		}, nil
 	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
 		var client model.Client
@@ -954,6 +997,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			})
 		}
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		runtime.StatsCollector = sharedRuntimeStats
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
 		runtime.HookRunner = hookRunner
@@ -988,11 +1032,12 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		}
 
 		return &EngineAssembly{
-			Engine:      runtime,
-			Policy:      policy,
-			McpRegistry: mcpServerRegistry,
-			HookRunner:  hookRunner,
-			Hooks:       &runtime.Hooks,
+			Engine:         runtime,
+			Policy:         policy,
+			McpRegistry:    mcpServerRegistry,
+			HookRunner:     hookRunner,
+			Hooks:          &runtime.Hooks,
+			StatsCollector: sharedRuntimeStats,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)

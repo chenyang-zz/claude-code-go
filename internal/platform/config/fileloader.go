@@ -33,6 +33,9 @@ type FileLoader struct {
 	FlagSettingsValue string
 	// AllowedSettingSources optionally restricts which user/project/local disk-backed settings files participate in config loading.
 	AllowedSettingSources []SettingSource
+	// TrustAccepted indicates whether the current workspace has passed the trust dialog.
+	// When true, project/local settings env vars are applied without the safe-only restriction.
+	TrustAccepted bool
 }
 
 type settingsFile struct {
@@ -180,7 +183,7 @@ func (l *FileLoader) Load(ctx context.Context) (coreconfig.Config, error) {
 	cfg.LoadedSettingSources = append([]string(nil), loadedSettingSources...)
 	cfg.SettingOrigins = cloneStringMap(settingOrigins)
 	cfg.ManagedSettingsDir = l.managedSettingsDir()
-	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")))
+	cfg.Env = buildRuntimeSettingsEnv(sourceEnvs, isTruthySettingEnv(l.LookupEnv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")), l.TrustAccepted)
 
 	envLookup := l.runtimeEnvLookup(cfg.Env)
 	envLookupWithSource := l.runtimeEnvLookupWithSource(cfg.Env)

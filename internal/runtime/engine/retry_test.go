@@ -1148,3 +1148,216 @@ func TestRuntimeRunFallbackAfterAttemptsZeroMeansExhausted(t *testing.T) {
 		t.Fatalf("models used = %v, want [primary-model x3, fallback-model]", modelsUsed)
 	}
 }
+
+// TestIsRetriableError_CircuitBreakerOpenError verifies that CircuitBreakerOpenError is classified as retriable.
+func TestIsRetriableError_CircuitBreakerOpenError(t *testing.T) {
+	err := &model.CircuitBreakerOpenError{Provider: "anthropic"}
+	if !isRetriableError(err) {
+		t.Fatal("isRetriableError(CircuitBreakerOpenError) = false, want true")
+	}
+}
+
+// TestIsImmediateFallbackError verifies the immediate fallback classification.
+func TestIsImmediateFallbackError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"circuit breaker open", &model.CircuitBreakerOpenError{Provider: "anthropic"}, true},
+		{"quota exceeded", model.NewProviderError(model.ProviderErrorQuotaExceeded, "openai", 429, "insufficient_quota"), true},
+		{"rate limit", model.NewProviderError(model.ProviderErrorRateLimit, "openai", 429, "rate_limit"), false},
+		{"server error", model.NewProviderError(model.ProviderErrorServerError, "anthropic", 500, "server error"), false},
+		{"network error", errors.New("connection refused"), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isImmediateFallbackError(tt.err)
+			if got != tt.want {
+				t.Errorf("isImmediateFallbackError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtractErrorKind verifies error kind extraction.
+func TestExtractErrorKind(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{model.NewProviderError(model.ProviderErrorQuotaExceeded, "openai", 429, "insufficient_quota"), "quota_exceeded"},
+		{model.NewProviderError(model.ProviderErrorRateLimit, "openai", 429, "rate_limit"), "rate_limit"},
+		{&model.CircuitBreakerOpenError{Provider: "anthropic"}, "circuit_breaker_open"},
+		{errors.New("connection refused"), "network_error"},
+		{errors.New("server error 500"), "http_status"},
+		{errors.New("unknown error"), "unknown"},
+		{nil, ""},
+	}
+	for _, tt := range tests {
+		got := extractErrorKind(tt.err)
+		if got != tt.want {
+			t.Errorf("extractErrorKind(%v) = %q, want %q", tt.err, got, tt.want)
+		}
+	}
+}
+
+// TestRuntimeRun_CircuitBreakerOpenImmediateFallback verifies that breaker open triggers immediate fallback without retry.
+func TestRuntimeRun_CircuitBreakerOpenImmediateFallback(t *testing.T) {
+	var primaryCalls, fallbackCalls int32
+	primaryClient := &fakeModelClient{}
+	primaryClient.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		atomic.AddInt32(&primaryCalls, 1)
+		return nil, &model.CircuitBreakerOpenError{Provider: "primary"}
+	}
+
+	fallbackClient := &fakeModelClient{}
+	fallbackClient.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		atomic.AddInt32(&fallbackCalls, 1)
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "fallback"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(primaryClient, "primary-model", nil)
+	runtime.FallbackClients = []model.Client{fallbackClient}
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    3,
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var fallbackEvt *event.ModelFallbackPayload
+	for evt := range out {
+		if evt.Type == event.TypeModelFallback {
+			p, ok := evt.Payload.(event.ModelFallbackPayload)
+			if ok {
+				fallbackEvt = &p
+			}
+		}
+	}
+
+	if primaryCalls != 1 {
+		t.Fatalf("primary calls = %d, want 1 (no retries before immediate fallback)", primaryCalls)
+	}
+	if fallbackCalls != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fallbackCalls)
+	}
+	if fallbackEvt == nil {
+		t.Fatal("expected TypeModelFallback event")
+	}
+}
+
+// TestRuntimeRun_QuotaExceededImmediateFallback verifies that quota exceeded triggers immediate fallback without retry.
+func TestRuntimeRun_QuotaExceededImmediateFallback(t *testing.T) {
+	var primaryCalls, fallbackCalls int32
+	primaryClient := &fakeModelClient{}
+	primaryClient.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		atomic.AddInt32(&primaryCalls, 1)
+		return nil, model.NewProviderError(model.ProviderErrorQuotaExceeded, "openai", 429, "insufficient_quota")
+	}
+
+	fallbackClient := &fakeModelClient{}
+	fallbackClient.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		atomic.AddInt32(&fallbackCalls, 1)
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "fallback"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(primaryClient, "primary-model", nil)
+	runtime.FallbackClients = []model.Client{fallbackClient}
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    3,
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var fallbackEvt *event.ModelFallbackPayload
+	for evt := range out {
+		if evt.Type == event.TypeModelFallback {
+			p, ok := evt.Payload.(event.ModelFallbackPayload)
+			if ok {
+				fallbackEvt = &p
+			}
+		}
+	}
+
+	if primaryCalls != 1 {
+		t.Fatalf("primary calls = %d, want 1 (no retries before immediate fallback)", primaryCalls)
+	}
+	if fallbackCalls != 1 {
+		t.Fatalf("fallback calls = %d, want 1", fallbackCalls)
+	}
+	if fallbackEvt == nil {
+		t.Fatal("expected TypeModelFallback event")
+	}
+}
+
+// TestRuntimeRunRetryEmitsEvents_WithErrorKind verifies retry events include the ErrorKind field.
+func TestRuntimeRunRetryEmitsEvents_WithErrorKind(t *testing.T) {
+	var attempts int32
+	client := &fakeModelClient{}
+	client.streamFn = func(ctx context.Context, req model.Request) (model.Stream, error) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n <= 2 {
+			return nil, model.NewProviderError(model.ProviderErrorServerError, "anthropic", 529, "overloaded")
+		}
+		return newModelStream(
+			model.Event{Type: model.EventTypeTextDelta, Text: "ok"},
+			model.Event{Type: model.EventTypeDone, StopReason: model.StopReasonEndTurn},
+		), nil
+	}
+
+	runtime := New(client, "claude-sonnet-4-5", nil)
+	runtime.RetryPolicy = RetryPolicy{
+		MaxAttempts:    3,
+		InitialBackoff: 5 * time.Millisecond,
+		MaxBackoff:     20 * time.Millisecond,
+	}
+
+	out, err := runtime.Run(context.Background(), conversation.RunRequest{
+		SessionID: "cli",
+		Input:     "test",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var retryEvents []event.RetryAttemptedPayload
+	for evt := range out {
+		if evt.Type == event.TypeRetryAttempted {
+			p, ok := evt.Payload.(event.RetryAttemptedPayload)
+			if !ok {
+				t.Fatalf("retry payload type = %T", evt.Payload)
+			}
+			retryEvents = append(retryEvents, p)
+		}
+	}
+
+	if len(retryEvents) != 2 {
+		t.Fatalf("retry event count = %d, want 2", len(retryEvents))
+	}
+	if retryEvents[0].ErrorKind != "server_error" {
+		t.Fatalf("retry error kind = %q, want server_error", retryEvents[0].ErrorKind)
+	}
+}

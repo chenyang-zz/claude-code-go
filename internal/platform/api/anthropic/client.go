@@ -360,7 +360,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 
 			token, err := c.vertexAuth.GetToken(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("vertex auth: %w", err)
+				return nil, model.WrapProviderError(model.ProviderErrorAuthError, "vertex", 0, fmt.Errorf("vertex auth: %w", err))
 			}
 
 			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
@@ -396,7 +396,7 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			httpReq.Header.Set("content-type", "application/json")
 			httpReq.Header.Set("accept", "application/vnd.amazon.eventstream")
 			if err := c.bedrockAuth.SignRequest(httpReq, region, body); err != nil {
-				return nil, fmt.Errorf("bedrock auth: %w", err)
+				return nil, model.WrapProviderError(model.ProviderErrorAuthError, "bedrock", 0, fmt.Errorf("bedrock auth: %w", err))
 			}
 			return httpReq, nil
 		}
@@ -419,13 +419,13 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 			httpReq.Header.Set("content-type", "application/json")
 			httpReq.Header.Set("accept", "text/event-stream")
 			if err := c.foundryAuth.Authenticate(httpReq); err != nil {
-				return nil, fmt.Errorf("foundry auth: %w", err)
+				return nil, model.WrapProviderError(model.ProviderErrorAuthError, "foundry", 0, fmt.Errorf("foundry auth: %w", err))
 			}
 			return httpReq, nil
 		}
 
 		if c.apiKey == "" && c.authToken == "" {
-			return nil, fmt.Errorf("missing Anthropic auth credential")
+			return nil, model.WrapProviderError(model.ProviderErrorAuthError, "anthropic", 0, fmt.Errorf("missing Anthropic auth credential"))
 		}
 		endpoint = c.baseURL + "/v1/messages"
 
@@ -468,7 +468,8 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		payload, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("anthropic api error: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(payload)))
+		apiErr := ParseAPIError(resp, payload)
+		return nil, MapAPIError(apiErr)
 	}
 
 	out := make(chan model.Event)

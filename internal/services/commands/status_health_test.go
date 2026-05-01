@@ -31,14 +31,18 @@ func TestProviderHealthStatus_WithResults(t *testing.T) {
 	cmd := StatusCommand{HealthChecker: hc}
 	lines := cmd.providerHealthStatus(context.Background())
 
-	if len(lines) != 1 {
-		t.Fatalf("len(lines) = %d, want 1", len(lines))
+	if len(lines) != 2 {
+		t.Fatalf("len(lines) = %d, want 2", len(lines))
 	}
 	if !strings.Contains(lines[0], "anthropic=healthy") {
 		t.Fatalf("missing anthropic=healthy in %q", lines[0])
 	}
 	if !strings.Contains(lines[0], "openai-compatible=unhealthy") {
 		t.Fatalf("missing openai-compatible=unhealthy in %q", lines[0])
+	}
+	// Second line is the diagnostic hint for the unhealthy provider.
+	if !strings.Contains(lines[1], "openai-compatible") {
+		t.Fatalf("missing diagnostic hint for openai-compatible in %q", lines[1])
 	}
 }
 

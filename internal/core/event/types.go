@@ -67,6 +67,7 @@ type RetryAttemptedPayload struct {
 	MaxAttempts int    `json:"max_attempts"`
 	BackoffMs   int64  `json:"backoff_ms"`
 	Error       string `json:"error"`
+	ErrorKind   string `json:"error_kind,omitempty"`
 }
 
 // ModelFallbackPayload carries information about a model fallback switch.

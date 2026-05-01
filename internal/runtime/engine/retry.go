@@ -71,6 +71,13 @@ func isRetriableError(err error) bool {
 		return retryable.IsRetryable()
 	}
 
+	// Circuit breaker open errors are retriable in the sense that the engine
+	// should attempt fallback rather than surface the error immediately.
+	var cbErr *model.CircuitBreakerOpenError
+	if errors.As(err, &cbErr) {
+		return true
+	}
+
 	msg := err.Error()
 
 	// Network / connection errors.
@@ -138,19 +145,31 @@ type fallbackResult struct {
 // client when the primary model fails. Returns nil if no fallback is configured
 // or the error is not eligible for fallback.
 func (e *Runtime) tryFallback(ctx context.Context, req model.Request, primaryErr error) *fallbackResult {
-	if !isRetriableError(primaryErr) {
+	var cbErr *model.CircuitBreakerOpenError
+	var pErr *model.ProviderError
+	isQuotaExceeded := errors.As(primaryErr, &pErr) && pErr.Kind == model.ProviderErrorQuotaExceeded
+	if !isRetriableError(primaryErr) && !errors.As(primaryErr, &cbErr) && !isQuotaExceeded {
 		return nil
 	}
 
-	// 1. Try the in-provider fallback model first (existing behaviour).
+	// 1. Try the in-provider fallback model first, unless the primary client
+	// itself is circuit-breaker open (the same client would reject again).
 	if e.FallbackModel != "" {
-		fbReq := req
-		fbReq.Model = e.FallbackModel
-		stream, err := e.Client.Stream(ctx, fbReq)
-		if err == nil {
-			return &fallbackResult{
-				model:  e.FallbackModel,
-				stream: stream,
+		skipPrimary := false
+		if cbc, ok := e.Client.(*CircuitBreakerClient); ok {
+			if cbc.Breaker().State() == model.CircuitBreakerOpen {
+				skipPrimary = true
+			}
+		}
+		if !skipPrimary {
+			fbReq := req
+			fbReq.Model = e.FallbackModel
+			stream, err := e.Client.Stream(ctx, fbReq)
+			if err == nil {
+				return &fallbackResult{
+					model:  e.FallbackModel,
+					stream: stream,
+				}
 			}
 		}
 	}
@@ -159,6 +178,12 @@ func (e *Runtime) tryFallback(ctx context.Context, req model.Request, primaryErr
 	for i, client := range e.FallbackClients {
 		if client == nil {
 			continue
+		}
+		// Skip fallback clients whose circuit breaker is open.
+		if cbc, ok := client.(*CircuitBreakerClient); ok {
+			if !cbc.Breaker().CanExecute() {
+				continue
+			}
 		}
 		stream, err := client.Stream(ctx, req)
 		if err == nil {
@@ -179,6 +204,46 @@ func (e *Runtime) shouldFallbackAfterAttempts(attempt int) bool {
 		return false
 	}
 	return attempt >= e.FallbackAfterAttempts
+}
+
+// extractErrorKind returns a human-readable classification string for an error.
+func extractErrorKind(err error) string {
+	if err == nil {
+		return ""
+	}
+	var pErr *model.ProviderError
+	if errors.As(err, &pErr) {
+		return string(pErr.Kind)
+	}
+	var cbErr *model.CircuitBreakerOpenError
+	if errors.As(err, &cbErr) {
+		return "circuit_breaker_open"
+	}
+	if isNetworkError(err) {
+		return "network_error"
+	}
+	msg := err.Error()
+	if httpStatusRe.MatchString(msg) {
+		return "http_status"
+	}
+	return "unknown"
+}
+
+// isImmediateFallbackError reports whether the error should trigger cross-provider
+// fallback immediately, bypassing the normal retry loop.
+func isImmediateFallbackError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var cbErr *model.CircuitBreakerOpenError
+	if errors.As(err, &cbErr) {
+		return true
+	}
+	var pErr *model.ProviderError
+	if errors.As(err, &pErr) && pErr.Kind == model.ProviderErrorQuotaExceeded {
+		return true
+	}
+	return false
 }
 
 // emitEvent sends an event to the channel. The caller (runLoop goroutine) owns the channel

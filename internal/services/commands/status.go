@@ -38,6 +38,12 @@ type StatusCommand struct {
 	// HealthChecker performs provider health checks for the status summary.
 	// When nil, provider health is omitted from the output.
 	HealthChecker *model.HealthChecker
+	// CircuitBreakers maps provider identifiers to their circuit breakers.
+	// When non-empty, breaker states are included in the status output.
+	CircuitBreakers map[string]*model.CircuitBreaker
+	// StatsCollector provides engine-level retry and fallback counters.
+	// When nil, runtime statistics are omitted from the output.
+	StatsCollector *model.RuntimeStats
 	// Stat inspects local filesystem paths so tests can provide stable storage diagnostics.
 	Stat func(string) (os.FileInfo, error)
 	// ReadFile inspects memory files for shared local diagnostics.
@@ -96,6 +102,12 @@ func (c StatusCommand) Execute(ctx context.Context, args command.Args) (command.
 	)
 	if healthLines := c.providerHealthStatus(ctx); len(healthLines) > 0 {
 		lines = append(lines, healthLines...)
+	}
+	if cbLines := c.circuitBreakerStatus(); len(cbLines) > 0 {
+		lines = append(lines, cbLines...)
+	}
+	if statsLines := c.runtimeStatsStatus(); len(statsLines) > 0 {
+		lines = append(lines, statsLines...)
 	}
 	lines = append(lines,
 		fmt.Sprintf("- Tool status checks: %s", toolSummary),
@@ -173,10 +185,101 @@ func (c StatusCommand) providerHealthStatus(ctx context.Context) []string {
 		return nil
 	}
 	parts := make([]string, 0, len(results))
+	hints := make([]string, 0)
 	for _, r := range results {
-		parts = append(parts, fmt.Sprintf("%s=%s", r.Provider, r.Status))
+		part := fmt.Sprintf("%s=%s", r.Provider, r.Status)
+		if r.ErrorKind != "" {
+			part += fmt.Sprintf(" (%s)", r.ErrorKind)
+		}
+		parts = append(parts, part)
+		if hint := healthDiagnosticHint(r); hint != "" {
+			hints = append(hints, hint)
+		}
 	}
-	return []string{fmt.Sprintf("- Provider health: %s", strings.Join(parts, ", "))}
+	lines := []string{fmt.Sprintf("- Provider health: %s", strings.Join(parts, ", "))}
+	if len(hints) > 0 {
+		lines = append(lines, hints...)
+	}
+	return lines
+}
+
+// healthDiagnosticHint returns a human-readable diagnostic hint for a health result.
+func healthDiagnosticHint(r model.HealthResult) string {
+	if r.Status == model.HealthStatusHealthy || r.Status == model.HealthStatusUnknown {
+		return ""
+	}
+	switch r.ErrorKind {
+	case model.ProviderErrorAuthError:
+		return fmt.Sprintf("  ! %s: authentication error — check credentials or run /login", r.Provider)
+	case model.ProviderErrorQuotaExceeded:
+		return fmt.Sprintf("  ! %s: quota exceeded — check billing or switch model", r.Provider)
+	case model.ProviderErrorRateLimit:
+		return fmt.Sprintf("  ! %s: rate limited — retry after a short delay", r.Provider)
+	case model.ProviderErrorServerOverloaded:
+		return fmt.Sprintf("  ! %s: server overloaded — retry after a short delay", r.Provider)
+	case model.ProviderErrorServerError:
+		return fmt.Sprintf("  ! %s: server error — provider may be experiencing issues", r.Provider)
+	case model.ProviderErrorNetworkError:
+		return fmt.Sprintf("  ! %s: network error — check connectivity and proxy settings", r.Provider)
+	case model.ProviderErrorSSLCertError:
+		return fmt.Sprintf("  ! %s: SSL certificate error — check proxy or corporate certificates", r.Provider)
+	case model.ProviderErrorTimeout:
+		return fmt.Sprintf("  ! %s: request timed out — check network connectivity", r.Provider)
+	default:
+		if r.Status == model.HealthStatusUnhealthy {
+			return fmt.Sprintf("  ! %s: unhealthy — check provider configuration", r.Provider)
+		}
+		return ""
+	}
+}
+
+// circuitBreakerStatus formats the current circuit breaker states for the status output.
+func (c StatusCommand) circuitBreakerStatus() []string {
+	if len(c.CircuitBreakers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(c.CircuitBreakers))
+	for k := range c.CircuitBreakers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if cb := c.CircuitBreakers[k]; cb != nil {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, cb.State()))
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("- Circuit breaker: %s", strings.Join(parts, ", "))}
+}
+
+// runtimeStatsStatus formats retry/fallback/circuit-breaker trip counters for the status output.
+func (c StatusCommand) runtimeStatsStatus() []string {
+	retryCount, fallbackCount, _ := c.StatsCollector.Snapshot()
+	if retryCount == 0 && fallbackCount == 0 {
+		return nil
+	}
+	parts := make([]string, 0, 3)
+	if retryCount > 0 {
+		parts = append(parts, fmt.Sprintf("retries=%d", retryCount))
+	}
+	if fallbackCount > 0 {
+		parts = append(parts, fmt.Sprintf("fallbacks=%d", fallbackCount))
+	}
+	if len(c.CircuitBreakers) > 0 {
+		var totalTrips int
+		for _, cb := range c.CircuitBreakers {
+			if cb != nil {
+				totalTrips += cb.TripCount()
+			}
+		}
+		if totalTrips > 0 {
+			parts = append(parts, fmt.Sprintf("cb_trips=%d", totalTrips))
+		}
+	}
+	return []string{fmt.Sprintf("- Runtime resilience: %s", strings.Join(parts, ", "))}
 }
 
 // statusToolSummary reports the currently wired tool registry in one stable text line.

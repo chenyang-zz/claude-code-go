@@ -65,6 +65,9 @@ type Runtime struct {
 	FallbackAfterAttempts int
 	// RetryPolicy controls exponential backoff retry for transient provider errors.
 	RetryPolicy RetryPolicy
+	// StatsCollector tracks retry and fallback counters for observability.
+	// When nil, no statistics are collected.
+	StatsCollector *model.RuntimeStats
 	// ToolCatalog stores the provider-facing tool declarations attached to each request by default.
 	ToolCatalog []model.ToolDefinition
 	// Executor runs normalized tool invocations when the model emits tool_use blocks.
@@ -1250,6 +1253,13 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 		modelStream, connErr := e.Client.Stream(ctx, req)
 		if connErr != nil {
 			lastErr = connErr
+			// Immediate fallback for circuit breaker open or quota exceeded.
+			if isImmediateFallbackError(connErr) {
+				if fb := e.tryFallback(ctx, req, lastErr); fb != nil {
+					return e.runFallback(ctx, req, fb, streamingExec, out)
+				}
+				return streamResult{}, fmt.Errorf("stream failed, immediate fallback not available: %w", lastErr)
+			}
 			if !isRetriableError(connErr) {
 				break
 			}
@@ -1261,6 +1271,9 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 			}
 			if attempt < retries {
 				backoff := e.computeBackoff(connErr, attempt+1, policy)
+				if e.StatsCollector != nil {
+					e.StatsCollector.RecordRetry()
+				}
 				out <- event.Event{
 					Type:      event.TypeRetryAttempted,
 					Timestamp: time.Now(),
@@ -1269,6 +1282,7 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 						MaxAttempts: retries,
 						BackoffMs:   backoff.Milliseconds(),
 						Error:       connErr.Error(),
+						ErrorKind:   extractErrorKind(connErr),
 					},
 				}
 				select {
@@ -1317,6 +1331,9 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 
 		if attempt < retries {
 			backoff := e.computeBackoff(streamErr, attempt+1, policy)
+			if e.StatsCollector != nil {
+				e.StatsCollector.RecordRetry()
+			}
 			out <- event.Event{
 				Type:      event.TypeRetryAttempted,
 				Timestamp: time.Now(),
@@ -1325,6 +1342,7 @@ func (e *Runtime) streamAndConsume(ctx context.Context, req model.Request, out c
 					MaxAttempts: retries,
 					BackoffMs:   backoff.Milliseconds(),
 					Error:       streamErr.Error(),
+					ErrorKind:   extractErrorKind(streamErr),
 				},
 			}
 			select {
@@ -1357,6 +1375,9 @@ func (e *Runtime) computeBackoff(err error, attempt int, policy RetryPolicy) tim
 
 // runFallback executes a fallback model attempt and returns the result.
 func (e *Runtime) runFallback(ctx context.Context, req model.Request, fb *fallbackResult, streamingExec *StreamingToolExecutor, out chan<- event.Event) (streamResult, error) {
+	if e.StatsCollector != nil {
+		e.StatsCollector.RecordFallback()
+	}
 	// Create a fresh streaming executor for the fallback attempt.
 	if streamingExec != nil {
 		streamingExec.Discard()

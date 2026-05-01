@@ -73,6 +73,7 @@ func (p *anthropicHealthProbe) Check(ctx context.Context) model.HealthResult {
 			Status:    model.HealthStatusUnhealthy,
 			Message:   fmt.Sprintf("unreachable (%v)", err),
 			CheckedAt: time.Now(),
+			ErrorKind: healthErrorKind(0, true),
 		}
 	}
 	defer resp.Body.Close()
@@ -86,6 +87,7 @@ func (p *anthropicHealthProbe) Check(ctx context.Context) model.HealthResult {
 		Status:    status,
 		Message:   fmt.Sprintf("reachable (HTTP %d from /v1/messages)", resp.StatusCode),
 		CheckedAt: time.Now(),
+		ErrorKind: healthErrorKind(resp.StatusCode, false),
 	}
 }
 
@@ -168,6 +170,7 @@ func (p *vertexHealthProbe) Check(ctx context.Context) model.HealthResult {
 			Status:    model.HealthStatusUnhealthy,
 			Message:   fmt.Sprintf("unreachable (%v)", err),
 			CheckedAt: time.Now(),
+			ErrorKind: healthErrorKind(0, true),
 		}
 	}
 	defer resp.Body.Close()
@@ -181,6 +184,7 @@ func (p *vertexHealthProbe) Check(ctx context.Context) model.HealthResult {
 		Status:    status,
 		Message:   fmt.Sprintf("reachable (HTTP %d from %s)", resp.StatusCode, endpoint),
 		CheckedAt: time.Now(),
+		ErrorKind: healthErrorKind(resp.StatusCode, false),
 	}
 }
 
@@ -234,6 +238,7 @@ func (p *bedrockHealthProbe) Check(ctx context.Context) model.HealthResult {
 			Status:    model.HealthStatusUnhealthy,
 			Message:   fmt.Sprintf("unreachable (%v)", err),
 			CheckedAt: time.Now(),
+			ErrorKind: healthErrorKind(0, true),
 		}
 	}
 	defer resp.Body.Close()
@@ -250,6 +255,7 @@ func (p *bedrockHealthProbe) Check(ctx context.Context) model.HealthResult {
 		Status:    status,
 		Message:   fmt.Sprintf("reachable (HTTP %d from %s)", resp.StatusCode, endpoint),
 		CheckedAt: time.Now(),
+		ErrorKind: healthErrorKind(resp.StatusCode, false),
 	}
 }
 
@@ -316,6 +322,7 @@ func (p *foundryHealthProbe) Check(ctx context.Context) model.HealthResult {
 			Status:    model.HealthStatusUnhealthy,
 			Message:   fmt.Sprintf("unreachable (%v)", err),
 			CheckedAt: time.Now(),
+			ErrorKind: healthErrorKind(0, true),
 		}
 	}
 	defer resp.Body.Close()
@@ -329,6 +336,29 @@ func (p *foundryHealthProbe) Check(ctx context.Context) model.HealthResult {
 		Status:    status,
 		Message:   fmt.Sprintf("reachable (HTTP %d from %s)", resp.StatusCode, endpoint),
 		CheckedAt: time.Now(),
+		ErrorKind: healthErrorKind(resp.StatusCode, false),
+	}
+}
+
+// healthErrorKind maps an HTTP status code or error condition to a ProviderErrorKind
+// for health probe classification.
+func healthErrorKind(statusCode int, isNetworkError bool) model.ProviderErrorKind {
+	if isNetworkError {
+		return model.ProviderErrorNetworkError
+	}
+	switch statusCode {
+	case 401, 403:
+		return model.ProviderErrorAuthError
+	case 429:
+		return model.ProviderErrorRateLimit
+	case 408:
+		return model.ProviderErrorTimeout
+	case 500, 502, 503, 504:
+		return model.ProviderErrorServerError
+	case 529:
+		return model.ProviderErrorServerOverloaded
+	default:
+		return model.ProviderErrorUnknown
 	}
 }
 
