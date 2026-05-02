@@ -1144,6 +1144,35 @@ func (e *Runtime) RunNotificationHooks(ctx context.Context, message string, titl
 	e.runHooks(ctx, hook.EventNotification, input, cwd)
 }
 
+// RunUserPromptSubmitHooks fires UserPromptSubmit hooks before a user prompt
+// is forwarded to the model. It returns the collected hook results, whether
+// any hook blocked the prompt (exit code 2), and the blocking message
+// contents collected from blocking hook stderr. Callers (typically the REPL)
+// surface blocked=true by formatting `getUserPromptSubmitHookBlockingMessage`
+// and aborting the turn before history is mutated.
+func (e *Runtime) RunUserPromptSubmitHooks(ctx context.Context, prompt string, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventUserPromptSubmit) {
+		return nil, false, nil
+	}
+	input := hook.UserPromptSubmitHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventUserPromptSubmit),
+		Prompt:        prompt,
+	}
+	results = e.runHooks(ctx, hook.EventUserPromptSubmit, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
 // workingDir returns the working directory used for hook execution context.
 func (e *Runtime) workingDir(requestCWD string) string {
 	if e == nil {
