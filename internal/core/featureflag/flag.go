@@ -29,6 +29,10 @@ const (
 	// When enabled, a forked subagent analyzes conversation history after each
 	// complete turn and writes durable memories to the auto-memory directory.
 	FlagExtractMemories = "EXTRACT_MEMORIES"
+	// FlagAutoDream gates the autoDream background memory consolidation.
+	// When enabled, a forked subagent periodically consolidates, deduplicates,
+	// and prunes memory files in the auto-memory directory.
+	FlagAutoDream = "AUTO_DREAM"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

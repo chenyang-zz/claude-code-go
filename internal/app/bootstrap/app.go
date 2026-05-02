@@ -45,6 +45,7 @@ import (
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
+	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
@@ -289,6 +290,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	extractmemories.InitExtractMemories(nil, func(hook extractmemories.PostTurnHookFunc) {
 		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	}, cfg.ProjectPath)
+
+		// Initialize autoDream system (background memory consolidation via forked subagent).
+		autodream.InitAutoDream(nil, func(hook autodream.PostTurnHookFunc) {
+			engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
+		}, cfg.ProjectPath)
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
