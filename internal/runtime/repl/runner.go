@@ -227,8 +227,9 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 
 	// Show a contextual tip before the model responds.
 	if tip := tips.GetTipToShow(); tip != nil {
-		_ = r.Renderer.RenderLine(fmt.Sprintf("💡 %s", tip.Content))
-		tips.OnTipShown(tip)
+		if err := r.Renderer.RenderLine(fmt.Sprintf("💡 %s", tip.Content)); err == nil {
+			tips.OnTipShown(tip)
+		}
 	}
 
 	requestHistory := history.Clone()

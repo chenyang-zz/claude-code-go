@@ -221,7 +221,9 @@ func (s *GlobalSettingsStore) RecordTipShown(tipID string) error {
 
 	history := make(map[string]any)
 	if h, ok := document["tipsHistory"].(map[string]any); ok {
-		history = h
+		if h != nil {
+			history = h
+		}
 	}
 	history[tipID] = numStartups
 	document["tipsHistory"] = history
@@ -242,12 +244,12 @@ func (s *GlobalSettingsStore) RecordTipShown(tipID string) error {
 // Returns an empty map if the field is absent or malformed.
 func (s *GlobalSettingsStore) GetTipsHistory() map[string]int {
 	if s == nil || strings.TrimSpace(s.Path) == "" {
-		return nil
+		return map[string]int{}
 	}
 
 	document, err := loadSettingsDocument(s.Path)
 	if err != nil {
-		return nil
+		return map[string]int{}
 	}
 
 	history := make(map[string]int)

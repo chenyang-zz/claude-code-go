@@ -1,6 +1,7 @@
 package tips
 
 import (
+	"math"
 	"os"
 	"runtime"
 )
@@ -30,7 +31,7 @@ var allTips = []Tip{
 		IsRelevant:       func() bool { return true },
 	},
 	{
-		ID:               "enter-to-steer-in-relatime",
+		ID:               "enter-to-steer-in-realtime",
 		Content:          "Send messages to Claude while it works to steer Claude in real-time",
 		CooldownSessions: 20,
 		IsRelevant:       func() bool { return true },
@@ -116,12 +117,28 @@ var allTips = []Tip{
 // GetRelevantTips returns the subset of tips whose IsRelevant predicate is
 // true and whose cooldown has been satisfied.
 func GetRelevantTips() []Tip {
+	// Snapshot history and startup count once to avoid repeated disk reads
+	// when evaluating each tip's cooldown.
+	history := make(map[string]int)
+	startups := 0
+	if defaultStore != nil {
+		history = defaultStore.GetTipsHistory()
+		startups = defaultStore.GetNumStartups()
+	}
+
 	var relevant []Tip
 	for _, tip := range allTips {
 		if !tip.IsRelevant() {
 			continue
 		}
-		if sessions := GetSessionsSinceLastShown(tip.ID); sessions < tip.CooldownSessions {
+		sessions := math.MaxInt32
+		if lastShown, ok := history[tip.ID]; ok {
+			sessions = startups - lastShown
+			if sessions < 0 {
+				sessions = 0
+			}
+		}
+		if sessions < tip.CooldownSessions {
 			continue
 		}
 		relevant = append(relevant, tip)

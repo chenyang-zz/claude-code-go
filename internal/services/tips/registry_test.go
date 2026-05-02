@@ -1,6 +1,9 @@
 package tips
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 // mockStore is a test double for HistoryStore.
 type mockStore struct {
@@ -101,7 +104,6 @@ func TestGetRelevantTips_DesktopAppPlatformCheck(t *testing.T) {
 	SetHistoryStore(store)
 
 	// desktop-app is relevant when GOOS != "linux"
-	// We can't change runtime.GOOS in tests, so we just verify the tip exists
 	tips := GetRelevantTips()
 	found := false
 	for _, tip := range tips {
@@ -110,6 +112,8 @@ func TestGetRelevantTips_DesktopAppPlatformCheck(t *testing.T) {
 			break
 		}
 	}
-	// On linux this would be false, on darwin/windows true
-	_ = found
+	want := runtime.GOOS != "linux"
+	if found != want {
+		t.Errorf("desktop-app found=%v, want=%v (GOOS=%q)", found, want, runtime.GOOS)
+	}
 }

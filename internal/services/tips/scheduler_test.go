@@ -44,15 +44,14 @@ func TestSelectTipWithLongestTimeSinceShown_LongestWins(t *testing.T) {
 }
 
 func TestGetTipToShowOnSpinner_Disabled(t *testing.T) {
-	// Feature flag not set, env not set - default is enabled so this test
-	// is limited. We test the nil store path instead.
+	// Disable tips via env override.
+	t.Setenv("CLAUDE_CODE_ENABLE_SPINNER_TIPS", "0")
 	SetHistoryStore(nil)
 
 	result := GetTipToShowOnSpinner()
-	// With nil store, numStartups=0, so tips requiring numStartups>5/10 won't show
-	// but tips with no restriction will show. However GetSessionsSinceLastShown
-	// returns MaxInt32 with nil store, so cooldown is always satisfied.
-	_ = result
+	if result != nil {
+		t.Errorf("expected nil when tips disabled, got %v", result)
+	}
 }
 
 func TestGetTipToShowOnSpinner_NoRelevantTips(t *testing.T) {
