@@ -35,12 +35,14 @@ type credentialsBundle struct {
 // persistedOAuthTokens is the JSON shape stored under `claudeAiOauth`. It
 // mirrors the saveOAuthTokensIfNeeded() write set on the TS side.
 type persistedOAuthTokens struct {
-	AccessToken      string   `json:"accessToken"`
-	RefreshToken     string   `json:"refreshToken,omitempty"`
-	ExpiresAt        int64    `json:"expiresAt,omitempty"`
-	Scopes           []string `json:"scopes,omitempty"`
-	SubscriptionType string   `json:"subscriptionType,omitempty"`
-	RateLimitTier    string   `json:"rateLimitTier,omitempty"`
+	AccessToken          string   `json:"accessToken"`
+	RefreshToken         string   `json:"refreshToken,omitempty"`
+	ExpiresAt            int64    `json:"expiresAt,omitempty"`
+	Scopes               []string `json:"scopes,omitempty"`
+	SubscriptionType     string   `json:"subscriptionType,omitempty"`
+	RateLimitTier        string   `json:"rateLimitTier,omitempty"`
+	HasExtraUsageEnabled bool     `json:"hasExtraUsageEnabled,omitempty"`
+	BillingType          string   `json:"billingType,omitempty"`
 }
 
 // MarshalJSON merges the typed claudeAiOauth slot back together with any
@@ -128,12 +130,14 @@ func (s *OAuthCredentialStore) Load() (*OAuthTokens, error) {
 		return nil, nil
 	}
 	tokens := &OAuthTokens{
-		AccessToken:      bundle.ClaudeAIOauth.AccessToken,
-		RefreshToken:     bundle.ClaudeAIOauth.RefreshToken,
-		ExpiresAt:        bundle.ClaudeAIOauth.ExpiresAt,
-		Scopes:           append([]string(nil), bundle.ClaudeAIOauth.Scopes...),
-		SubscriptionType: SubscriptionType(bundle.ClaudeAIOauth.SubscriptionType),
-		RateLimitTier:    RateLimitTier(bundle.ClaudeAIOauth.RateLimitTier),
+		AccessToken:          bundle.ClaudeAIOauth.AccessToken,
+		RefreshToken:         bundle.ClaudeAIOauth.RefreshToken,
+		ExpiresAt:            bundle.ClaudeAIOauth.ExpiresAt,
+		Scopes:               append([]string(nil), bundle.ClaudeAIOauth.Scopes...),
+		SubscriptionType:     SubscriptionType(bundle.ClaudeAIOauth.SubscriptionType),
+		RateLimitTier:        RateLimitTier(bundle.ClaudeAIOauth.RateLimitTier),
+		HasExtraUsageEnabled: bundle.ClaudeAIOauth.HasExtraUsageEnabled,
+		BillingType:          BillingType(bundle.ClaudeAIOauth.BillingType),
 	}
 	return tokens, nil
 }
@@ -178,12 +182,14 @@ func (s *OAuthCredentialStore) Save(tokens *OAuthTokens) (SaveDecision, error) {
 	}
 
 	persisted := &persistedOAuthTokens{
-		AccessToken:      tokens.AccessToken,
-		RefreshToken:     tokens.RefreshToken,
-		ExpiresAt:        tokens.ExpiresAt,
-		Scopes:           append([]string(nil), tokens.Scopes...),
-		SubscriptionType: string(tokens.SubscriptionType),
-		RateLimitTier:    string(tokens.RateLimitTier),
+		AccessToken:          tokens.AccessToken,
+		RefreshToken:         tokens.RefreshToken,
+		ExpiresAt:            tokens.ExpiresAt,
+		Scopes:               append([]string(nil), tokens.Scopes...),
+		SubscriptionType:     string(tokens.SubscriptionType),
+		RateLimitTier:        string(tokens.RateLimitTier),
+		HasExtraUsageEnabled: tokens.HasExtraUsageEnabled,
+		BillingType:          string(tokens.BillingType),
 	}
 	// Three-way fallback for subscription type / rate-limit tier so a refresh
 	// that fails to fetch profile info doesn't blank out previously known
@@ -193,6 +199,15 @@ func (s *OAuthCredentialStore) Save(tokens *OAuthTokens) (SaveDecision, error) {
 	}
 	if persisted.RateLimitTier == "" && bundle.ClaudeAIOauth != nil {
 		persisted.RateLimitTier = bundle.ClaudeAIOauth.RateLimitTier
+	}
+	if persisted.BillingType == "" && bundle.ClaudeAIOauth != nil {
+		persisted.BillingType = bundle.ClaudeAIOauth.BillingType
+	}
+	// HasExtraUsageEnabled defaults to false; only inherit when the incoming
+	// tokens explicitly say false AND the existing record said true. This
+	// avoids dropping the bit on a refresh that didn't refetch the profile.
+	if !tokens.HasExtraUsageEnabled && bundle.ClaudeAIOauth != nil && bundle.ClaudeAIOauth.HasExtraUsageEnabled {
+		persisted.HasExtraUsageEnabled = true
 	}
 	bundle.ClaudeAIOauth = persisted
 
