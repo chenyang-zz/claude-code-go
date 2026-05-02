@@ -45,6 +45,7 @@ import (
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
+	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
@@ -276,6 +277,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		"has_session_db_path": cfg.SessionDBPath != "",
 		"remote_mode":         cfg.RemoteSession.Enabled,
 		"output_format":       cfg.OutputFormat,
+	})
+
+	// Initialize Magic Docs system (detection and tracking; subagent execution wired later).
+	magicdocs.InitMagicDocs(nil, func(hook magicdocs.PostTurnHookFunc) {
+		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	})
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{

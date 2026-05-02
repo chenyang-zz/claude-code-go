@@ -341,6 +341,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	// Build freshness reminders: memory files get their own reminder, all files get change detection.
 	prefix := buildFreshnessPrefix(t.freshnessTracker, filePath, info.ModTime())
 
+	notifyReadListeners(filePath, readResult.content)
+	// Notify read listeners (text-only reads; Magic Docs only cares about markdown).
+
 	return coretool.Result{
 		Output: renderOutput(output, prefix),
 		Meta: map[string]any{

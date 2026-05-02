@@ -894,6 +894,8 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 					logger.DebugCF("engine", "stop hook preventContinuation", map[string]any{
 						"session_id": sessionID,
 					})
+					// Fire post-turn hooks before completing the turn.
+					e.firePostTurnHooks(ctx, cwd, history.Messages)
 					out <- event.Event{
 						Type:      event.TypeConversationDone,
 						Timestamp: time.Now(),
@@ -923,6 +925,8 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 					continue
 				}
 			}
+			// Fire post-turn hooks before completing the turn.
+			e.firePostTurnHooks(ctx, cwd, history.Messages)
 			out <- event.Event{
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),
