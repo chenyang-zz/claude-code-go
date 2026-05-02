@@ -79,6 +79,18 @@ type WorktreeCreateHookInput struct {
 	Name string `json:"name"`
 }
 
+// WorktreeRemoveHookInput is the JSON payload piped to WorktreeRemove event hooks via stdin.
+// Hooks receive this after a git worktree is removed and can observe the removal.
+// This is a non-blocking notification hook (matching TS behavior where failed hooks only
+// log errors and do not prevent cleanup).
+type WorktreeRemoveHookInput struct {
+	BaseHookInput
+	// HookEventName is always "WorktreeRemove".
+	HookEventName string `json:"hook_event_name"`
+	// WorktreePath is the absolute path of the removed worktree.
+	WorktreePath string `json:"worktree_path"`
+}
+
 // StopFailureHookInput is the JSON payload piped to StopFailure event hooks.
 type StopFailureHookInput struct {
 	BaseHookInput

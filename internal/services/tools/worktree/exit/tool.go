@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	worktreeshared "github.com/sheepzhao/claude-code-go/internal/services/tools/worktree/shared"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -14,9 +15,19 @@ const (
 	Name = "ExitWorktree"
 )
 
+// HookDispatcher dispatches hook events for worktree lifecycle hooks.
+type HookDispatcher interface {
+	// RunHooks executes hooks for the given event and returns results.
+	// Returns nil when no hooks are configured.
+	RunHooks(ctx context.Context, event hook.HookEvent, input any, cwd string) []hook.HookResult
+}
+
 // Tool implements the ExitWorktreeTool for exiting and optionally removing git worktrees.
 type Tool struct {
-	manager *worktreeshared.Manager
+	manager         *worktreeshared.Manager
+	hooks           HookDispatcher
+	hookCfg         hook.HooksConfig
+	disableAllHooks bool
 }
 
 // Input is the typed request payload for ExitWorktreeTool.
@@ -37,6 +48,11 @@ type Output struct {
 // NewTool constructs an ExitWorktreeTool with a shared worktree manager.
 func NewTool(manager *worktreeshared.Manager) *Tool {
 	return &Tool{manager: manager}
+}
+
+// NewToolWithHooks constructs an ExitWorktreeTool with hook dispatch capability.
+func NewToolWithHooks(manager *worktreeshared.Manager, dispatcher HookDispatcher, hookCfg hook.HooksConfig, disableAllHooks bool) *Tool {
+	return &Tool{manager: manager, hooks: dispatcher, hookCfg: hookCfg, disableAllHooks: disableAllHooks}
 }
 
 // Name returns the stable tool identifier.
@@ -125,6 +141,11 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			return coretool.Result{Error: fmt.Sprintf("exit worktree tool: %v", err)}, nil
 		}
 
+		// Fire WorktreeRemove hook after successful removal.
+		// This is a non-blocking notification hook (matching TS behaviour where
+		// failed hooks only log errors and do not prevent cleanup).
+		t.fireWorktreeRemoveHook(ctx, worktreePath)
+
 		logger.DebugCF("exit_worktree_tool", "worktree removed", map[string]any{
 			"worktree_path": worktreePath,
 			"force":         force,
@@ -159,4 +180,27 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			},
 		},
 	}, nil
+}
+
+// fireWorktreeRemoveHook dispatches the WorktreeRemove hook as a non-blocking
+// notification after a worktree is successfully removed. It only fires when
+// hooks are configured and not globally disabled.
+func (t *Tool) fireWorktreeRemoveHook(ctx context.Context, worktreePath string) {
+	if t.hooks == nil || t.hookCfg == nil {
+		return
+	}
+	if t.disableAllHooks {
+		return
+	}
+	if !t.hookCfg.HasEvent(hook.EventWorktreeRemove) {
+		return
+	}
+	hookInput := hook.WorktreeRemoveHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			CWD: worktreePath,
+		},
+		HookEventName: string(hook.EventWorktreeRemove),
+		WorktreePath:  worktreePath,
+	}
+	_ = t.hooks.RunHooks(ctx, hook.EventWorktreeRemove, hookInput, worktreePath)
 }
