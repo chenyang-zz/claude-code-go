@@ -87,7 +87,7 @@ func TestCronPromptSection(t *testing.T) {
 	if strings.TrimSpace(content) == "" {
 		t.Error("Compute() returned empty content")
 	}
-	for _, phrase := range []string{"CronCreate", "CronDelete", "CronList", "cron", "recurring", "durable"} {
+	for _, phrase := range []string{"CronCreate", "CronDelete", "CronList", "cron", "recurring", "durable", "ScheduleWakeup", "delaySeconds", "prompt cache"} {
 		if !strings.Contains(content, phrase) {
 			t.Errorf("Compute() missing expected phrase: %q", phrase)
 		}
