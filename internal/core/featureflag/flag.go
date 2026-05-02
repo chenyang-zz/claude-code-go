@@ -33,6 +33,12 @@ const (
 	// When enabled, a forked subagent periodically consolidates, deduplicates,
 	// and prunes memory files in the auto-memory directory.
 	FlagAutoDream = "AUTO_DREAM"
+	// FlagPromptSuggestion gates the prompt suggestion feature.
+	// When enabled, a forked subagent generates prompt suggestions during conversation.
+	FlagPromptSuggestion = "PROMPT_SUGGESTION"
+	// FlagSpeculation gates the speculation feature.
+	// When enabled, speculative generation is used to improve response latency.
+	FlagSpeculation = "SPECULATION"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
