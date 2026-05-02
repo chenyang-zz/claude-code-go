@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	worktreeshared "github.com/sheepzhao/claude-code-go/internal/services/tools/worktree/shared"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -17,9 +19,19 @@ const (
 	Name = "EnterWorktree"
 )
 
+// HookDispatcher dispatches hook events for worktree lifecycle hooks.
+type HookDispatcher interface {
+	// RunHooks executes hooks for the given event and returns results.
+	// Returns nil when no hooks are configured.
+	RunHooks(ctx context.Context, event hook.HookEvent, input any, cwd string) []hook.HookResult
+}
+
 // Tool implements the EnterWorktreeTool for creating isolated git worktrees.
 type Tool struct {
-	manager *worktreeshared.Manager
+	manager         *worktreeshared.Manager
+	hooks           HookDispatcher
+	hookCfg         hook.HooksConfig
+	disableAllHooks bool
 }
 
 // Input is the typed request payload for EnterWorktreeTool.
@@ -37,6 +49,11 @@ type Output struct {
 // NewTool constructs an EnterWorktreeTool with a shared worktree manager.
 func NewTool(manager *worktreeshared.Manager) *Tool {
 	return &Tool{manager: manager}
+}
+
+// NewToolWithHooks constructs an EnterWorktreeTool with hook dispatch capability.
+func NewToolWithHooks(manager *worktreeshared.Manager, dispatcher HookDispatcher, hookCfg hook.HooksConfig, disableAllHooks bool) *Tool {
+	return &Tool{manager: manager, hooks: dispatcher, hookCfg: hookCfg, disableAllHooks: disableAllHooks}
 }
 
 // Name returns the stable tool identifier.
@@ -107,6 +124,25 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: fmt.Sprintf("enter worktree tool: %v", err)}, nil
 	}
 
+	// Fire WorktreeCreate hooks after successful git worktree creation.
+	// This is a post-creation notification hook. Blocking (exit code 2) returns
+	// an error to the caller; the worktree is already created and cannot be
+	// rolled back within this scope.
+	if t.shouldRunWorktreeHooks(hook.EventWorktreeCreate) {
+		hookInput := hook.WorktreeCreateHookInput{
+			BaseHookInput: hook.BaseHookInput{
+				CWD: call.Context.WorkingDir,
+			},
+			HookEventName: string(hook.EventWorktreeCreate),
+			Name:          slug,
+		}
+		results := t.hooks.RunHooks(ctx, hook.EventWorktreeCreate, hookInput, call.Context.WorkingDir)
+		if runtimehooks.HasBlockingResult(results) {
+			errs := runtimehooks.BlockingErrors(results)
+			return coretool.Result{Error: fmt.Sprintf("WorktreeCreate blocked by hook:\n%s", strings.Join(errs, "\n"))}, nil
+		}
+	}
+
 	logger.DebugCF("enter_worktree_tool", "worktree created", map[string]any{
 		"slug":        slug,
 		"path":        result.Path,
@@ -132,6 +168,18 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			},
 		},
 	}, nil
+}
+
+// shouldRunWorktreeHooks reports whether worktree lifecycle hooks should execute
+// for the given event.
+func (t *Tool) shouldRunWorktreeHooks(event hook.HookEvent) bool {
+	if t.hooks == nil || t.hookCfg == nil {
+		return false
+	}
+	if t.disableAllHooks {
+		return false
+	}
+	return t.hookCfg.HasEvent(event)
 }
 
 // randomSlug generates a short random slug for unnamed worktrees.

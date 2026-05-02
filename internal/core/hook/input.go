@@ -67,6 +67,18 @@ type SubagentStartHookInput struct {
 	AgentType string `json:"agent_type"`
 }
 
+// WorktreeCreateHookInput is the JSON payload piped to WorktreeCreate event hooks via stdin.
+// Hooks receive this after a git worktree is created and can block the operation
+// by returning exit code 2. In Go the worktree is created via git (not hook), so this
+// is a post-creation notification hook.
+type WorktreeCreateHookInput struct {
+	BaseHookInput
+	// HookEventName is always "WorktreeCreate".
+	HookEventName string `json:"hook_event_name"`
+	// Name is the worktree slug provided by the caller.
+	Name string `json:"name"`
+}
+
 // StopFailureHookInput is the JSON payload piped to StopFailure event hooks.
 type StopFailureHookInput struct {
 	BaseHookInput
