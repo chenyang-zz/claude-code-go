@@ -177,8 +177,9 @@ type NotificationHookInput struct {
 
 // UserPromptSubmitHookInput is the JSON payload piped to UserPromptSubmit event
 // hooks via stdin. Hooks receive this when the user submits a prompt and can
-// block the prompt by returning exit code 2 or override behavior via stdout
-// JSON output (continue:false / additionalContext).
+// block the prompt by returning exit code 2; the resulting stderr is surfaced
+// back to the user. Stdout JSON forms such as `continue:false` or hook-specific
+// `additionalContext` are not yet consumed by this runtime.
 type UserPromptSubmitHookInput struct {
 	BaseHookInput
 	// HookEventName is always "UserPromptSubmit".

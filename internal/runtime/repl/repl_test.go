@@ -2977,5 +2977,3 @@ func (s stubEngine) Run(ctx context.Context, req conversation.RunRequest) (event
 	_ = req
 	return s.stream, nil
 }
-
-var _ = hook.HookResult{} // ensure the hook import stays referenced when only tests use it
