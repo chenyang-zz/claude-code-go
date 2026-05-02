@@ -112,7 +112,7 @@ func TestFirePostSamplingHook_Timeout(t *testing.T) {
 
 	hook := func(ctx context.Context, assistantMessage message.Message, history []message.Message, workingDir string) error {
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(100 * time.Millisecond):
 			return errors.New("should have been cancelled")
 		case <-ctx.Done():
 			return ctx.Err()

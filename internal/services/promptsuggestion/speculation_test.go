@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 )
@@ -26,9 +25,6 @@ func TestSpeculator_Start(t *testing.T) {
 		Messages:       []message.Message{},
 	})
 
-	// 给 goroutine 一点时间启动
-	time.Sleep(50 * time.Millisecond)
-
 	if s.State() != SpeculationStateActive {
 		t.Fatalf("expected state active, got %s", s.State())
 	}
@@ -45,8 +41,6 @@ func TestSpeculator_Abort(t *testing.T) {
 		SuggestionText: "test suggestion",
 		Messages:       []message.Message{},
 	})
-
-	time.Sleep(50 * time.Millisecond)
 
 	if s.State() != SpeculationStateActive {
 		t.Fatalf("expected state active before abort, got %s", s.State())
@@ -71,8 +65,6 @@ func TestSpeculator_StartWhileActive(t *testing.T) {
 		Messages:       []message.Message{},
 	})
 
-	time.Sleep(50 * time.Millisecond)
-
 	if s.State() != SpeculationStateActive {
 		t.Fatalf("expected state active after first start, got %s", s.State())
 	}
@@ -84,8 +76,6 @@ func TestSpeculator_StartWhileActive(t *testing.T) {
 		SuggestionText: "second suggestion",
 		Messages:       []message.Message{},
 	})
-
-	time.Sleep(50 * time.Millisecond)
 
 	if s.State() != SpeculationStateActive {
 		t.Fatalf("expected state active after second start, got %s", s.State())

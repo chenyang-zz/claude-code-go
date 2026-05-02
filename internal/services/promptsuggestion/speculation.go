@@ -2,12 +2,12 @@ package promptsuggestion
 
 import (
 	"context"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 // SpeculationState 表示推测系统的状态
@@ -77,12 +77,18 @@ func (s *Speculator) Start(ctx context.Context, params StartParams) {
 	s.active = activeState
 
 	go func() {
-		log.Printf("[speculation] started: %s", activeState.ID)
+		logger.DebugCF("speculation", "speculation started", map[string]any{
+			"id": activeState.ID,
+		})
 		select {
 		case <-childCtx.Done():
-			log.Printf("[speculation] cancelled: %s", activeState.ID)
+			logger.DebugCF("speculation", "speculation cancelled", map[string]any{
+				"id": activeState.ID,
+			})
 		case <-time.After(100 * time.Millisecond):
-			log.Printf("[speculation] completed (placeholder): %s", activeState.ID)
+			logger.DebugCF("speculation", "speculation completed (placeholder)", map[string]any{
+				"id": activeState.ID,
+			})
 		}
 	}()
 }

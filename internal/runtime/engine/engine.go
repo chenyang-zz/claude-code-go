@@ -815,12 +815,12 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 
 		if len(result.assistant.Content) > 0 {
 			e.appendHistoryWithTranscript(&history, result.assistant, transcriptWriter)
-		}
 
-		// Fire post-sampling hooks after the assistant message is appended
-		// but before tool execution begins. This is the window where
-		// prompt suggestions are generated.
-		e.firePostSamplingHooks(ctx, cwd, result.assistant, history.Messages)
+			// Fire post-sampling hooks after the assistant message is appended
+			// but before tool execution begins. This is the window where
+			// prompt suggestions are generated.
+			e.firePostSamplingHooks(ctx, cwd, result.assistant, history.Messages)
+		}
 
 		if len(result.toolUses) == 0 {
 			// When the model stops due to max_tokens (output truncated),

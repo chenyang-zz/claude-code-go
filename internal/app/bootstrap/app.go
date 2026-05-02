@@ -23,12 +23,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/openai"
 	platformconfig "github.com/sheepzhao/claude-code-go/internal/platform/config"
-	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformgit "github.com/sheepzhao/claude-code-go/internal/platform/git"
 	mcpbridge "github.com/sheepzhao/claude-code-go/internal/platform/mcp/bridge"
 	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
+	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	"github.com/sheepzhao/claude-code-go/internal/platform/plugin"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
@@ -40,15 +40,15 @@ import (
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
+	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
+	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
+	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
-	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
-	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
-	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
-	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
@@ -84,6 +84,8 @@ type App struct {
 	Scheduler *cron.Scheduler
 	// PluginWatcher monitors plugin directories for changes.
 	PluginWatcher *plugin.Watcher
+	// PromptSuggestionCleanup aborts in-progress suggestion/speculation work on shutdown.
+	PromptSuggestionCleanup func()
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -292,26 +294,27 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	}, cfg.ProjectPath)
 
-		// Initialize autoDream system (background memory consolidation via forked subagent).
-		autodream.InitAutoDream(nil, func(hook autodream.PostTurnHookFunc) {
-			engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
-		}, cfg.ProjectPath)
+	// Initialize autoDream system (background memory consolidation via forked subagent).
+	autodream.InitAutoDream(nil, func(hook autodream.PostTurnHookFunc) {
+		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
+	}, cfg.ProjectPath)
 
+	// Initialize PromptSuggestion system (post-sampling suggestion generation).
+	_, psCleanup := promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {
+		engine.RegisterPostSamplingHook(engine.PostSamplingHook(hook))
+	}, cfg.ProjectPath)
 
-		// Initialize PromptSuggestion system (post-sampling suggestion generation).
-		_, _ = promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {
-			engine.RegisterPostSamplingHook(engine.PostSamplingHook(hook))
-		}, cfg.ProjectPath)
-		scheduler := cron.NewScheduler(cron.SchedulerOptions{
+	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
 	scheduler.Start()
 
 	return &App{
-		Config:        cfg,
-		Runner:        runner,
-		Scheduler:     scheduler,
-		PluginWatcher: pluginWatcher,
+		Config:                  cfg,
+		Runner:                  runner,
+		Scheduler:               scheduler,
+		PluginWatcher:           pluginWatcher,
+		PromptSuggestionCleanup: psCleanup,
 	}, nil
 }
 
@@ -377,7 +380,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err != nil {
 		return nil, err
 	}
-		tool_search.SharedRegistry = statusToolRegistry.Tools
+	tool_search.SharedRegistry = statusToolRegistry.Tools
 	if err := registry.Register(servicecommands.DoctorCommand{
 		Config:       dereferenceConfig(cfg),
 		ToolRegistry: statusToolRegistry.Tools,
@@ -732,109 +735,109 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	}); err != nil {
 		return nil, err
 	}
-		// Load skills from all sources (project, user, managed, bundled)
-		// and register them into the command registry so SkillTool can invoke them.
-		homeDir := dereferenceConfig(cfg).HomeDir
-		projectPath := dereferenceConfig(cfg).ProjectPath
+	// Load skills from all sources (project, user, managed, bundled)
+	// and register them into the command registry so SkillTool can invoke them.
+	homeDir := dereferenceConfig(cfg).HomeDir
+	projectPath := dereferenceConfig(cfg).ProjectPath
 
-		var allSkills []*skill.Skill
+	var allSkills []*skill.Skill
 
-		// Project skills: from .claude/skills/ in CWD and parent dirs up to $HOME.
-		if projectPath != "" {
-			projectSkills, loadErrors, err := skill.LoadProjectSkills(projectPath, homeDir)
-			if err != nil {
-				logger.WarnCF("bootstrap", "failed to load project skills", map[string]any{
-						"error": err.Error(),
-				})
-			}
-			for _, le := range loadErrors {
-				logger.WarnCF("bootstrap", "skill load error", map[string]any{
-						"skill": le.Name,
-						"error": le.Error,
-				})
-			}
-			allSkills = append(allSkills, projectSkills...)
-		}
-
-		// User skills: from ~/.claude/skills/.
-		if homeDir != "" {
-			userSkills, loadErrors, err := skill.LoadUserSkills(homeDir)
-			if err != nil {
-				logger.WarnCF("bootstrap", "failed to load user skills", map[string]any{
-						"error": err.Error(),
-				})
-			}
-			for _, le := range loadErrors {
-				logger.WarnCF("bootstrap", "user skill load error", map[string]any{
-						"skill": le.Name,
-						"error": le.Error,
-				})
-			}
-			allSkills = append(allSkills, userSkills...)
-		}
-
-		// Managed skills: from ~/.claude/managed/.claude/skills/.
-		if homeDir != "" {
-			managedSkills, loadErrors, err := skill.LoadManagedSkills(homeDir)
-			if err != nil {
-				logger.WarnCF("bootstrap", "failed to load managed skills", map[string]any{
-						"error": err.Error(),
-				})
-			}
-			for _, le := range loadErrors {
-				logger.WarnCF("bootstrap", "managed skill load error", map[string]any{
-						"skill": le.Name,
-						"error": le.Error,
-				})
-			}
-			allSkills = append(allSkills, managedSkills...)
-		}
-
-		// Legacy /commands/ loading: load old-format skills from .claude/commands/.
-		if projectPath != "" {
-			commandsSkills, loadErrors, err := skill.LoadSkillsFromCommandsDir(projectPath)
-			if err != nil {
-				logger.WarnCF("bootstrap", "failed to load commands skills", map[string]any{
-					"error": err.Error(),
-				})
-			}
-			for _, le := range loadErrors {
-				logger.WarnCF("bootstrap", "commands skill load error", map[string]any{
-					"skill": le.Name,
-					"error": le.Error,
-				})
-			}
-			allSkills = append(allSkills, commandsSkills...)
-		}
-
-		// Deduplicate by canonical path, then separate conditional skills
-		// (skills with paths frontmatter that activate when matching files are touched).
-		allSkills = skill.DeduplicateByPath(allSkills)
-		allSkills = skill.SeparateConditionalSkills(allSkills)
-
-		if registered := skill.RegisterSkills(registry, allSkills, "skills"); registered > 0 {
-			logger.InfoCF("bootstrap", "loaded skills", map[string]any{
-				"count": registered,
+	// Project skills: from .claude/skills/ in CWD and parent dirs up to $HOME.
+	if projectPath != "" {
+		projectSkills, loadErrors, err := skill.LoadProjectSkills(projectPath, homeDir)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load project skills", map[string]any{
+				"error": err.Error(),
 			})
 		}
-
-		// Initialize and register bundled skills.
-		bundled.InitBundledSkills()
-		for _, bs := range skill.GetBundledSkills() {
-			if err := registry.Register(bs); err != nil {
-				logger.DebugCF("bootstrap", "failed to register bundled skill", map[string]any{
-						"name":  bs.Metadata().Name,
-						"error": err.Error(),
-				})
-			}
+		for _, le := range loadErrors {
+			logger.WarnCF("bootstrap", "skill load error", map[string]any{
+				"skill": le.Name,
+				"error": le.Error,
+			})
 		}
+		allSkills = append(allSkills, projectSkills...)
+	}
 
-		// Publish the command registry for SkillTool to look up skills at invoke time.
-		skill.SharedRegistry = registry
+	// User skills: from ~/.claude/skills/.
+	if homeDir != "" {
+		userSkills, loadErrors, err := skill.LoadUserSkills(homeDir)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load user skills", map[string]any{
+				"error": err.Error(),
+			})
+		}
+		for _, le := range loadErrors {
+			logger.WarnCF("bootstrap", "user skill load error", map[string]any{
+				"skill": le.Name,
+				"error": le.Error,
+			})
+		}
+		allSkills = append(allSkills, userSkills...)
+	}
 
-		// Start the file watcher for skill and command directories.
-		skill.StartDefaultWatcher(homeDir, projectPath)
-		return registry, nil
+	// Managed skills: from ~/.claude/managed/.claude/skills/.
+	if homeDir != "" {
+		managedSkills, loadErrors, err := skill.LoadManagedSkills(homeDir)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load managed skills", map[string]any{
+				"error": err.Error(),
+			})
+		}
+		for _, le := range loadErrors {
+			logger.WarnCF("bootstrap", "managed skill load error", map[string]any{
+				"skill": le.Name,
+				"error": le.Error,
+			})
+		}
+		allSkills = append(allSkills, managedSkills...)
+	}
+
+	// Legacy /commands/ loading: load old-format skills from .claude/commands/.
+	if projectPath != "" {
+		commandsSkills, loadErrors, err := skill.LoadSkillsFromCommandsDir(projectPath)
+		if err != nil {
+			logger.WarnCF("bootstrap", "failed to load commands skills", map[string]any{
+				"error": err.Error(),
+			})
+		}
+		for _, le := range loadErrors {
+			logger.WarnCF("bootstrap", "commands skill load error", map[string]any{
+				"skill": le.Name,
+				"error": le.Error,
+			})
+		}
+		allSkills = append(allSkills, commandsSkills...)
+	}
+
+	// Deduplicate by canonical path, then separate conditional skills
+	// (skills with paths frontmatter that activate when matching files are touched).
+	allSkills = skill.DeduplicateByPath(allSkills)
+	allSkills = skill.SeparateConditionalSkills(allSkills)
+
+	if registered := skill.RegisterSkills(registry, allSkills, "skills"); registered > 0 {
+		logger.InfoCF("bootstrap", "loaded skills", map[string]any{
+			"count": registered,
+		})
+	}
+
+	// Initialize and register bundled skills.
+	bundled.InitBundledSkills()
+	for _, bs := range skill.GetBundledSkills() {
+		if err := registry.Register(bs); err != nil {
+			logger.DebugCF("bootstrap", "failed to register bundled skill", map[string]any{
+				"name":  bs.Metadata().Name,
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// Publish the command registry for SkillTool to look up skills at invoke time.
+	skill.SharedRegistry = registry
+
+	// Start the file watcher for skill and command directories.
+	skill.StartDefaultWatcher(homeDir, projectPath)
+	return registry, nil
 }
 
 // dereferenceConfig copies the pointed runtime config or returns the zero value when unavailable.
@@ -1508,6 +1511,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	defer a.Scheduler.Stop()
 	if a.PluginWatcher != nil {
 		defer a.PluginWatcher.Stop()
+	}
+	if a.PromptSuggestionCleanup != nil {
+		defer a.PromptSuggestionCleanup()
 	}
 	return a.Runner.Run(ctx, args)
 }

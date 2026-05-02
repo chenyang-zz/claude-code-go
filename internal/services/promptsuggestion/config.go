@@ -48,18 +48,26 @@ func isTeammate() bool {
 //  2. feature flag CLAUDE_FEATURE_PROMPT_SUGGESTION == "1"
 //  3. non-interactive session rejection
 //  4. teammate (forked subagent) rejection
+// Defaults to false.
 func IsPromptSuggestionEnabled() bool {
 	if v := os.Getenv("CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION"); v != "" {
-		if isEnvTruthy(v) {
-			return true
-		}
 		if isEnvFalsy(v) {
 			return false
 		}
+		if isEnvTruthy(v) {
+			// Even with env override, apply safety gates
+			if isNonInteractive() {
+				return false
+			}
+			if isTeammate() {
+				return false
+			}
+			return true
+		}
 	}
 
-	if featureflag.IsEnabled(featureflag.FlagPromptSuggestion) {
-		return true
+	if !featureflag.IsEnabled(featureflag.FlagPromptSuggestion) {
+		return false
 	}
 
 	if isNonInteractive() {

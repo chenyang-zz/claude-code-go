@@ -87,13 +87,14 @@ func (s *Suggester) TryGenerate(ctx context.Context, messages []message.Message)
 	}
 
 	// Placeholder: fork agent execution via runner.
-	// For now, just log that we would run the subagent.
 	ctx, cancel := context.WithCancel(ctx)
 	s.mu.Lock()
 	s.cancel = cancel
 	s.mu.Unlock()
 
-	_ = s.runner.Run(ctx, messages)
+	if err := s.runner.Run(ctx, messages); err != nil {
+		return Outcome{Error: err}
+	}
 
 	return Outcome{
 		Suggestion: &SuggestionResult{

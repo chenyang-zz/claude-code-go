@@ -19,8 +19,8 @@ type PostSamplingHookFunc func(ctx context.Context, assistantMessage message.Mes
 // The runner may be nil; in that case the suggester returns placeholder
 // suggestions without forking a real agent.
 //
-// The returned cleanup function should be called on shutdown to unregister
-// the post-sampling hook.
+// The returned cleanup function should be called on shutdown to abort any
+// in-progress suggestion or speculation work.
 func Init(
 	runner SubagentRunner,
 	registerPostSamplingHook func(hook PostSamplingHookFunc),
