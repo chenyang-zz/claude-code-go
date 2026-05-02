@@ -103,12 +103,29 @@ func HasClaudeAIBillingAccess() bool {
 	}
 }
 
+// recognisedOverageBillingTypes is the set of billing channels known to
+// support overage provisioning via the Claude.ai backend. The list mirrors
+// the channels surfaced by the TS reference and excludes marketplace tiers
+// (e.g. AWS Marketplace) where the backend cannot honour /extra-usage even
+// for team / enterprise tiers.
+var recognisedOverageBillingTypes = map[oauth.BillingType]struct{}{
+	"":                {}, // Empty billing type — profile fetch did not return one.
+	"anthropic_api":   {},
+	"anthropic":       {},
+	"console":         {},
+	"console_proxy":   {},
+	"claudeai_pro":    {},
+	"claudeai_team":   {},
+	"claudeai_enterprise": {},
+	"stripe":          {},
+}
+
 // IsOverageProvisioningAllowed reports whether the current organization can
-// provision overage. Mirrors the TS-side gate that team/enterprise tiers on
-// recognised billing channels (anthropic_api, console_proxy, marketplace
-// "claudeai_*") are eligible. AWS Marketplace and other unrecognised tiers
-// return false so callers do not surface "/extra-usage" upsell text on
-// platforms that cannot honour the request.
+// provision overage. Mirrors the TS-side gate that team / enterprise tiers
+// on recognised billing channels (anthropic_api, console_proxy, marketplace
+// "claudeai_*") are eligible. Unknown / unrecognised billing types return
+// false so callers do not surface "/extra-usage" upsell text on platforms
+// that cannot honour the request.
 func IsOverageProvisioningAllowed() bool {
 	tokens, err := loadCurrentTokens()
 	if err != nil || tokens == nil {
@@ -120,13 +137,7 @@ func IsOverageProvisioningAllowed() bool {
 	default:
 		return false
 	}
-	switch tokens.BillingType {
-	case "":
-		// Empty billing type means the profile fetch did not return one;
-		// default to allowed to match the TS side which treats null as
-		// "no explicit denial".
-		return true
-	case "aws_marketplace":
+	if _, ok := recognisedOverageBillingTypes[tokens.BillingType]; !ok {
 		return false
 	}
 	return true

@@ -1,8 +1,10 @@
 package claudeailimits
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -60,12 +62,18 @@ func MakeAnthropicConsumer() func(http.Header, int, error) {
 
 		limits := ProcessRateLimitHeaders(headers)
 		if limits == nil {
-			return
-		}
-
-		// Mirror the TS extractQuotaStatusFromError fallback: a 429
-		// always means rejected even if headers were not present.
-		if status == http.StatusTooManyRequests {
+			// A 429 with no rate-limit headers still means we are
+			// rate limited. Synthesise a minimal rejected snapshot
+			// so the engine annotator has fresh state to render
+			// even when the upstream omits the unified limiter
+			// fields entirely.
+			if status != http.StatusTooManyRequests {
+				return
+			}
+			limits = &ClaudeAILimits{Status: QuotaStatusRejected}
+		} else if status == http.StatusTooManyRequests {
+			// Mirror the TS extractQuotaStatusFromError fallback: a 429
+			// always means rejected even if the limiter says otherwise.
 			limits.Status = QuotaStatusRejected
 		}
 
@@ -96,6 +104,13 @@ func MakeErrorAnnotator() func(err error, modelName string) error {
 		if !IsClaudeAISubscriber() {
 			return nil
 		}
+		// Only rewrite errors that actually represent a rate-limit
+		// rejection. Without this gate, a stale `rejected` snapshot
+		// would cause unrelated 5xx / 4xx responses to be surfaced as
+		// "You've hit your … limit", masking the real failure.
+		if !isRateLimitError(err) {
+			return nil
+		}
 		// Only annotate if the persisted snapshot indicates we are rate
 		// limited; otherwise leave the original provider error verbatim
 		// so the caller surfaces the most accurate diagnostic.
@@ -109,6 +124,26 @@ func MakeErrorAnnotator() func(err error, modelName string) error {
 		}
 		return &AnnotatedError{Underlying: err, Message: message}
 	}
+}
+
+// isRateLimitError reports whether the supplied provider error represents
+// the kind of rate-limit / quota rejection that the rate-limit annotator
+// should surface to the user. Wrapped errors are unwrapped via errors.As so
+// nested provider-error chains still match. Falls back to the HTTP 429 hint
+// for raw API errors that have not been wrapped into a ProviderError.
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var providerErr *model.ProviderError
+	if errors.As(err, &providerErr) {
+		switch providerErr.Kind {
+		case model.ProviderErrorRateLimit, model.ProviderErrorQuotaExceeded:
+			return true
+		}
+		return providerErr.StatusCode == http.StatusTooManyRequests
+	}
+	return false
 }
 
 // AnnotatedError wraps an upstream provider error with a user-facing message

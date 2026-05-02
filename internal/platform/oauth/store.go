@@ -203,11 +203,15 @@ func (s *OAuthCredentialStore) Save(tokens *OAuthTokens) (SaveDecision, error) {
 	if persisted.BillingType == "" && bundle.ClaudeAIOauth != nil {
 		persisted.BillingType = bundle.ClaudeAIOauth.BillingType
 	}
-	// HasExtraUsageEnabled defaults to false; only inherit when the incoming
-	// tokens explicitly say false AND the existing record said true. This
-	// avoids dropping the bit on a refresh that didn't refetch the profile.
-	if !tokens.HasExtraUsageEnabled && bundle.ClaudeAIOauth != nil && bundle.ClaudeAIOauth.HasExtraUsageEnabled {
-		persisted.HasExtraUsageEnabled = true
+	// HasExtraUsageEnabled is a boolean so we cannot use the empty-string
+	// fallback above. We only fall back to the previously persisted bit
+	// when the incoming tokens carry no profile envelope at all — i.e.
+	// this is a refresh that did not re-fetch the profile and so cannot
+	// authoritatively report a new value. When `tokens.Profile != nil`
+	// we trust the freshly fetched bit even if it transitioned from
+	// true to false (the org-level overage may have just been disabled).
+	if tokens.Profile == nil && bundle.ClaudeAIOauth != nil {
+		persisted.HasExtraUsageEnabled = bundle.ClaudeAIOauth.HasExtraUsageEnabled
 	}
 	bundle.ClaudeAIOauth = persisted
 

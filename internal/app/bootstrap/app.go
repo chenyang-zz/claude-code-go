@@ -970,47 +970,48 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		var client model.Client
 		switch coreconfig.NormalizeProvider(cfg.Provider) {
 		case coreconfig.ProviderVertex:
+			// Vertex / Bedrock / Foundry 429 errors are billing-tier
+			// rejections, not Claude.ai subscription limits, so the
+			// annotator that renders Claude.ai plan-limit text is
+			// only attached to the first-party Anthropic client.
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:                  cfg.APIKey,
-				AuthToken:               cfg.AuthToken,
-				BaseURL:                 cfg.APIBaseURL,
-				HTTPClient:              nil,
-				IsFirstParty:            false,
-				VertexEnabled:           true,
-				VertexProjectID:         cfg.VertexProjectID,
-				VertexRegion:            cfg.VertexRegion,
-				VertexSkipAuth:          cfg.VertexSkipAuth,
-				RateLimitConsumer:       rateLimitConsumer,
-				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
+				APIKey:            cfg.APIKey,
+				AuthToken:         cfg.AuthToken,
+				BaseURL:           cfg.APIBaseURL,
+				HTTPClient:        nil,
+				IsFirstParty:      false,
+				VertexEnabled:     true,
+				VertexProjectID:   cfg.VertexProjectID,
+				VertexRegion:      cfg.VertexRegion,
+				VertexSkipAuth:    cfg.VertexSkipAuth,
+				RateLimitConsumer: rateLimitConsumer,
 			})
 		case coreconfig.ProviderBedrock:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:                  cfg.APIKey,
-				AuthToken:               cfg.AuthToken,
-				BaseURL:                 cfg.APIBaseURL,
-				HTTPClient:              nil,
-				IsFirstParty:            false,
-				BedrockEnabled:          true,
-				BedrockRegion:           cfg.BedrockRegion,
-				BedrockModelID:          cfg.BedrockModelID,
-				BedrockSkipAuth:         cfg.BedrockSkipAuth,
-				RateLimitConsumer:       rateLimitConsumer,
-				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
+				APIKey:            cfg.APIKey,
+				AuthToken:         cfg.AuthToken,
+				BaseURL:           cfg.APIBaseURL,
+				HTTPClient:        nil,
+				IsFirstParty:      false,
+				BedrockEnabled:    true,
+				BedrockRegion:     cfg.BedrockRegion,
+				BedrockModelID:    cfg.BedrockModelID,
+				BedrockSkipAuth:   cfg.BedrockSkipAuth,
+				RateLimitConsumer: rateLimitConsumer,
 			})
 		case coreconfig.ProviderFoundry:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:                  cfg.APIKey,
-				AuthToken:               cfg.AuthToken,
-				BaseURL:                 cfg.APIBaseURL,
-				HTTPClient:              nil,
-				IsFirstParty:            false,
-				FoundryEnabled:          true,
-				FoundryResource:         cfg.FoundryResource,
-				FoundryBaseURL:          cfg.FoundryBaseURL,
-				FoundryAPIKey:           cfg.FoundryAPIKey,
-				FoundrySkipAuth:         cfg.FoundrySkipAuth,
-				RateLimitConsumer:       rateLimitConsumer,
-				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
+				APIKey:            cfg.APIKey,
+				AuthToken:         cfg.AuthToken,
+				BaseURL:           cfg.APIBaseURL,
+				HTTPClient:        nil,
+				IsFirstParty:      false,
+				FoundryEnabled:    true,
+				FoundryResource:   cfg.FoundryResource,
+				FoundryBaseURL:    cfg.FoundryBaseURL,
+				FoundryAPIKey:     cfg.FoundryAPIKey,
+				FoundrySkipAuth:   cfg.FoundrySkipAuth,
+				RateLimitConsumer: rateLimitConsumer,
 			})
 		default:
 			client = anthropic.NewClient(anthropic.Config{

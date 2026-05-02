@@ -72,10 +72,12 @@ func evaluateEarlyWarning(headers http.Header, fallbackAvailable bool) *ClaudeAI
 
 // getHeaderBasedEarlyWarning checks each claim for a surpassed-threshold
 // header pushed by the server. Returns the first match as a fully populated
-// ClaudeAILimits snapshot.
+// ClaudeAILimits snapshot. Iteration uses the ordered earlyWarningClaims
+// slice so the chosen claim is deterministic when multiple
+// surpassed-threshold headers are present in one response.
 func getHeaderBasedEarlyWarning(headers http.Header, fallbackAvailable bool) *ClaudeAILimits {
-	for abbrev, rateLimitType := range earlyWarningClaimMap {
-		key := "anthropic-ratelimit-unified-" + abbrev + "-surpassed-threshold"
+	for _, claim := range earlyWarningClaims {
+		key := "anthropic-ratelimit-unified-" + claim.abbrev + "-surpassed-threshold"
 		thresholdStr := headers.Get(key)
 		if thresholdStr == "" {
 			continue
@@ -85,13 +87,13 @@ func getHeaderBasedEarlyWarning(headers http.Header, fallbackAvailable bool) *Cl
 			continue
 		}
 
-		util, hasUtil := headerFloat(headers, "anthropic-ratelimit-unified-"+abbrev+"-utilization")
-		resetsAt := headerInt64(headers, "anthropic-ratelimit-unified-"+abbrev+"-reset")
+		util, hasUtil := headerFloat(headers, "anthropic-ratelimit-unified-"+claim.abbrev+"-utilization")
+		resetsAt := headerInt64(headers, "anthropic-ratelimit-unified-"+claim.abbrev+"-reset")
 
 		warn := &ClaudeAILimits{
 			Status:                            QuotaStatusAllowedWarning,
 			UnifiedRateLimitFallbackAvailable: fallbackAvailable,
-			RateLimitType:                     rateLimitType,
+			RateLimitType:                     claim.rateLimitType,
 			ResetsAt:                          resetsAt,
 			IsUsingOverage:                    false,
 			SurpassedThreshold:                threshold,

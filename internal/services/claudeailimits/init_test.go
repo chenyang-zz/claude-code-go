@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 )
 
@@ -159,7 +160,7 @@ func TestMakeErrorAnnotatorReplacesMessageOnRejection(t *testing.T) {
 	t.Cleanup(func() { Init(InitOptions{Store: nil, SubscriptionLoader: nil}) })
 
 	annotator := MakeErrorAnnotator()
-	original := errors.New("api error 429")
+	original := model.NewProviderError(model.ProviderErrorRateLimit, "anthropic", http.StatusTooManyRequests, "api error 429")
 	got := annotator(original, "claude-sonnet-4-6")
 	if got == nil {
 		t.Fatal("expected non-nil annotated error")
@@ -174,6 +175,31 @@ func TestMakeErrorAnnotatorReplacesMessageOnRejection(t *testing.T) {
 	}
 	if !errors.Is(annotated, original) {
 		t.Fatal("annotated error should wrap the original via Unwrap")
+	}
+}
+
+func TestMakeErrorAnnotatorIgnoresNonRateLimitErrors(t *testing.T) {
+	// Stale snapshot says rejected but the current error is a 5xx server
+	// failure. Annotator must leave the original error intact so users
+	// see the real failure mode.
+	store := &fakeStore{loadVal: map[string]any{
+		"status":        "rejected",
+		"rateLimitType": "five_hour",
+	}}
+	loader := SubscriptionLoaderFunc(func() (*oauth.OAuthTokens, error) {
+		return &oauth.OAuthTokens{SubscriptionType: oauth.SubscriptionPro}, nil
+	})
+	Init(InitOptions{Store: store, SubscriptionLoader: loader})
+	t.Cleanup(func() { Init(InitOptions{Store: nil, SubscriptionLoader: nil}) })
+
+	annotator := MakeErrorAnnotator()
+	serverErr := model.NewProviderError(model.ProviderErrorServerError, "anthropic", http.StatusInternalServerError, "boom")
+	if got := annotator(serverErr, "claude-sonnet-4-6"); got != nil {
+		t.Fatalf("expected nil for non-rate-limit error, got %v", got)
+	}
+	plainErr := errors.New("network blip")
+	if got := annotator(plainErr, "claude-sonnet-4-6"); got != nil {
+		t.Fatalf("expected nil for plain error, got %v", got)
 	}
 }
 

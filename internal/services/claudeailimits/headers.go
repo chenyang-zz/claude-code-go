@@ -14,12 +14,22 @@ var claimAbbrevForType = map[RateLimitType]string{
 	RateLimitOverage:  "overage",
 }
 
-// earlyWarningClaimMap maps the abbreviated header claim name onto the
-// canonical RateLimitType for surpassed-threshold detection.
-var earlyWarningClaimMap = map[string]RateLimitType{
-	"5h":      RateLimitFiveHour,
-	"7d":      RateLimitSevenDay,
-	"overage": RateLimitOverage,
+// earlyWarningClaim binds one Anthropic header claim abbreviation to its
+// canonical RateLimitType. Iterated in declaration order so callers obtain
+// deterministic behaviour when multiple surpassed-threshold headers are
+// present in a single response.
+type earlyWarningClaim struct {
+	abbrev        string
+	rateLimitType RateLimitType
+}
+
+// earlyWarningClaims is the ordered list of claims recognised by the
+// surpassed-threshold detection path. Order is "5h then 7d then overage" so
+// session limits surface ahead of weekly limits, mirroring the TS reference.
+var earlyWarningClaims = []earlyWarningClaim{
+	{abbrev: "5h", rateLimitType: RateLimitFiveHour},
+	{abbrev: "7d", rateLimitType: RateLimitSevenDay},
+	{abbrev: "overage", rateLimitType: RateLimitOverage},
 }
 
 // ProcessRateLimitHeaders projects one Anthropic response header set onto a
@@ -52,13 +62,15 @@ func ProcessRateLimitHeaders(headers http.Header) *ClaudeAILimits {
 	// early-warning signal first (server header) and fall back to the
 	// time-relative thresholds. Either match collapses status into
 	// allowed_warning and seeds rateLimitType / utilization / resetsAt.
+	//
+	// When neither path fires we leave status untouched so a future
+	// server-side warning claim that the early-warning matcher does not
+	// recognise still flows through to callers — better to surface an
+	// unfamiliar warning than to silently downgrade it to allowed.
 	if status == QuotaStatusAllowed || status == QuotaStatusAllowedWarning {
 		if warn := evaluateEarlyWarning(headers, fallback); warn != nil {
 			return warn
 		}
-		// No early warning fired — clear ambiguous allowed_warning back to
-		// allowed so callers do not display a phantom warning.
-		status = QuotaStatusAllowed
 	}
 
 	limits := &ClaudeAILimits{
