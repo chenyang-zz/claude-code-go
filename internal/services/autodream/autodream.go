@@ -3,6 +3,7 @@ package autodream
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -124,6 +125,14 @@ func (s *System) RunAutoDream(ctx context.Context) error {
 		return nil
 	}
 
+	// If no runner is configured, skip lock acquisition and execution entirely.
+	// The lock mtime is the consolidation gate — acquiring it without running
+	// a subagent would delay/skip future real consolidations.
+	if s.runner == nil {
+		logger.DebugCF("autodream", "subagent runner is nil, skipping consolidation", nil)
+		return nil
+	}
+
 	// Lock: ensure no other process is mid-consolidation.
 	priorMtime, err := tryAcquireConsolidationLock(s.projectRoot)
 	if err != nil {
@@ -150,7 +159,7 @@ func (s *System) RunAutoDream(ctx context.Context) error {
 
 	// Build the consolidation prompt.
 	memoryRoot := extractmemories.GetAutoMemPath(s.projectRoot)
-	transcriptDir := s.projectRoot
+	transcriptDir := filepath.Join(s.projectRoot, ".claude", "transcripts")
 	extra := fmt.Sprintf(`
 
 **Tool constraints for this run:** Bash is restricted to read-only commands (`+"`ls`, `find`, `grep`, `cat`, `stat`, `wc`, `head`, `tail`"+` and similar). Anything that writes, redirects to a file, or modifies state will be denied. Plan your exploration with this in mind — no need to probe.
@@ -160,23 +169,19 @@ Sessions since last consolidation (%d):
 
 	prompt := buildConsolidationPrompt(memoryRoot, transcriptDir, extra)
 
-	if s.runner != nil {
-		promptMsg := message.Message{
-			Role: message.RoleUser,
-			Content: []message.ContentPart{
-				message.TextPart(prompt),
-			},
-		}
-		if runErr := s.runner.Run(ctx, []message.Message{promptMsg}); runErr != nil {
-			logger.WarnCF("autodream", "subagent execution failed", map[string]any{
-				"error": runErr.Error(),
-			})
-			// Rollback: rewind mtime so time-gate passes again.
-			rollbackConsolidationLock(s.projectRoot, priorMtime)
-			return nil
-		}
-	} else {
-		logger.DebugCF("autodream", "subagent runner is nil, skipping execution", nil)
+	promptMsg := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(prompt),
+		},
+	}
+	if runErr := s.runner.Run(ctx, []message.Message{promptMsg}); runErr != nil {
+		logger.WarnCF("autodream", "subagent execution failed", map[string]any{
+			"error": runErr.Error(),
+		})
+		// Rollback: rewind mtime so time-gate passes again.
+		rollbackConsolidationLock(s.projectRoot, priorMtime)
+		return nil
 	}
 
 	logger.DebugCF("autodream", "consolidation completed", nil)

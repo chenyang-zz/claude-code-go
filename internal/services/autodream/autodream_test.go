@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 )
 
 // stubRunner is a SubagentRunner that records invocations.
@@ -51,9 +52,11 @@ func TestIsGateOpen_Enabled(t *testing.T) {
 func TestRunAutoDream_TimeGateNotPassed(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	os.Setenv("CLAUDE_FEATURE_AUTO_DREAM", "1")
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 	defer os.Unsetenv("CLAUDE_FEATURE_AUTO_DREAM")
 
 	// Record a consolidation "just now" so time gate doesn't pass.
@@ -82,9 +85,11 @@ func TestRunAutoDream_GateDisabled(t *testing.T) {
 func TestRunAutoDream_FirstRunWithRunner(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	os.Setenv("CLAUDE_FEATURE_AUTO_DREAM", "1")
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 	defer os.Unsetenv("CLAUDE_FEATURE_AUTO_DREAM")
 
 	runner := &stubRunner{}
@@ -103,9 +108,11 @@ func TestRunAutoDream_FirstRunWithRunner(t *testing.T) {
 func TestRunAutoDream_LockHeld(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	os.Setenv("CLAUDE_FEATURE_AUTO_DREAM", "1")
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 	defer os.Unsetenv("CLAUDE_FEATURE_AUTO_DREAM")
 
 	// Acquire lock first to simulate another process holding it.

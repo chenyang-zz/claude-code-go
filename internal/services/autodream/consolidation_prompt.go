@@ -6,9 +6,6 @@ import (
 )
 
 const (
-	// dirExistsGuidance gives the agent instructions for handling missing
-	// memory directories.
-	dirExistsGuidance = `If the memory directory doesn't exist yet, create it with mkdir -p and start fresh.`
 	// entrypointName is the MEMORY.md index filename.
 	entrypointName = "MEMORY.md"
 	// maxEntrypointLines is the maximum number of lines for the MEMORY.md index.
@@ -29,14 +26,14 @@ func buildConsolidationPrompt(memoryRoot, transcriptDir, extra string) string {
 	b.WriteString("memories so that future sessions can orient quickly.\n\n")
 
 	b.WriteString(fmt.Sprintf("Memory directory: `%s`\n", memoryRoot))
-	b.WriteString(dirExistsGuidance + "\n\n")
+	b.WriteString("The memory directory already exists — no need to create it.\n\n")
 	b.WriteString(fmt.Sprintf("Session transcripts: `%s` (large JSONL files — grep narrowly, don't read whole files)\n\n", transcriptDir))
 
 	b.WriteString("---\n\n")
 
 	// Phase 1: Orient.
 	b.WriteString("## Phase 1 — Orient\n\n")
-	b.WriteString("- `ls` the memory directory to see what already exists\n")
+	b.WriteString("- `ls` the memory directory to see what already exists (the directory is already created)\n")
 	b.WriteString(fmt.Sprintf("- Read `%s` to understand the current index\n", entrypointName))
 	b.WriteString("- Skim existing topic files so you improve them rather than creating duplicates\n")
 	b.WriteString("- If `logs/` or `sessions/` subdirectories exist (assistant-mode layout), review recent entries there\n\n")

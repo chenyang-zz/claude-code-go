@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 )
 
 func TestLockPath(t *testing.T) {
@@ -22,8 +24,10 @@ func TestLockPath(t *testing.T) {
 func TestReadLastConsolidatedAt_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	// Set memory base dir to temp dir for isolation.
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", filepath.Join(dir, "memory-base"))
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	mtime, err := readLastConsolidatedAt(dir)
 	if err != nil {
@@ -37,8 +41,10 @@ func TestReadLastConsolidatedAt_NoFile(t *testing.T) {
 func TestTryAcquireConsolidationLock_FirstAcquire(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	priorMtime, err := tryAcquireConsolidationLock(dir)
 	if err != nil {
@@ -61,8 +67,10 @@ func TestTryAcquireConsolidationLock_FirstAcquire(t *testing.T) {
 func TestTryAcquireConsolidationLock_SecondAcquireBlocked(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	// First acquire.
 	_, err := tryAcquireConsolidationLock(dir)
@@ -84,8 +92,10 @@ func TestTryAcquireConsolidationLock_SecondAcquireBlocked(t *testing.T) {
 func TestRollbackConsolidationLock_Unlink(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	_, err := tryAcquireConsolidationLock(dir)
 	if err != nil {
@@ -104,8 +114,10 @@ func TestRollbackConsolidationLock_Unlink(t *testing.T) {
 func TestRollbackConsolidationLock_RestoreMtime(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	_, err := tryAcquireConsolidationLock(dir)
 	if err != nil {
@@ -135,8 +147,10 @@ func TestRollbackConsolidationLock_RestoreMtime(t *testing.T) {
 func TestRecordConsolidation(t *testing.T) {
 	dir := t.TempDir()
 	memDir := filepath.Join(dir, "memory-base")
+	extractmemories.ResetMemoryBaseDir()
 	os.Setenv("CLAUDE_CODE_REMOTE_MEMORY_DIR", memDir)
 	defer os.Unsetenv("CLAUDE_CODE_REMOTE_MEMORY_DIR")
+	defer extractmemories.ResetMemoryBaseDir()
 
 	recordConsolidation(dir)
 

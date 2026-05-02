@@ -111,15 +111,15 @@ func rollbackConsolidationLock(projectRoot string, priorMtime int64) {
 		}
 		return
 	}
-	t := time.UnixMilli(priorMtime)
-	if err := os.Chtimes(path, t, t); err != nil {
-		logger.DebugCF("autodream", "rollback chtimes failed — next trigger delayed to minHours", map[string]any{
+	// Clear the PID body first so WriteFile doesn't update mtime after we restore it.
+	if err := os.WriteFile(path, []byte{}, 0644); err != nil {
+		logger.DebugCF("autodream", "rollback body clear failed", map[string]any{
 			"error": err.Error(),
 		})
 	}
-	// Clear the PID body so our still-running process doesn't look like it's holding.
-	if err := os.WriteFile(path, []byte{}, 0644); err != nil {
-		logger.DebugCF("autodream", "rollback body clear failed", map[string]any{
+	t := time.UnixMilli(priorMtime)
+	if err := os.Chtimes(path, t, t); err != nil {
+		logger.DebugCF("autodream", "rollback chtimes failed — next trigger delayed to minHours", map[string]any{
 			"error": err.Error(),
 		})
 	}
