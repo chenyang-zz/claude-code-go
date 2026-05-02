@@ -187,9 +187,6 @@ func (s *System) runExtraction(ctx context.Context, messages []message.Message, 
 	}
 	s.state.ResetTurnsSinceLastExtraction()
 
-	s.state.SetInProgress(true)
-	defer s.state.SetInProgress(false)
-
 	logger.DebugCF("extractmemories", "starting extraction", map[string]any{
 		"new_message_count": newMessageCount,
 		"project_root":      s.projectRoot,
@@ -274,11 +271,18 @@ func (s *System) extractAfterTurn(ctx context.Context, messages []message.Messag
 		logger.DebugCF("extractmemories", "extraction in progress — coalescing", nil)
 		return nil
 	}
+	s.state.SetInProgress(true)
 
+	// Detach from the hook context so the background extraction isn't
+	// canceled as soon as the post-turn hook returns. Use a background
+	// context with its own timeout.
 	s.inflight.Add(1)
 	go func() {
 		defer s.inflight.Done()
-		s.runExtraction(ctx, messages, false)
+		defer s.state.SetInProgress(false)
+		bgCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		s.runExtraction(bgCtx, messages, false)
 	}()
 
 	return nil

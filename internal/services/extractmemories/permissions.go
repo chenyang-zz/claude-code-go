@@ -2,8 +2,28 @@ package extractmemories
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
+
+// isPathWithinDir checks whether the given file path is within the specified
+// directory, using clean absolute paths and a separator-aware prefix check.
+func isPathWithinDir(filePath, dir string) bool {
+	cleanFP := filepath.Clean(filePath)
+	cleanDir := filepath.Clean(dir)
+
+	if cleanFP == cleanDir {
+		return true
+	}
+
+	dirPrefix := cleanDir
+	if !strings.HasSuffix(dirPrefix, string(os.PathSeparator)) {
+		dirPrefix += string(os.PathSeparator)
+	}
+
+	return strings.HasPrefix(cleanFP, dirPrefix)
+}
 
 // ToolPermDecision represents a decision on whether a tool is allowed for the
 // memory extraction subagent.
@@ -52,7 +72,7 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 		if isWriteOrEditToolUse(toolName) {
 			if filePath, ok := input["file_path"]; ok {
 				if fp, ok := filePath.(string); ok && fp != "" {
-					if strings.HasPrefix(fp, memoryDir) || strings.HasPrefix(fp, strings.TrimSuffix(memoryDir, "/")) {
+					if isPathWithinDir(fp, memoryDir) {
 						return ToolPermDecision{Behavior: "allow"}
 					}
 				}
@@ -75,36 +95,35 @@ func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
 }
 
 // readOnlyBashCommands is the set of commands that are considered safe for
-// read-only Bash execution.
+// read-only Bash execution. Commands that can write files (e.g., sed -i,
+// awk with system(), echo with redirection) are excluded.
 var readOnlyBashCommands = map[string]bool{
-	"ls":    true,
-	"find":  true,
-	"grep":  true,
-	"cat":   true,
-	"stat":  true,
-	"wc":    true,
-	"head":  true,
-	"tail":  true,
-	"file":  true,
-	"du":    true,
-	"df":    true,
-	"sort":  true,
-	"uniq":  true,
-	"cut":   true,
-	"awk":   true,
-	"sed":   true,
-	"tr":    true,
-	"echo":  true,
-	"pwd":   true,
-	"which": true,
-	"type":  true,
-	"env":   true,
+	"ls":       true,
+	"find":     true,
+	"grep":     true,
+	"cat":      true,
+	"stat":     true,
+	"wc":       true,
+	"head":     true,
+	"tail":     true,
+	"file":     true,
+	"du":       true,
+	"df":       true,
+	"pwd":      true,
+	"which":    true,
+	"type":     true,
+	"env":      true,
 	"printenv": true,
 }
 
+// dangerousShellChars is the set of shell metacharacters that can enable
+// destructive behavior (redirection, piping, command substitution, backgrounding).
+var dangerousShellChars = []string{">", "|", ";", "&", "$(", "`"}
+
 // isReadOnlyBashCommand checks if a Bash tool input represents a read-only
-// command. It looks at the "command" field in the input and checks against
-// the known read-only commands list.
+// command. It looks at the "command" field in the input, validates the base
+// command against the known read-only list, and rejects commands containing
+// shell metacharacters that enable writes or execution.
 func isReadOnlyBashCommand(input map[string]any) bool {
 	cmd, ok := input["command"]
 	if !ok {
@@ -113,6 +132,13 @@ func isReadOnlyBashCommand(input map[string]any) bool {
 	cmdStr, ok := cmd.(string)
 	if !ok || cmdStr == "" {
 		return false
+	}
+
+	// Reject commands containing dangerous shell metacharacters.
+	for _, ch := range dangerousShellChars {
+		if strings.Contains(cmdStr, ch) {
+			return false
+		}
 	}
 
 	// Get the first word of the command.

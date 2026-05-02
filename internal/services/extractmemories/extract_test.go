@@ -160,6 +160,9 @@ func TestSystemExtractAfterTurn(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
+
+	// Wait for any background goroutine to complete.
+	sys.DrainPendingExtraction(5000)
 }
 
 func TestSystemDrainPendingExtraction(t *testing.T) {

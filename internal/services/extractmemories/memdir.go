@@ -209,7 +209,8 @@ type memoryFrontmatter struct {
 
 // parseFrontmatter reads a markdown file and extracts YAML frontmatter
 // delimited by --- lines at the start of the file.
-// Only reads the first 40 lines (~4KB) to keep scanning fast.
+// Memory files are typically small (~1-5 KB), so reading the full file is
+// acceptable. parseFrontmatterString limits parsing to the first 40 lines.
 func parseFrontmatter(filePath string) (memoryFrontmatter, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
