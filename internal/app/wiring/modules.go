@@ -12,12 +12,13 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
-	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/ask_user_question"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/bash"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/brief"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/config_tool"
 	croncreate "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/create"
 	crondelete "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/delete"
 	cronlist "github.com/sheepzhao/claude-code-go/internal/services/tools/cron/list"
@@ -29,27 +30,26 @@ import (
 	filewrite "github.com/sheepzhao/claude-code-go/internal/services/tools/file_write"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/glob"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/grep"
-	notebookedit "github.com/sheepzhao/claude-code-go/internal/services/tools/notebook_edit"
+	lsptool "github.com/sheepzhao/claude-code-go/internal/services/tools/lsp"
 	listresources "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/list_resources"
 	readresource "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/read_resource"
+	notebookedit "github.com/sheepzhao/claude-code-go/internal/services/tools/notebook_edit"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/remote_trigger"
-	"github.com/sheepzhao/claude-code-go/internal/services/tools/send_message"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/schedule_wakeup"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/send_message"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
-	lsptool "github.com/sheepzhao/claude-code-go/internal/services/tools/lsp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/sleep"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/synthetic_output"
-	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_output"
-	"github.com/sheepzhao/claude-code-go/internal/services/tools/tool_search"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_create"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_get"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_list"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_output"
 	taskstop "github.com/sheepzhao/claude-code-go/internal/services/tools/task_stop"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/task_update"
-	"github.com/sheepzhao/claude-code-go/internal/services/tools/config_tool"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/team_create"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/team_delete"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/todo_write"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/tool_search"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/web_fetch"
 	worktreeenter "github.com/sheepzhao/claude-code-go/internal/services/tools/worktree/enter"
 	worktreeexit "github.com/sheepzhao/claude-code-go/internal/services/tools/worktree/exit"
@@ -65,7 +65,7 @@ type Modules struct {
 }
 
 var (
-	wakeupSchedulerOnce sync.Once
+	wakeupSchedulerOnce   sync.Once
 	sharedWakeupScheduler *repl.WakeupScheduler
 )
 
@@ -88,8 +88,8 @@ func NewModules(tools ...tool.Tool) (Modules, error) {
 	}
 
 	return Modules{
-		Tools:          registry,
-		WakeupScheduler: sharedWakeupScheduler,
+		Tools:           registry,
+		WakeupScheduler: WakeupScheduler(),
 	}, nil
 }
 
@@ -122,7 +122,7 @@ func (e *bashNotificationEmitter) EmitTaskNotification(taskID string, status str
 		msg += "\nOutput: " + outputPath
 	}
 	input := hook.NotificationHookInput{
-		BaseHookInput: hook.BaseHookInput{},
+		BaseHookInput:    hook.BaseHookInput{},
 		HookEventName:    string(hook.EventNotification),
 		Message:          msg,
 		Title:            "Background Bash Task",
@@ -155,6 +155,7 @@ func getCronStore(projectDir string) *cronshared.Store {
 	})
 	return cronStore
 }
+
 var worktreeManager = worktreeshared.NewManager()
 
 // webFetchCache is the process-level shared cache for WebFetch results.
@@ -185,10 +186,10 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		croncreate.NewTool(getCronStore(projectDir)),
 		crondelete.NewTool(getCronStore(projectDir)),
 		cronlist.NewTool(getCronStore(projectDir)),
-			schedule_wakeup.NewTool(WakeupScheduler()),
+		schedule_wakeup.NewTool(WakeupScheduler()),
 		skill.NewTool(),
-			synthetic_output.NewTool(),
-			tool_search.NewTool(),
+		synthetic_output.NewTool(),
+		tool_search.NewTool(),
 		worktreeenter.NewTool(worktreeManager),
 		worktreeexit.NewTool(worktreeManager),
 		listresources.NewTool(),
@@ -198,10 +199,10 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		team_create.NewTool(homeDir),
 		team_delete.NewTool(homeDir),
 		send_message.NewTool(homeDir),
-			brief.NewTool(),
-			task_output.NewTool(backgroundTaskStore),
-			sleep.NewTool(),
-			lsptool.NewTool(),
+		brief.NewTool(),
+		task_output.NewTool(backgroundTaskStore),
+		sleep.NewTool(),
+		lsptool.NewTool(),
 	}
 }
 
@@ -232,10 +233,10 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		croncreate.NewTool(getCronStore(projectDir)),
 		crondelete.NewTool(getCronStore(projectDir)),
 		cronlist.NewTool(getCronStore(projectDir)),
-			schedule_wakeup.NewTool(WakeupScheduler()),
+		schedule_wakeup.NewTool(WakeupScheduler()),
 		skill.NewTool(),
-			synthetic_output.NewTool(),
-			tool_search.NewTool(),
+		synthetic_output.NewTool(),
+		tool_search.NewTool(),
 		worktreeenter.NewTool(worktreeManager),
 		worktreeexit.NewTool(worktreeManager),
 		listresources.NewTool(),

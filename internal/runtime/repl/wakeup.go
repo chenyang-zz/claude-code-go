@@ -25,11 +25,12 @@ type WakeupRequest struct {
 // any previously scheduled wakeup. The fire channel delivers the prompt string
 // when the timer expires.
 type WakeupScheduler struct {
-	mu      sync.Mutex
-	timer   *time.Timer
-	pending *WakeupRequest
-	fireCh  chan string
-	stopped bool
+	mu         sync.Mutex
+	timer      *time.Timer
+	pending    *WakeupRequest
+	generation uint64
+	fireCh     chan string
+	stopped    bool
 }
 
 // NewWakeupScheduler creates a WakeupScheduler with a buffered fire channel
@@ -40,10 +41,10 @@ func NewWakeupScheduler() *WakeupScheduler {
 	}
 }
 
-// Schedule sets or replaces the pending wakeup. delaySeconds is expected to be
-// pre-clamped to [MinWakeupDelaySeconds, MaxWakeupDelaySeconds] by the caller
-// (the ScheduleWakeupTool). If a wakeup was already pending it is cancelled
-// and replaced.
+// Schedule sets or replaces the pending wakeup. delaySeconds is not clamped
+// by the scheduler; callers (ScheduleWakeupTool) are responsible for clamping
+// to [MinWakeupDelaySeconds, MaxWakeupDelaySeconds]. If a wakeup was already
+// pending it is cancelled and replaced.
 func (w *WakeupScheduler) Schedule(delaySeconds int, reason, prompt string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -53,6 +54,7 @@ func (w *WakeupScheduler) Schedule(delaySeconds int, reason, prompt string) {
 	}
 
 	w.cancelLocked()
+	w.generation++
 
 	req := &WakeupRequest{
 		DelaySeconds: delaySeconds,
@@ -61,11 +63,17 @@ func (w *WakeupScheduler) Schedule(delaySeconds int, reason, prompt string) {
 		FireAt:       time.Now().Add(time.Duration(delaySeconds) * time.Second),
 	}
 	w.pending = req
+	gen := w.generation
 
 	w.timer = time.AfterFunc(time.Duration(delaySeconds)*time.Second, func() {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		if w.stopped {
+			return
+		}
+		// Guard against stale timers: if a newer Schedule call replaced
+		// this request, skip delivery.
+		if w.generation != gen {
 			return
 		}
 		// Non-blocking send; if the channel already has an item, drain and

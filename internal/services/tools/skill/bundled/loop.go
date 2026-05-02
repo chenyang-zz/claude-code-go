@@ -13,17 +13,19 @@ const defaultMaxAgeDays = 7
 
 const loopUsage = `Usage: /loop [interval] <prompt>
 
-Run a prompt or slash command on a recurring interval.
+Run a prompt or slash command on a recurring schedule, or as a self-paced dynamic loop.
 
 Intervals: Ns, Nm, Nh, Nd (e.g. 5m, 30m, 2h, 1d). Minimum granularity is 1 minute.
-If no interval is specified, defaults to ` + defaultLoopInterval + `.
+
+Two modes:
+1. Fixed interval: /loop 5m /foo — schedules with CronCreate at the given interval
+2. Dynamic (no interval): /loop check the deploy — runs iteratively at your own pace using ScheduleWakeup
 
 Examples:
-  /loop 5m /babysit-prs
-  /loop 30m check the deploy
-  /loop 1h /standup 1
-  /loop check the deploy          (defaults to ` + defaultLoopInterval + `)
-  /loop check the deploy every 20m`
+  /loop 5m /babysit-prs        (every 5 min via CronCreate)
+  /loop 30m check the deploy   (every 30 min via CronCreate)
+  /loop 1h /standup 1          (every hour via CronCreate)
+  /loop check the deploy       (dynamic self-paced via ScheduleWakeup)`
 
 var leadingTokenRe = regexp.MustCompile(`^\d+[smhd]$`)
 
@@ -87,10 +89,10 @@ Run the following task iteratively at your own pace. After each iteration, call 
 
 func registerLoopSkill() {
 	skill.RegisterBundledSkill(skill.BundledSkillDefinition{
-		Name:         "loop",
-		Description:  "Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo, defaults to 10m)",
-		WhenToUse:    "When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval. Do NOT invoke for one-off tasks.",
-		ArgumentHint: "[interval] <prompt>",
+		Name:          "loop",
+		Description:   "Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo, defaults to 10m)",
+		WhenToUse:     "When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval. Do NOT invoke for one-off tasks.",
+		ArgumentHint:  "[interval] <prompt>",
 		UserInvocable: true,
 		GetPromptForCommand: func(args string) (string, error) {
 			trimmed := strings.TrimSpace(args)

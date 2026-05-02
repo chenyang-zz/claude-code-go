@@ -90,10 +90,10 @@ func (t *Tool) IsConcurrencySafe() bool {
 	return true
 }
 
-// RequiresUserInteraction reports that this tool does not require user
-// approval (the agent self-paces loop iterations autonomously).
+// RequiresUserInteraction reports that ScheduleWakeup does not require user
+// approval — the agent self-paces loop iterations autonomously.
 func (t *Tool) RequiresUserInteraction() bool {
-	return true
+	return false
 }
 
 // Invoke validates the input, clamps delaySeconds, and schedules the wakeup.
@@ -143,7 +143,7 @@ func inputSchema() coretool.InputSchema {
 	return coretool.InputSchema{
 		Properties: map[string]coretool.FieldSchema{
 			"delaySeconds": {
-				Type:        coretool.ValueKindNumber,
+				Type:        coretool.ValueKindInteger,
 				Description: "Seconds from now to wake up. Clamped to [60, 3600] by the runtime.",
 				Required:    true,
 			},
