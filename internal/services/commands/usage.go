@@ -7,6 +7,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/services/claudeailimits"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -78,6 +79,11 @@ func renderUsageSnapshot(snapshot UsageLimitsSnapshot) string {
 	}
 	if strings.TrimSpace(snapshot.Summary) != "" {
 		lines = append(lines, fmt.Sprintf("- Probe: %s", snapshot.Summary))
+	}
+	if persisted, err := claudeailimits.LoadClaudeAILimits(); err == nil {
+		if extra := renderClaudeAILimitsLines(persisted); len(extra) > 0 {
+			lines = append(lines, extra...)
+		}
 	}
 	return strings.Join(lines, "\n")
 }

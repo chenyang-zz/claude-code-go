@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/services/claudeailimits"
 )
 
 // UsageLimitsSnapshot stores one normalized provider quota summary for slash command rendering.
@@ -115,4 +116,46 @@ func formatUnixReset(value int64) string {
 		return "unknown"
 	}
 	return time.Unix(value, 0).UTC().Format(time.RFC3339)
+}
+
+// renderClaudeAILimitsLines projects the persisted ClaudeAILimits snapshot
+// into a list of human-readable lines for the `/usage` and `/stats` commands.
+// Returns nil when no snapshot has been persisted yet so callers can skip
+// the section entirely.
+func renderClaudeAILimitsLines(limits *claudeailimits.ClaudeAILimits) []string {
+	if limits == nil {
+		return nil
+	}
+	lines := []string{
+		fmt.Sprintf("- Claude.ai status: %s", normalizedStatus(string(limits.Status))),
+	}
+	if limits.RateLimitType != "" {
+		lines = append(lines, fmt.Sprintf("- Representative claim: %s", limits.RateLimitType.DisplayName()))
+	}
+	if limits.HasUtilization {
+		lines = append(lines, fmt.Sprintf("- Utilization: %.0f%%", limits.Utilization*100))
+	}
+	if limits.ResetsAt > 0 {
+		lines = append(lines, fmt.Sprintf("- Resets at: %s", formatUnixReset(limits.ResetsAt)))
+	}
+	if limits.IsUsingOverage {
+		lines = append(lines, "- Currently using extra usage")
+	}
+	if limits.OverageDisabledReason != "" {
+		lines = append(lines, fmt.Sprintf("- Extra usage disabled: %s", limits.OverageDisabledReason))
+	}
+	if limits.HasSurpassedThreshold {
+		lines = append(lines, fmt.Sprintf("- Surpassed threshold: %.0f%%", limits.SurpassedThreshold*100))
+	}
+	return lines
+}
+
+// normalizedStatus returns a stable label for the supplied status, falling
+// back to "unknown" when empty.
+func normalizedStatus(status string) string {
+	value := strings.TrimSpace(status)
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }

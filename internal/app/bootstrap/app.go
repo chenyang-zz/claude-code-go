@@ -41,6 +41,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
+	"github.com/sheepzhao/claude-code-go/internal/services/claudeailimits"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
@@ -307,6 +308,22 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	// Initialize Tips system (spinner contextual usage tips).
 	tips.Init(globalSettingsStore)
+
+	// Initialize Claude.ai rate limit observation system. Bound to the
+	// global settings store so the persisted snapshot survives restarts,
+	// and to a credential-store-backed loader so subscription gating
+	// (used by `messages.go` upsell branches) can read SubscriptionType
+	// without an extra round trip.
+	var claudeAILimitsLoader claudeailimits.SubscriptionLoader
+	if homeDir := strings.TrimSpace(cfg.HomeDir); homeDir != "" {
+		if store, storeErr := oauth.NewOAuthCredentialStore(homeDir); storeErr == nil {
+			claudeAILimitsLoader = claudeailimits.LoadOAuthTokensFromStore(store)
+		}
+	}
+	claudeailimits.Init(claudeailimits.InitOptions{
+		Store:              globalSettingsStore,
+		SubscriptionLoader: claudeAILimitsLoader,
+	})
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
@@ -945,54 +962,65 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	agentRegistry := resolveAgentRegistry(cfg)
 	promptBuilder := newPromptBuilder(cfg, agentRegistry)
 
+	rateLimitConsumer := claudeailimits.MakeAnthropicConsumer()
+	rateLimitErrorAnnotator := claudeailimits.MakeErrorAnnotator()
+
 	switch coreconfig.NormalizeProvider(cfg.Provider) {
 	case coreconfig.ProviderAnthropic, coreconfig.ProviderVertex, coreconfig.ProviderBedrock, coreconfig.ProviderFoundry:
 		var client model.Client
 		switch coreconfig.NormalizeProvider(cfg.Provider) {
 		case coreconfig.ProviderVertex:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:          cfg.APIKey,
-				AuthToken:       cfg.AuthToken,
-				BaseURL:         cfg.APIBaseURL,
-				HTTPClient:      nil,
-				IsFirstParty:    false,
-				VertexEnabled:   true,
-				VertexProjectID: cfg.VertexProjectID,
-				VertexRegion:    cfg.VertexRegion,
-				VertexSkipAuth:  cfg.VertexSkipAuth,
+				APIKey:                  cfg.APIKey,
+				AuthToken:               cfg.AuthToken,
+				BaseURL:                 cfg.APIBaseURL,
+				HTTPClient:              nil,
+				IsFirstParty:            false,
+				VertexEnabled:           true,
+				VertexProjectID:         cfg.VertexProjectID,
+				VertexRegion:            cfg.VertexRegion,
+				VertexSkipAuth:          cfg.VertexSkipAuth,
+				RateLimitConsumer:       rateLimitConsumer,
+				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
 			})
 		case coreconfig.ProviderBedrock:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:          cfg.APIKey,
-				AuthToken:       cfg.AuthToken,
-				BaseURL:         cfg.APIBaseURL,
-				HTTPClient:      nil,
-				IsFirstParty:    false,
-				BedrockEnabled:  true,
-				BedrockRegion:   cfg.BedrockRegion,
-				BedrockModelID:  cfg.BedrockModelID,
-				BedrockSkipAuth: cfg.BedrockSkipAuth,
+				APIKey:                  cfg.APIKey,
+				AuthToken:               cfg.AuthToken,
+				BaseURL:                 cfg.APIBaseURL,
+				HTTPClient:              nil,
+				IsFirstParty:            false,
+				BedrockEnabled:          true,
+				BedrockRegion:           cfg.BedrockRegion,
+				BedrockModelID:          cfg.BedrockModelID,
+				BedrockSkipAuth:         cfg.BedrockSkipAuth,
+				RateLimitConsumer:       rateLimitConsumer,
+				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
 			})
 		case coreconfig.ProviderFoundry:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:          cfg.APIKey,
-				AuthToken:       cfg.AuthToken,
-				BaseURL:         cfg.APIBaseURL,
-				HTTPClient:      nil,
-				IsFirstParty:    false,
-				FoundryEnabled:  true,
-				FoundryResource: cfg.FoundryResource,
-				FoundryBaseURL:  cfg.FoundryBaseURL,
-				FoundryAPIKey:   cfg.FoundryAPIKey,
-				FoundrySkipAuth: cfg.FoundrySkipAuth,
+				APIKey:                  cfg.APIKey,
+				AuthToken:               cfg.AuthToken,
+				BaseURL:                 cfg.APIBaseURL,
+				HTTPClient:              nil,
+				IsFirstParty:            false,
+				FoundryEnabled:          true,
+				FoundryResource:         cfg.FoundryResource,
+				FoundryBaseURL:          cfg.FoundryBaseURL,
+				FoundryAPIKey:           cfg.FoundryAPIKey,
+				FoundrySkipAuth:         cfg.FoundrySkipAuth,
+				RateLimitConsumer:       rateLimitConsumer,
+				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
 			})
 		default:
 			client = anthropic.NewClient(anthropic.Config{
-				APIKey:       cfg.APIKey,
-				AuthToken:    cfg.AuthToken,
-				BaseURL:      cfg.APIBaseURL,
-				HTTPClient:   nil,
-				IsFirstParty: true,
+				APIKey:                  cfg.APIKey,
+				AuthToken:               cfg.AuthToken,
+				BaseURL:                 cfg.APIBaseURL,
+				HTTPClient:              nil,
+				IsFirstParty:            true,
+				RateLimitConsumer:       rateLimitConsumer,
+				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
 			})
 		}
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
