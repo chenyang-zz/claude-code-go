@@ -54,6 +54,43 @@ type SubagentStopHookInput struct {
 	AgentTranscriptPath string `json:"agent_transcript_path"`
 }
 
+// SubagentStartHookInput is the JSON payload piped to SubagentStart event hooks via stdin.
+// Hooks receive this when a sub-agent starts and can inject additional context into
+// the sub-agent conversation.
+type SubagentStartHookInput struct {
+	BaseHookInput
+	// HookEventName is always "SubagentStart".
+	HookEventName string `json:"hook_event_name"`
+	// AgentID identifies the sub-agent being started.
+	AgentID string `json:"agent_id"`
+	// AgentType is the type/name of the sub-agent (e.g. "general-purpose").
+	AgentType string `json:"agent_type"`
+}
+
+// WorktreeCreateHookInput is the JSON payload piped to WorktreeCreate event hooks via stdin.
+// Hooks receive this after a git worktree is created and can block the operation
+// by returning exit code 2. In Go the worktree is created via git (not hook), so this
+// is a post-creation notification hook.
+type WorktreeCreateHookInput struct {
+	BaseHookInput
+	// HookEventName is always "WorktreeCreate".
+	HookEventName string `json:"hook_event_name"`
+	// Name is the worktree slug provided by the caller.
+	Name string `json:"name"`
+}
+
+// WorktreeRemoveHookInput is the JSON payload piped to WorktreeRemove event hooks via stdin.
+// Hooks receive this after a git worktree is removed and can observe the removal.
+// This is a non-blocking notification hook (matching TS behavior where failed hooks only
+// log errors and do not prevent cleanup).
+type WorktreeRemoveHookInput struct {
+	BaseHookInput
+	// HookEventName is always "WorktreeRemove".
+	HookEventName string `json:"hook_event_name"`
+	// WorktreePath is the absolute path of the removed worktree.
+	WorktreePath string `json:"worktree_path"`
+}
+
 // StopFailureHookInput is the JSON payload piped to StopFailure event hooks.
 type StopFailureHookInput struct {
 	BaseHookInput

@@ -1173,6 +1173,48 @@ func (e *Runtime) RunUserPromptSubmitHooks(ctx context.Context, prompt string, c
 	return results, false, nil
 }
 
+// RunSubagentStartHooks fires SubagentStart hooks when a sub-agent starts.
+// It returns the collected hook results, whether any hook blocked (exit code 2),
+// the blocking message contents, and the joined additional context from all
+// successful hooks. Callers should append the additional context as a user
+// message to the sub-agent's initial messages (consistent with SessionStart
+// and UserPromptSubmit patterns).
+func (e *Runtime) RunSubagentStartHooks(ctx context.Context, agentID string, agentType string, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string, additionalContext string) {
+	if !e.shouldRunStopHooks(hook.EventSubagentStart) {
+		return nil, false, nil, ""
+	}
+	input := hook.SubagentStartHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventSubagentStart),
+		AgentID:       agentID,
+		AgentType:     agentType,
+	}
+	results = e.runHooks(ctx, hook.EventSubagentStart, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil, ""
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results), ""
+	}
+	// Collect additional context from successful hooks.
+	var contexts []string
+	for _, r := range results {
+		if r.IsSuccess() && r.ParsedOutput != nil {
+			if ac := r.ParsedOutput.ResolveAdditionalContext(); ac != "" {
+				contexts = append(contexts, ac)
+			}
+		}
+	}
+	if len(contexts) > 0 {
+		return results, false, nil, strings.Join(contexts, "\n")
+	}
+	return results, false, nil, ""
+}
+
 // workingDir returns the working directory used for hook execution context.
 func (e *Runtime) workingDir(requestCWD string) string {
 	if e == nil {
