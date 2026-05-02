@@ -202,6 +202,114 @@ func (s *GlobalSettingsStore) SaveTheme(ctx context.Context, theme string) error
 	return nil
 }
 
+// RecordTipShown writes a tip-id → current numStartups entry into the global
+// settings file under the tipsHistory key.
+func (s *GlobalSettingsStore) RecordTipShown(tipID string) error {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return err
+	}
+
+	numStartups := 0
+	if v, ok := document["numStartups"].(float64); ok {
+		numStartups = int(v)
+	}
+
+	history := make(map[string]any)
+	if h, ok := document["tipsHistory"].(map[string]any); ok {
+		if h != nil {
+			history = h
+		}
+	}
+	history[tipID] = numStartups
+	document["tipsHistory"] = history
+
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
+	}
+
+	logger.DebugCF("settings_config", "recorded tip shown", map[string]any{
+		"path":    s.Path,
+		"tip_id":  tipID,
+		"session": numStartups,
+	})
+	return nil
+}
+
+// GetTipsHistory reads the tipsHistory map from the global settings file.
+// Returns an empty map if the field is absent or malformed.
+func (s *GlobalSettingsStore) GetTipsHistory() map[string]int {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return map[string]int{}
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return map[string]int{}
+	}
+
+	history := make(map[string]int)
+	if h, ok := document["tipsHistory"].(map[string]any); ok {
+		for k, v := range h {
+			if n, ok := v.(float64); ok {
+				history[k] = int(n)
+			}
+		}
+	}
+	return history
+}
+
+// GetNumStartups reads the numStartups counter from the global settings file.
+func (s *GlobalSettingsStore) GetNumStartups() int {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return 0
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return 0
+	}
+
+	if v, ok := document["numStartups"].(float64); ok {
+		return int(v)
+	}
+	return 0
+}
+
+// IncrementNumStartups bumps the numStartups counter in the global settings
+// file by one. If the field is absent it is initialised to 1.
+func (s *GlobalSettingsStore) IncrementNumStartups() error {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return err
+	}
+
+	current := 0
+	if v, ok := document["numStartups"].(float64); ok {
+		current = int(v)
+	}
+	current++
+	document["numStartups"] = current
+
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
+	}
+
+	logger.DebugCF("settings_config", "incremented numStartups", map[string]any{
+		"path":        s.Path,
+		"num_startups": current,
+	})
+	return nil
+}
+
 // writeSettingsDocument encodes and writes one Claude Code settings document to disk.
 func writeSettingsDocument(path string, document map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

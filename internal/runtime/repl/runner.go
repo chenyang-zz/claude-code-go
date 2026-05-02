@@ -21,6 +21,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 	"github.com/sheepzhao/claude-code-go/pkg/sdk"
@@ -222,6 +223,13 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		return err
 	} else if blocked {
 		return nil
+	}
+
+	// Show a contextual tip before the model responds.
+	if tip := tips.GetTipToShow(); tip != nil {
+		if err := r.Renderer.RenderLine(fmt.Sprintf("💡 %s", tip.Content)); err == nil {
+			tips.OnTipShown(tip)
+		}
 	}
 
 	requestHistory := history.Clone()

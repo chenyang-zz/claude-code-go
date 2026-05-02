@@ -39,6 +39,9 @@ const (
 	// FlagSpeculation gates the speculation feature.
 	// When enabled, speculative generation is used to improve response latency.
 	FlagSpeculation = "SPECULATION"
+	// FlagSpinnerTips gates the spinner tips feature.
+	// When enabled, contextual usage tips are shown during the spinner wait state.
+	FlagSpinnerTips = "SPINNER_TIPS"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

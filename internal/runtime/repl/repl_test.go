@@ -24,6 +24,12 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 )
 
+func init() {
+	// Disable spinner tips in tests to avoid extra output interfering
+	// with assertions against rendered buffer contents.
+	os.Setenv("CLAUDE_CODE_ENABLE_SPINNER_TIPS", "0")
+}
+
 type recordingEngine struct {
 	lastRequest conversation.RunRequest
 	stream      event.Stream

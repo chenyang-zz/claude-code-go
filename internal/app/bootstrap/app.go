@@ -46,6 +46,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
+	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
@@ -303,6 +304,9 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	_, psCleanup := promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {
 		engine.RegisterPostSamplingHook(engine.PostSamplingHook(hook))
 	}, cfg.ProjectPath)
+
+	// Initialize Tips system (spinner contextual usage tips).
+	tips.Init(globalSettingsStore)
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
