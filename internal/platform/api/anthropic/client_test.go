@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,9 +330,10 @@ func TestClientStreamReadsErrorEvent(t *testing.T) {
 // the client is first-party and TaskBudget is provided.
 func TestClientStreamTaskBudget(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify beta header.
-		if got := r.Header.Get("anthropic-beta"); got != "task-budgets-2026-03-13" {
-			t.Fatalf("anthropic-beta = %q, want task-budgets-2026-03-13", got)
+		// Verify beta header contains task-budgets (merged with auto-detected betas).
+		betaHeader := r.Header.Get("anthropic-beta")
+		if !strings.Contains(betaHeader, "task-budgets-2026-03-13") {
+			t.Fatalf("anthropic-beta = %q, want to contain task-budgets-2026-03-13", betaHeader)
 		}
 
 		var body map[string]any

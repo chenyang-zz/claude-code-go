@@ -17,6 +17,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic/betas"
 	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
@@ -354,6 +355,21 @@ func NewClient(cfg Config) *Client {
 	return client
 }
 
+// providerType maps the client's boolean provider flags to a typed provider
+// identifier used by the beta header composer.
+func (c *Client) providerType() betas.ProviderType {
+	if c.vertexEnabled {
+		return betas.ProviderVertex
+	}
+	if c.bedrockEnabled {
+		return betas.ProviderBedrock
+	}
+	if c.foundryEnabled {
+		return betas.ProviderFoundry
+	}
+	return betas.ProviderFirstParty
+}
+
 // isOAuthAutoRefreshEnabled reports whether the client should perform OAuth
 // preemptive / reactive refresh for the upcoming request. The hooks only
 // engage for first-party Anthropic OAuth traffic — third-party providers
@@ -391,9 +407,26 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		return nil, fmt.Errorf("request contains %d media items, exceeding the maximum of %d", mediaCount, MaxMediaPerRequest)
 	}
 
-	body, err := json.Marshal(c.buildMessagesRequest(req))
+	betaOpts := betas.ParseEnvOptions()
+	betaOpts.Provider = c.providerType()
+
+	msgReq := c.buildMessagesRequest(req)
+	body, err := json.Marshal(msgReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
+	}
+
+	// For Bedrock, inject extra body params beta headers into the request body.
+	if c.bedrockEnabled {
+		extraBetas := betas.GetExtraBodyParamsBetas(req.Model, betaOpts)
+		if len(extraBetas) > 0 {
+			body, err = injectExtraBodyParams(body, map[string]any{
+				"anthropic-beta": strings.Join(extraBetas, ","),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("inject bedrock extra body params: %w", err)
+			}
+		}
 	}
 
 	// accessToken tracks the bearer token used for the current attempt.
@@ -518,10 +551,17 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		}
 		httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-		// Inject task-budgets beta header when task budget is configured
-		// and this is a first-party Anthropic request.
-		if req.TaskBudget != nil && c.isFirstParty {
-			httpReq.Header.Set("anthropic-beta", taskBudgetsBetaHeader)
+		// Compose and inject beta headers for first-party requests only.
+		if c.isFirstParty {
+			modelBetas := betas.GetModelBetas(req.Model, betaOpts)
+			if req.TaskBudget != nil {
+				if !containsBeta(modelBetas, taskBudgetsBetaHeader) {
+					modelBetas = append(modelBetas, taskBudgetsBetaHeader)
+				}
+			}
+			if len(modelBetas) > 0 {
+				httpReq.Header.Set("anthropic-beta", strings.Join(modelBetas, ","))
+			}
 		}
 		return httpReq, nil
 	}
@@ -1181,4 +1221,28 @@ func mapTools(tools []model.ToolDefinition) []anthropicTool {
 		})
 	}
 	return out
+}
+
+// containsBeta reports whether the slice includes the target beta header.
+func containsBeta(betas []string, target string) bool {
+	for _, b := range betas {
+		if b == target {
+			return true
+		}
+	}
+	return false
+}
+
+// injectExtraBodyParams merges extra key-value pairs into an already-serialized
+// JSON request body. Used by the Bedrock path to add anthropic-beta headers
+// through extraBodyParams instead of HTTP headers.
+func injectExtraBodyParams(body []byte, params map[string]any) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range params {
+		m[k] = v
+	}
+	return json.Marshal(m)
 }
