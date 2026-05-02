@@ -154,6 +154,12 @@ type Config struct {
 	// cache_control markers to API requests for prompt caching. It defaults to
 	// true and can be disabled via the DISABLE_PROMPT_CACHING environment variable.
 	EnablePromptCaching bool
+	// SpinnerTipsEnabled controls whether contextual usage tips are shown
+	// during the spinner wait state. Defaults to true.
+	SpinnerTipsEnabled bool
+	// HasSpinnerTipsEnabledSetting reports whether SpinnerTipsEnabled was
+	// explicitly set by settings.
+	HasSpinnerTipsEnabledSetting bool
 	// VertexProjectID is the GCP project ID for Vertex AI provider.
 	VertexProjectID string
 	// VertexRegion is the GCP region for Vertex AI provider.
