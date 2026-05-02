@@ -96,8 +96,8 @@ type State struct {
 	// config is the current extraction configuration.
 	config ExtractionConfig
 
-	// lastMemoryMessageUuid is the cursor — UUID of the last message processed.
-	lastMemoryMessageUuid string
+	// lastMessageIndex is the cursor — index of the last message processed.
+	lastMessageIndex int
 
 	// inProgress is true while an extraction is executing.
 	inProgress bool
@@ -110,9 +110,11 @@ type State struct {
 }
 
 // NewState creates a new extraction state with default config.
+// The cursor starts at -1 (no extraction performed yet).
 func NewState() *State {
 	return &State{
-		config: DefaultExtractionConfig(),
+		config:           DefaultExtractionConfig(),
+		lastMessageIndex: -1,
 	}
 }
 
@@ -130,18 +132,19 @@ func (s *State) Config() ExtractionConfig {
 	return s.config
 }
 
-// GetLastMemoryMessageUuid returns the cursor UUID.
-func (s *State) GetLastMemoryMessageUuid() string {
+// GetLastMessageIndex returns the cursor index of the last message processed.
+// Returns -1 when no extraction has been performed.
+func (s *State) GetLastMessageIndex() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.lastMemoryMessageUuid
+	return s.lastMessageIndex
 }
 
-// SetLastMemoryMessageUuid advances the cursor to the given message UUID.
-func (s *State) SetLastMemoryMessageUuid(uuid string) {
+// SetLastMessageIndex advances the cursor to the given message index.
+func (s *State) SetLastMessageIndex(idx int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.lastMemoryMessageUuid = uuid
+	s.lastMessageIndex = idx
 }
 
 // IsInProgress reports whether an extraction is currently running.
@@ -198,7 +201,7 @@ func (s *State) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.config = DefaultExtractionConfig()
-	s.lastMemoryMessageUuid = ""
+	s.lastMessageIndex = -1
 	s.inProgress = false
 	s.turnsSinceLastExtraction = 0
 	s.hasLoggedGateFailure = false

@@ -56,16 +56,16 @@ func TestDefaultExtractionConfig(t *testing.T) {
 func TestStateCRUD(t *testing.T) {
 	s := NewState()
 
-	t.Run("initial cursor is empty", func(t *testing.T) {
-		if s.GetLastMemoryMessageUuid() != "" {
-			t.Error("expected empty cursor")
+	t.Run("initial cursor is -1", func(t *testing.T) {
+		if s.GetLastMessageIndex() != -1 {
+			t.Error("expected cursor to be -1")
 		}
 	})
 
 	t.Run("set and get cursor", func(t *testing.T) {
-		s.SetLastMemoryMessageUuid("msg-uuid-123")
-		if s.GetLastMemoryMessageUuid() != "msg-uuid-123" {
-			t.Error("expected cursor to be set")
+		s.SetLastMessageIndex(42)
+		if s.GetLastMessageIndex() != 42 {
+			t.Error("expected cursor to be set to 42")
 		}
 	})
 
@@ -120,8 +120,8 @@ func TestStateCRUD(t *testing.T) {
 
 	t.Run("reset state", func(t *testing.T) {
 		s.Reset()
-		if s.GetLastMemoryMessageUuid() != "" {
-			t.Error("expected empty cursor after reset")
+		if s.GetLastMessageIndex() != -1 {
+			t.Error("expected empty cursor (-1) after reset")
 		}
 		if s.IsInProgress() {
 			t.Error("expected not in progress after reset")

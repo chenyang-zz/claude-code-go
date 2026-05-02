@@ -25,6 +25,10 @@ const (
 	// FlagCoordinatorMode gates the coordinator mode agents.
 	// When enabled, coordinator-specific agents are registered.
 	FlagCoordinatorMode = "COORDINATOR_MODE"
+	// FlagExtractMemories gates the extractMemories background extraction.
+	// When enabled, a forked subagent analyzes conversation history after each
+	// complete turn and writes durable memories to the auto-memory directory.
+	FlagExtractMemories = "EXTRACT_MEMORIES"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
