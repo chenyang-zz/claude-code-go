@@ -59,13 +59,20 @@ func (u *Updater) updateOneDoc(ctx context.Context, filePath string, messages []
 	// 1. Re-read the document to get the latest content.
 	currentContent, err := u.readFile(filePath)
 	if err != nil {
-		// File deleted or unreadable — remove from tracking.
-		UnregisterMagicDoc(filePath)
-		logger.DebugCF("magicdocs", "magic doc unregistered (unreadable)", map[string]any{
+		// Only unregister if the file was deleted (NotExist). Transient errors
+		// (permission issues, network FS hiccups) are logged but keep the doc tracked.
+		if os.IsNotExist(err) {
+			UnregisterMagicDoc(filePath)
+			logger.DebugCF("magicdocs", "magic doc unregistered (file deleted)", map[string]any{
+				"file_path": filePath,
+			})
+			return nil
+		}
+		logger.WarnCF("magicdocs", "failed to read magic doc (will retry)", map[string]any{
 			"file_path": filePath,
 			"error":     err.Error(),
 		})
-		return nil
+		return err
 	}
 
 	// 2. Re-detect the Magic Doc header from latest content.

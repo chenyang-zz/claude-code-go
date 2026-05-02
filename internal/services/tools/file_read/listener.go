@@ -1,14 +1,23 @@
 package file_read
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // ReadListener is called after a successful file read (text only).
 // filePath is the absolute path, content is the full text content.
 type ReadListener func(filePath string, content string)
 
+type listenerEntry struct {
+	id       uint64
+	listener ReadListener
+}
+
 var (
+	nextListenerID atomic.Uint64
 	readListenersMu sync.Mutex
-	readListeners   []ReadListener
+	readListeners   []listenerEntry
 )
 
 // RegisterReadListener registers a listener to be called after each successful text file read.
@@ -18,19 +27,22 @@ func RegisterReadListener(listener ReadListener) func() {
 		return func() {}
 	}
 
-	readListenersMu.Lock()
-	defer readListenersMu.Unlock()
+	id := nextListenerID.Add(1)
 
-	readListeners = append(readListeners, listener)
-	idx := len(readListeners) - 1
-	removed := false
+	readListenersMu.Lock()
+	readListeners = append(readListeners, listenerEntry{id: id, listener: listener})
+	readListenersMu.Unlock()
 
 	return func() {
 		readListenersMu.Lock()
 		defer readListenersMu.Unlock()
-		if !removed {
-			readListeners[idx] = nil
-			removed = true
+		for i, e := range readListeners {
+			if e.id == id {
+				// Remove by swapping with last element and truncating (order doesn't matter).
+				readListeners[i] = readListeners[len(readListeners)-1]
+				readListeners = readListeners[:len(readListeners)-1]
+				return
+			}
 		}
 	}
 }
@@ -46,17 +58,14 @@ func ClearReadListeners() {
 // Listeners are called without holding the lock to avoid deadlocks.
 func notifyReadListeners(filePath string, content string) {
 	readListenersMu.Lock()
-	// Compact nil entries while copying the slice.
-	listeners := make([]ReadListener, 0, len(readListeners))
-	for _, l := range readListeners {
-		if l != nil {
-			listeners = append(listeners, l)
-		}
+	// Snapshot the current listeners under lock.
+	snapshot := make([]ReadListener, len(readListeners))
+	for i, e := range readListeners {
+		snapshot[i] = e.listener
 	}
-	readListeners = listeners
 	readListenersMu.Unlock()
 
-	for _, l := range listeners {
+	for _, l := range snapshot {
 		l(filePath, content)
 	}
 }

@@ -895,7 +895,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 						"session_id": sessionID,
 					})
 					// Fire post-turn hooks before completing the turn.
-					e.firePostTurnHooks(ctx, history.Messages)
+					e.firePostTurnHooks(ctx, cwd, history.Messages)
 					out <- event.Event{
 						Type:      event.TypeConversationDone,
 						Timestamp: time.Now(),
@@ -926,7 +926,7 @@ func (e *Runtime) runLoop(ctx context.Context, sessionID string, cwd string, tur
 				}
 			}
 			// Fire post-turn hooks before completing the turn.
-			e.firePostTurnHooks(ctx, history.Messages)
+			e.firePostTurnHooks(ctx, cwd, history.Messages)
 			out <- event.Event{
 				Type:      event.TypeConversationDone,
 				Timestamp: time.Now(),

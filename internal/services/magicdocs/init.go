@@ -22,13 +22,13 @@ type PostTurnHookFunc func(ctx context.Context, messages []message.Message, work
 // Pass nil to skip subagent execution (only detection and tracking will work).
 // The registerPostTurnHook function registers a hook with the engine's post-turn system.
 func InitMagicDocs(runner SubagentRunner, registerPostTurnHook func(hook PostTurnHookFunc)) {
-	if runner == nil {
-		logger.DebugCF("magicdocs", "skipping init: no subagent runner available", nil)
-		return
-	}
 	if !isMagicDocsEnabled() {
 		logger.DebugCF("magicdocs", "skipping init: magic docs disabled", nil)
 		return
+	}
+
+	if runner == nil {
+		logger.DebugCF("magicdocs", "initializing without subagent runner (detection/tracking only)", nil)
 	}
 
 	// Create the updater with a direct filesystem reader.

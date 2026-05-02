@@ -20,7 +20,7 @@ func TestPostTurnHook_RegisterAndFire(t *testing.T) {
 
 	e := &Runtime{}
 	msgs := []message.Message{}
-	e.firePostTurnHooks(context.Background(), msgs)
+	e.firePostTurnHooks(context.Background(), "/test/cwd", msgs)
 
 	if !called {
 		t.Error("post-turn hook was not called")
@@ -39,7 +39,7 @@ func TestPostTurnHook_Clear(t *testing.T) {
 
 	e := &Runtime{}
 	msgs := []message.Message{}
-	e.firePostTurnHooks(context.Background(), msgs)
+	e.firePostTurnHooks(context.Background(), "/test/cwd", msgs)
 }
 
 // TestPostTurnHook_MultipleHooks verifies that all registered hooks are called.
@@ -55,7 +55,7 @@ func TestPostTurnHook_MultipleHooks(t *testing.T) {
 
 	e := &Runtime{}
 	msgs := []message.Message{}
-	e.firePostTurnHooks(context.Background(), msgs)
+	e.firePostTurnHooks(context.Background(), "/test/cwd", msgs)
 
 	if count != 2 {
 		t.Errorf("expected 2 hooks to be called, got %d", count)
@@ -77,7 +77,7 @@ func TestPostTurnHook_HookError(t *testing.T) {
 
 	e := &Runtime{}
 	msgs := []message.Message{}
-	e.firePostTurnHooks(context.Background(), msgs)
+	e.firePostTurnHooks(context.Background(), "/test/cwd", msgs)
 
 	if !secondCalled {
 		t.Error("second hook was not called after first hook returned an error")

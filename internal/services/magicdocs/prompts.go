@@ -1,6 +1,6 @@
 package magicdocs
 
-import "strings"
+import "regexp"
 
 // defaultUpdatePromptTemplate is the built-in Magic Docs update prompt.
 // Uses {{variable}} syntax for substitution: docContents, docPath, docTitle, customInstructions.
@@ -55,15 +55,20 @@ Use the Edit tool with file_path: {{docPath}}
 
 REMEMBER: Only update if there is substantial new information. The Magic Doc header (# MAGIC DOC: {{docTitle}}) must remain unchanged.`
 
+// placeholderPattern matches {{key}} placeholders for variable substitution.
+var placeholderPattern = regexp.MustCompile(`\{\{(\w+)\}\}`)
+
 // substituteVariables replaces {{key}} placeholders in the template with values from vars.
-// Single-pass replacement avoids double-substitution and backreference corruption.
+// Uses regexp-based single-pass replacement on the original template to avoid
+// double-substitution when replacement values contain {{...}} patterns.
 func substituteVariables(template string, vars map[string]string) string {
-	result := template
-	for key, value := range vars {
-		placeholder := "{{" + key + "}}"
-		result = strings.ReplaceAll(result, placeholder, value)
-	}
-	return result
+	return placeholderPattern.ReplaceAllStringFunc(template, func(match string) string {
+		key := match[2 : len(match)-2] // strip {{ and }}
+		if val, ok := vars[key]; ok {
+			return val
+		}
+		return match // keep unrecognized placeholders as-is
+	})
 }
 
 // BuildUpdatePrompt constructs the Magic Docs update prompt with variable substitution.

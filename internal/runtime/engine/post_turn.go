@@ -36,18 +36,19 @@ func ClearPostTurnHooks() {
 
 // firePostTurnHooks executes all registered post-turn hooks sequentially.
 // Each hook runs with a 60-second timeout to avoid blocking the engine.
-func (e *Runtime) firePostTurnHooks(ctx context.Context, messages []message.Message) {
+func (e *Runtime) firePostTurnHooks(ctx context.Context, cwd string, messages []message.Message) {
 	postTurnHooksMu.Lock()
 	hooks := make([]PostTurnHook, len(postTurnHooks))
 	copy(hooks, postTurnHooks)
 	postTurnHooksMu.Unlock()
 
+	workingDir := e.workingDir(cwd)
 	for _, hook := range hooks {
 		if hook == nil {
 			continue
 		}
 		hookCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		if err := hook(hookCtx, messages, e.workingDir("")); err != nil {
+		if err := hook(hookCtx, messages, workingDir); err != nil {
 			logger.WarnCF("engine", "post-turn hook error", map[string]any{
 				"error": err.Error(),
 			})
