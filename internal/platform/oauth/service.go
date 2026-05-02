@@ -363,6 +363,8 @@ func formatTokens(resp *OAuthTokenExchangeResponse, profile *ProfileInfo) *OAuth
 	if profile != nil {
 		tokens.SubscriptionType = profile.SubscriptionType
 		tokens.RateLimitTier = profile.RateLimitTier
+		tokens.HasExtraUsageEnabled = profile.HasExtraUsageEnabled
+		tokens.BillingType = profile.BillingType
 		tokens.Profile = &profile.RawProfile
 	}
 	if resp.Account != nil {

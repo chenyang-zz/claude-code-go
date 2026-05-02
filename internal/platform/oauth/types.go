@@ -163,8 +163,17 @@ type OAuthTokens struct {
 	Scopes           []string
 	SubscriptionType SubscriptionType
 	RateLimitTier    RateLimitTier
-	Profile          *OAuthProfileResponse
-	TokenAccount     *OAuthTokenAccountInfo
+	// HasExtraUsageEnabled mirrors organization.has_extra_usage_enabled from
+	// the profile endpoint. Persisted alongside the credentials so callers
+	// outside the OAuth flow (e.g. rate limit upsell text) can branch on it
+	// without re-fetching the profile.
+	HasExtraUsageEnabled bool
+	// BillingType mirrors organization.billing_type. Persisted to support
+	// overage provisioning gating; an empty string means the tier cannot be
+	// determined yet.
+	BillingType BillingType
+	Profile      *OAuthProfileResponse
+	TokenAccount *OAuthTokenAccountInfo
 }
 
 // OAuthTokenAccountInfo is the normalized projection of OAuthTokenExchangeResponse.Account

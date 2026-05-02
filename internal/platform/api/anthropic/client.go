@@ -99,6 +99,28 @@ type Config struct {
 	// calling Refresh + retrying the request once. When nil the client
 	// behaves exactly as in batch-218/219 (no auto-refresh).
 	TokenRefresher *oauth.TokenRefresher
+
+	// RateLimitConsumer, when non-nil, is invoked after every Anthropic
+	// request with the response headers (or nil when the request never
+	// reached the server). The first argument is the canonical
+	// http.Header carrying anthropic-ratelimit-* fields; the second is
+	// the response status (0 when err != nil). The third argument is
+	// the request error if any. The consumer is responsible for
+	// projecting the headers onto persisted ClaudeAILimits state.
+	//
+	// Hook is independent of TokenRefresher and works with API-key
+	// requests too — both paths get to observe the same headers.
+	RateLimitConsumer func(headers http.Header, status int, err error)
+
+	// RateLimitErrorAnnotator, when non-nil, gets a chance to rewrite the
+	// user-facing error message returned for non-2xx responses. The first
+	// argument is the wrapped ProviderError, the second is the model name
+	// from the request. Implementations should consult the persisted
+	// ClaudeAILimits snapshot to render a user-friendly limit-reached
+	// sentence (see services/claudeailimits.MakeErrorAnnotator).
+	//
+	// Returning nil leaves the original error unchanged.
+	RateLimitErrorAnnotator func(err error, modelName string) error
 }
 
 // Client implements the minimum Anthropic SSE text stream client used by the runtime engine.
@@ -140,6 +162,12 @@ type Client struct {
 	// tokenRefresher coordinates OAuth credential refresh for first-party
 	// Anthropic requests. nil disables auto-refresh.
 	tokenRefresher *oauth.TokenRefresher
+	// rateLimitConsumer observes response headers for rate-limit projection.
+	// nil disables the hook.
+	rateLimitConsumer func(headers http.Header, status int, err error)
+	// rateLimitErrorAnnotator rewrites the user-facing error message for
+	// non-2xx responses. nil disables the hook.
+	rateLimitErrorAnnotator func(err error, modelName string) error
 }
 
 type messagesRequest struct {
@@ -302,12 +330,14 @@ func NewClient(cfg Config) *Client {
 	}
 
 	client := &Client{
-		apiKey:         cfg.APIKey,
-		authToken:      cfg.AuthToken,
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		httpClient:     httpClient,
-		isFirstParty:   cfg.IsFirstParty,
-		tokenRefresher: cfg.TokenRefresher,
+		apiKey:                  cfg.APIKey,
+		authToken:               cfg.AuthToken,
+		baseURL:                 strings.TrimRight(baseURL, "/"),
+		httpClient:              httpClient,
+		isFirstParty:            cfg.IsFirstParty,
+		tokenRefresher:          cfg.TokenRefresher,
+		rateLimitConsumer:       cfg.RateLimitConsumer,
+		rateLimitErrorAnnotator: cfg.RateLimitErrorAnnotator,
 	}
 
 	if cfg.VertexEnabled {
@@ -382,6 +412,24 @@ func (c *Client) isOAuthAutoRefreshEnabled() bool {
 		return false
 	}
 	return true
+}
+
+// invokeRateLimitConsumer forwards the response headers (or transport-error
+// signal) to the registered consumer. Safe to call when no consumer is
+// registered. Any panic in the consumer is recovered so a buggy projection
+// cannot crash the upstream stream.
+func (c *Client) invokeRateLimitConsumer(headers http.Header, status int, err error) {
+	if c == nil || c.rateLimitConsumer == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.WarnCF("anthropic_client", "rate-limit consumer panicked", map[string]any{
+				"panic": fmt.Sprintf("%v", r),
+			})
+		}
+	}()
+	c.rateLimitConsumer(headers, status, err)
 }
 
 // wrapOAuthRefreshFailure normalises any OAuth refresh-time error into a
@@ -579,8 +627,10 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		c.invokeRateLimitConsumer(nil, 0, err)
 		return nil, fmt.Errorf("execute anthropic request: %w", err)
 	}
+	c.invokeRateLimitConsumer(resp.Header, resp.StatusCode, nil)
 
 	// Reactive 401 refresh + single retry. We close the original response
 	// body, request a refresh, and replay the request once with the new
@@ -604,8 +654,10 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		}
 		retryResp, err := c.httpClient.Do(retryReq)
 		if err != nil {
+			c.invokeRateLimitConsumer(nil, 0, err)
 			return nil, fmt.Errorf("execute anthropic request (after oauth refresh): %w", err)
 		}
+		c.invokeRateLimitConsumer(retryResp.Header, retryResp.StatusCode, nil)
 		resp = retryResp
 	}
 
@@ -613,7 +665,13 @@ func (c *Client) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		defer resp.Body.Close()
 		payload, _ := io.ReadAll(resp.Body)
 		apiErr := ParseAPIError(resp, payload)
-		return nil, MapAPIError(apiErr)
+		var finalErr error = MapAPIError(apiErr)
+		if c.rateLimitErrorAnnotator != nil {
+			if annotated := c.rateLimitErrorAnnotator(finalErr, req.Model); annotated != nil {
+				finalErr = annotated
+			}
+		}
+		return nil, finalErr
 	}
 
 	out := make(chan model.Event)

@@ -42,6 +42,11 @@ const (
 	// FlagSpinnerTips gates the spinner tips feature.
 	// When enabled, contextual usage tips are shown during the spinner wait state.
 	FlagSpinnerTips = "SPINNER_TIPS"
+	// FlagClaudeAILimits gates the Claude.ai rate limit observation system.
+	// When enabled, the Anthropic client consumes ratelimit response headers
+	// and persists the latest ClaudeAILimits snapshot for engine error
+	// messages and `/usage` `/stats` rendering.
+	FlagClaudeAILimits = "CLAUDEAI_LIMITS"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

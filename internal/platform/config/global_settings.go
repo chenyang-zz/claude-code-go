@@ -310,6 +310,56 @@ func (s *GlobalSettingsStore) IncrementNumStartups() error {
 	return nil
 }
 
+// SaveLastClaudeAILimits writes the supplied generic snapshot under the
+// `lastClaudeAILimits` key. The caller is expected to encode its domain
+// snapshot into a JSON-friendly map so this writer remains decoupled from
+// the claudeailimits package.
+//
+// A nil snapshot clears the persisted entry.
+func (s *GlobalSettingsStore) SaveLastClaudeAILimits(snapshot map[string]any) error {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return fmt.Errorf("global settings path is not configured")
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return err
+	}
+	if snapshot == nil {
+		delete(document, "lastClaudeAILimits")
+	} else {
+		document["lastClaudeAILimits"] = snapshot
+	}
+
+	if err := writeSettingsDocument(s.Path, document); err != nil {
+		return err
+	}
+
+	logger.DebugCF("settings_config", "updated last claudeai limits", map[string]any{
+		"path":    s.Path,
+		"present": snapshot != nil,
+	})
+	return nil
+}
+
+// GetLastClaudeAILimits returns the persisted `lastClaudeAILimits` map.
+// Returns nil when the field is absent or malformed.
+func (s *GlobalSettingsStore) GetLastClaudeAILimits() map[string]any {
+	if s == nil || strings.TrimSpace(s.Path) == "" {
+		return nil
+	}
+
+	document, err := loadSettingsDocument(s.Path)
+	if err != nil {
+		return nil
+	}
+
+	if v, ok := document["lastClaudeAILimits"].(map[string]any); ok {
+		return v
+	}
+	return nil
+}
+
 // writeSettingsDocument encodes and writes one Claude Code settings document to disk.
 func writeSettingsDocument(path string, document map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
