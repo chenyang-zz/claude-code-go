@@ -175,6 +175,18 @@ type NotificationHookInput struct {
 	NotificationType string `json:"notification_type"`
 }
 
+// UserPromptSubmitHookInput is the JSON payload piped to UserPromptSubmit event
+// hooks via stdin. Hooks receive this when the user submits a prompt and can
+// block the prompt by returning exit code 2 or override behavior via stdout
+// JSON output (continue:false / additionalContext).
+type UserPromptSubmitHookInput struct {
+	BaseHookInput
+	// HookEventName is always "UserPromptSubmit".
+	HookEventName string `json:"hook_event_name"`
+	// Prompt is the user-submitted prompt text forwarded to the conversation.
+	Prompt string `json:"prompt"`
+}
+
 // ElicitationHookInput is the JSON payload piped to Elicitation event hooks via stdin.
 // Hooks receive this before the MCP server sees a response and can programmatically
 // accept, decline, or cancel the elicitation.

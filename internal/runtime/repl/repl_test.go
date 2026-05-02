@@ -13,6 +13,7 @@ import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
@@ -30,6 +31,12 @@ type recordingEngine struct {
 		reason string
 		cwd    string
 	}
+	userPromptSubmits []struct {
+		prompt string
+		cwd    string
+	}
+	userPromptBlocked  bool
+	userPromptMessages []string
 }
 
 type stubWorktreeLister struct {
@@ -81,6 +88,21 @@ func (e *recordingEngine) RunSessionEndHooks(ctx context.Context, reason string,
 		reason: reason,
 		cwd:    cwd,
 	})
+}
+
+func (e *recordingEngine) RunUserPromptSubmitHooks(ctx context.Context, prompt string, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	_ = ctx
+	e.userPromptSubmits = append(e.userPromptSubmits, struct {
+		prompt string
+		cwd    string
+	}{
+		prompt: prompt,
+		cwd:    cwd,
+	})
+	if !e.userPromptBlocked {
+		return nil, false, nil
+	}
+	return nil, true, append([]string(nil), e.userPromptMessages...)
 }
 
 func (s stubWorktreeLister) ListWorktrees(ctx context.Context, cwd string) ([]string, error) {
@@ -2835,3 +2857,125 @@ func TestRunnerRunResumeForksSession(t *testing.T) {
 		t.Fatalf("autosave saved session id = %q, want %q", repo.saved[1].ID, eng.lastRequest.SessionID)
 	}
 }
+
+// TestRunnerRunUserPromptSubmitHookFires verifies the REPL fires
+// UserPromptSubmit hooks before forwarding the prompt to the engine, and
+// continues normally when no hook blocks the prompt.
+func TestRunnerRunUserPromptSubmitHookFires(t *testing.T) {
+	stream := make(chan event.Event, 1)
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hello")}},
+					{Role: message.RoleAssistant, Content: []message.ContentPart{message.TextPart("hi")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	var buf bytes.Buffer
+	eng := &recordingEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+
+	if err := runner.Run(context.Background(), []string{"hello"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(eng.userPromptSubmits) != 1 {
+		t.Fatalf("user prompt submit hook calls = %d, want 1", len(eng.userPromptSubmits))
+	}
+	if got := eng.userPromptSubmits[0].prompt; got != "hello" {
+		t.Fatalf("hook prompt = %q, want 'hello'", got)
+	}
+	if got := eng.userPromptSubmits[0].cwd; got != "/repo" {
+		t.Fatalf("hook cwd = %q, want '/repo'", got)
+	}
+
+	if eng.lastRequest.SessionID == "" && len(eng.lastRequest.Messages) == 0 {
+		t.Fatalf("engine.Run was not invoked; non-blocking hook should allow prompt to proceed")
+	}
+}
+
+// TestRunnerRunUserPromptSubmitHookBlocks verifies the REPL aborts the turn
+// when a UserPromptSubmit hook blocks the prompt: the engine is not invoked
+// and the formatted blocking message matches the TS surface.
+func TestRunnerRunUserPromptSubmitHookBlocks(t *testing.T) {
+	var buf bytes.Buffer
+	eng := &recordingEngine{
+		userPromptBlocked:  true,
+		userPromptMessages: []string{"policy violation: reject 'hello'"},
+	}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+	runner.ProjectPath = "/repo"
+
+	if err := runner.Run(context.Background(), []string{"hello"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if len(eng.userPromptSubmits) != 1 {
+		t.Fatalf("user prompt submit hook calls = %d, want 1", len(eng.userPromptSubmits))
+	}
+	if eng.lastRequest.SessionID != "" || len(eng.lastRequest.Messages) != 0 {
+		t.Fatalf("engine.Run should not be invoked when prompt is blocked, got %#v", eng.lastRequest)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "UserPromptSubmit operation blocked by hook:") {
+		t.Fatalf("output = %q, want blocking-message prefix", got)
+	}
+	if !strings.Contains(got, "policy violation") {
+		t.Fatalf("output = %q, want hook stderr to be surfaced", got)
+	}
+}
+
+// TestRunnerRunUserPromptSubmitHookEngineWithoutInterface verifies the REPL
+// runs cleanly when the engine does not satisfy sessionLifecycleEngine
+// (older engine implementations); no hook fire and no blocking happens.
+func TestRunnerRunUserPromptSubmitHookEngineWithoutInterface(t *testing.T) {
+	// Use the bare engine.Engine interface via stubEngine so that
+	// sessionLifecycleEngine type assertion fails.
+	stream := make(chan event.Event, 1)
+	stream <- event.Event{
+		Type:      event.TypeConversationDone,
+		Timestamp: time.Now(),
+		Payload: event.ConversationDonePayload{
+			History: conversation.History{
+				Messages: []message.Message{
+					{Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hi")}},
+				},
+			},
+		},
+	}
+	close(stream)
+
+	var buf bytes.Buffer
+	eng := stubEngine{stream: stream}
+	runner := NewRunner(eng, console.NewStreamRenderer(console.NewPrinter(&buf)))
+
+	if err := runner.Run(context.Background(), []string{"hi"}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	// No assertions on hook calls because stubEngine does not record them.
+	// We just verify the REPL did not panic and produced valid output.
+	if buf.String() == "" {
+		// stub returns empty stream content; ensure no blocking message accidentally surfaced
+	} else if strings.Contains(buf.String(), "UserPromptSubmit operation blocked by hook:") {
+		t.Fatalf("blocking message appeared without lifecycle engine: %q", buf.String())
+	}
+}
+
+type stubEngine struct {
+	stream event.Stream
+}
+
+func (s stubEngine) Run(ctx context.Context, req conversation.RunRequest) (event.Stream, error) {
+	_ = ctx
+	_ = req
+	return s.stream, nil
+}
+
+var _ = hook.HookResult{} // ensure the hook import stays referenced when only tests use it

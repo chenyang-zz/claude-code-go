@@ -14,6 +14,7 @@ import (
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
@@ -33,6 +34,7 @@ type WorktreeLister interface {
 
 type sessionLifecycleEngine interface {
 	RunSessionEndHooks(ctx context.Context, reason string, cwd string)
+	RunUserPromptSubmitHooks(ctx context.Context, prompt string, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string)
 }
 
 // RemoteLifecycle wires remote stream subscription lifecycle into one REPL turn.
@@ -216,6 +218,12 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		}()
 	}
 
+	if blocked, err := r.runUserPromptSubmitHooks(ctx, prompt); err != nil {
+		return err
+	} else if blocked {
+		return nil
+	}
+
 	requestHistory := history.Clone()
 	requestHistory.Append(message.Message{
 		Role: message.RoleUser,
@@ -261,6 +269,42 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		}
 	}
 	return nil
+}
+
+// runUserPromptSubmitHooks fires UserPromptSubmit hooks before forwarding the
+// prompt into the engine. When a hook blocks the prompt (exit code 2), the
+// blocking message is rendered in the same `UserPromptSubmit operation
+// blocked by hook:\n<stderr>` format as the TypeScript implementation and the
+// caller is expected to abort the turn without mutating the conversation
+// history. Returns blocked=true when the prompt is blocked, blocked=false
+// otherwise. A non-nil error indicates a renderer failure that should
+// propagate up the REPL.
+func (r *Runner) runUserPromptSubmitHooks(ctx context.Context, prompt string) (bool, error) {
+	if r == nil || r.Engine == nil {
+		return false, nil
+	}
+	lifecycle, ok := r.Engine.(sessionLifecycleEngine)
+	if !ok {
+		return false, nil
+	}
+	_, blocked, blockingMessages := lifecycle.RunUserPromptSubmitHooks(ctx, prompt, r.ProjectPath)
+	if !blocked {
+		return false, nil
+	}
+
+	logger.DebugCF("repl", "user prompt submit hook blocked", map[string]any{
+		"session_id":     r.sessionID(),
+		"blocking_count": len(blockingMessages),
+	})
+
+	body := strings.Join(blockingMessages, "\n")
+	rendered := fmt.Sprintf("UserPromptSubmit operation blocked by hook:\n%s", strings.TrimRight(body, "\n"))
+	if r.Renderer != nil {
+		if err := r.Renderer.RenderLine(rendered); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
 }
 
 func (r *Runner) subscribeRemoteStream(ctx context.Context) func() error {
