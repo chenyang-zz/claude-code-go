@@ -25,6 +25,11 @@ func DetectMagicDocHeader(content string) *MagicDocInfo {
 		return nil
 	}
 
+	// Only match headers on the first line.
+	if loc[0] != 0 {
+		return nil
+	}
+
 	// Extract the title from capture group 1.
 	title := string(magicDocHeaderPattern.ExpandString(nil, "$1", content, loc))
 	title = strings.TrimSpace(title)
