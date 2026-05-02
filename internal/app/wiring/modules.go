@@ -12,6 +12,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
 	platformfs "github.com/sheepzhao/claude-code-go/internal/platform/fs"
 	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/ask_user_question"
@@ -33,6 +34,7 @@ import (
 	readresource "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/read_resource"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/remote_trigger"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/send_message"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/schedule_wakeup"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 	lsptool "github.com/sheepzhao/claude-code-go/internal/services/tools/lsp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/sleep"
@@ -58,6 +60,22 @@ import (
 type Modules struct {
 	// Tools is the registry exposed to executors for tool lookup and dispatch.
 	Tools tool.Registry
+	// WakeupScheduler is the REPL wakeup scheduler for /loop dynamic mode.
+	WakeupScheduler *repl.WakeupScheduler
+}
+
+var (
+	wakeupSchedulerOnce sync.Once
+	sharedWakeupScheduler *repl.WakeupScheduler
+)
+
+// WakeupScheduler returns the shared REPL wakeup scheduler used by the
+// ScheduleWakeup tool and the REPL runner.
+func WakeupScheduler() *repl.WakeupScheduler {
+	wakeupSchedulerOnce.Do(func() {
+		sharedWakeupScheduler = repl.NewWakeupScheduler()
+	})
+	return sharedWakeupScheduler
 }
 
 // NewModules wires the provided tools into the default in-memory registry.
@@ -70,7 +88,8 @@ func NewModules(tools ...tool.Tool) (Modules, error) {
 	}
 
 	return Modules{
-		Tools: registry,
+		Tools:          registry,
+		WakeupScheduler: sharedWakeupScheduler,
 	}, nil
 }
 
@@ -166,6 +185,7 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		croncreate.NewTool(getCronStore(projectDir)),
 		crondelete.NewTool(getCronStore(projectDir)),
 		cronlist.NewTool(getCronStore(projectDir)),
+			schedule_wakeup.NewTool(WakeupScheduler()),
 		skill.NewTool(),
 			synthetic_output.NewTool(),
 			tool_search.NewTool(),
@@ -212,6 +232,7 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		croncreate.NewTool(getCronStore(projectDir)),
 		crondelete.NewTool(getCronStore(projectDir)),
 		cronlist.NewTool(getCronStore(projectDir)),
+			schedule_wakeup.NewTool(WakeupScheduler()),
 		skill.NewTool(),
 			synthetic_output.NewTool(),
 			tool_search.NewTool(),

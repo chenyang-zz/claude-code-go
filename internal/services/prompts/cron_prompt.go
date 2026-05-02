@@ -60,5 +60,28 @@ Cancel a cron job previously scheduled with CronCreate. Removes it from .claude/
 
 ## CronList
 
-List all cron jobs scheduled via CronCreate, both durable (.claude/scheduled_tasks.json) and session-only.`, nil
+List all cron jobs scheduled via CronCreate, both durable (.claude/scheduled_tasks.json) and session-only.
+
+## ScheduleWakeup
+
+Schedule when to resume work in /loop dynamic mode — the user invoked /loop without an interval, asking you to self-pace iterations of a specific task.
+
+Pass the same /loop prompt back via ` + "`" + `prompt` + "`" + ` each turn so the next firing repeats the task. For an autonomous /loop (no user prompt), pass the literal sentinel ` + "`" + `<<autonomous-loop-dynamic>>` + "`" + ` as ` + "`" + `prompt` + "`" + ` instead. Omit the call to end the loop.
+
+### Picking delaySeconds
+
+The prompt cache has a 5-minute TTL. Sleeping past 300 seconds means the next wake-up reads your full conversation context uncached — slower and more expensive. So the natural breakpoints:
+
+- **Under 5 minutes (60s–270s)**: cache stays warm. Right for active work — checking a build, polling for state that's about to change, watching a process you just started.
+- **5 minutes to 1 hour (300s–3600s)**: pay the cache miss. Right when there's no point checking sooner.
+
+**Don't pick 300s.** It's the worst-of-both: you pay the cache miss without amortizing it. If you're tempted to "wait 5 minutes," either drop to 270s (stay in cache) or commit to 1200s+ (one cache miss buys a much longer wait).
+
+For idle ticks with no specific signal to watch, default to **1200s–1800s** (20–30 min).
+
+The runtime clamps to [60, 3600], so you don't need to clamp yourself.
+
+### The reason field
+
+One short sentence on what you chose and why. Be specific. "checking long bun build" beats "waiting."`, nil
 }

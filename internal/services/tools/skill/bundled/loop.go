@@ -66,6 +66,25 @@ Supported suffixes: s (seconds, rounded up to nearest minute, min 1), m (minutes
 %s`, defaultLoopInterval, defaultMaxAgeDays, args)
 }
 
+func buildLoopDynamicPrompt(args string) string {
+	if args == "" {
+		args = "<<autonomous-loop-dynamic>>"
+	}
+	return fmt.Sprintf(`# /loop — self-paced dynamic loop
+
+Run the following task iteratively at your own pace. After each iteration, call ScheduleWakeup with the appropriate delay to continue the loop. Omit the ScheduleWakeup call to end the loop.
+
+## How to pace
+
+- If you're actively checking something (build progress, poll frequency): use 60s–270s to keep the prompt cache warm.
+- If nothing needs checking soon: default to 1200s–1800s (20–30 min).
+- Don't pick 300s (it pays the cache-miss cost without amortizing).
+
+## Task
+
+%s`, args)
+}
+
 func registerLoopSkill() {
 	skill.RegisterBundledSkill(skill.BundledSkillDefinition{
 		Name:         "loop",
@@ -76,7 +95,7 @@ func registerLoopSkill() {
 		GetPromptForCommand: func(args string) (string, error) {
 			trimmed := strings.TrimSpace(args)
 			if trimmed == "" {
-				return loopUsage, nil
+				return buildLoopDynamicPrompt(""), nil
 			}
 
 			// Parse interval from first token
@@ -87,10 +106,18 @@ func registerLoopSkill() {
 				if prompt == "" {
 					return loopUsage, nil
 				}
-				_ = interval // interval parsed by the model via the prompt guidance
+				_ = interval
+				return buildLoopPrompt(trimmed), nil
 			}
 
-			return buildLoopPrompt(trimmed), nil
+			// Check for trailing "every" clause — if found, use CronCreate path.
+			lower := strings.ToLower(trimmed)
+			if strings.Contains(lower, " every ") || strings.HasSuffix(lower, "every") {
+				return buildLoopPrompt(trimmed), nil
+			}
+
+			// No interval → dynamic self-paced loop using ScheduleWakeup.
+			return buildLoopDynamicPrompt(trimmed), nil
 		},
 	})
 }
