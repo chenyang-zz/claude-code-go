@@ -94,6 +94,17 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		}
 	}
 
+	// 2.5 Fire SubagentStart hooks and collect additional context.
+	// This matches the TS runAgent.ts pattern where hook output is appended as a
+	// user message to the sub-agent's initial prompt.
+	_, blocked, blockingMessages, additionalContext := r.ParentRuntime.RunSubagentStartHooks(
+		ctx, input.SubagentType, def.AgentType, input.Cwd,
+	)
+	if blocked {
+		return Output{}, fmt.Errorf("subagent start blocked by hook: %s",
+			strings.Join(blockingMessages, "; "))
+	}
+
 	// 3. Build system prompt
 	systemPrompt := r.buildSystemPrompt(def, coretool.UseContext{WorkingDir: input.Cwd, SessionConfig: r.SessionConfig}, memoryScope)
 
@@ -151,9 +162,19 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	child.HookRunner = r.ParentRuntime.HookRunner
 
 	// 6. Build and run request
+	msgs := buildAgentMessages(def.InitialPrompt, input.Prompt)
+	if additionalContext != "" {
+		hookMsg := message.Message{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart(additionalContext),
+			},
+		}
+		msgs = append([]message.Message{hookMsg}, msgs...)
+	}
 	req := conversation.RunRequest{
 		SessionID: fmt.Sprintf("agent-%s-%d", def.AgentType, time.Now().Unix()),
-		Messages:  buildAgentMessages(def.InitialPrompt, input.Prompt),
+		Messages:  msgs,
 		CWD:       input.Cwd,
 		System:    systemPrompt,
 	}

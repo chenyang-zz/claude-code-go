@@ -141,12 +141,28 @@ func (o *HookOutput) ResolveUpdatedInput() json.RawMessage {
 	return nil
 }
 
-// ResolveAdditionalContext returns the additionalContext from PreToolUse-specific output.
+// ResolveAdditionalContext returns the additionalContext from hook-specific output.
+// It first tries the PreToolUse-specific parser; if that yields nothing, it falls
+// back to a generic JSON unmarshal of HookSpecificOutput looking for an
+// "additionalContext" string field (used by SubagentStart, WorktreeCreate,
+// WorktreeRemove, and other non-tool events).
 // Returns empty string if no additionalContext is provided.
 func (o *HookOutput) ResolveAdditionalContext() string {
 	specific, _ := o.ParsePreToolUseOutput()
 	if specific != nil && specific.AdditionalContext != nil {
 		return *specific.AdditionalContext
+	}
+	// Generic fallback for non-tool events that include additionalContext in
+	// hookSpecificOutput (e.g. SubagentStart, SessionStart, UserPromptSubmit).
+	if len(o.HookSpecificOutput) > 0 {
+		var generic struct {
+			AdditionalContext *string `json:"additionalContext,omitempty"`
+		}
+		if err := json.Unmarshal(o.HookSpecificOutput, &generic); err == nil {
+			if generic.AdditionalContext != nil {
+				return *generic.AdditionalContext
+			}
+		}
 	}
 	return ""
 }

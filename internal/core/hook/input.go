@@ -54,6 +54,19 @@ type SubagentStopHookInput struct {
 	AgentTranscriptPath string `json:"agent_transcript_path"`
 }
 
+// SubagentStartHookInput is the JSON payload piped to SubagentStart event hooks via stdin.
+// Hooks receive this when a sub-agent starts and can inject additional context into
+// the sub-agent conversation.
+type SubagentStartHookInput struct {
+	BaseHookInput
+	// HookEventName is always "SubagentStart".
+	HookEventName string `json:"hook_event_name"`
+	// AgentID identifies the sub-agent being started.
+	AgentID string `json:"agent_id"`
+	// AgentType is the type/name of the sub-agent (e.g. "general-purpose").
+	AgentType string `json:"agent_type"`
+}
+
 // StopFailureHookInput is the JSON payload piped to StopFailure event hooks.
 type StopFailureHookInput struct {
 	BaseHookInput
