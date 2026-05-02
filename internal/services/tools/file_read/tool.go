@@ -44,6 +44,10 @@ type Tool struct {
 	maxFileSizeBytes int64
 	// maxTokens caps the estimated token count of returned content.
 	maxTokens int
+	// freshnessTracker manages per-file change-detection state.
+	freshnessTracker *FreshnessTracker
+	// freshnessWatcher watches files for external changes via fsnotify.
+	freshnessWatcher *FileFreshnessWatcher
 }
 
 // Input is the typed request payload accepted by the migrated FileReadTool.
@@ -149,11 +153,14 @@ type lineReadResult struct {
 // NewTool constructs a FileReadTool with explicit host dependencies.
 func NewTool(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy) *Tool {
 	limits := getDefaultFileReadingLimits()
+	tracker := NewFreshnessTracker()
 	return &Tool{
 		fs:               fs,
 		policy:           policy,
 		maxFileSizeBytes: limits.MaxSizeBytes,
 		maxTokens:        limits.MaxTokens,
+		freshnessTracker: tracker,
+		freshnessWatcher: NewFileFreshnessWatcher(tracker),
 	}
 }
 
@@ -230,7 +237,14 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 
 	info, err := t.fs.Stat(filePath)
 	if err != nil {
-		return coretool.Result{Error: fmt.Sprintf("File does not exist: %s", input.FilePath)}, nil
+		// Try alternate screenshot path for macOS screenshots with different space characters.
+		if altPath, ok := resolveScreenshotPath(t.fs, filePath); ok && altPath != filePath {
+			filePath = altPath
+			info, err = t.fs.Stat(filePath)
+		}
+		if err != nil {
+			return coretool.Result{Error: fmt.Sprintf("File does not exist: %s", input.FilePath)}, nil
+		}
 	}
 	if info.IsDir() {
 		return coretool.Result{Error: fmt.Sprintf("Path is a directory, not a file: %s", input.FilePath)}, nil
@@ -311,8 +325,24 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	})
 	triggerMeta := buildReadPathTriggerMeta(filePath, call.Context.WorkingDir)
 
+	// Ensure the freshness watcher is started.
+	if t.freshnessWatcher != nil {
+		_ = t.freshnessWatcher.Start()
+	}
+
+	// Record the file read for freshness tracking.
+	t.freshnessTracker.RecordRead(filePath, info.ModTime())
+
+	// Register the file for external change monitoring.
+	if t.freshnessWatcher != nil {
+		t.freshnessWatcher.AddFile(filePath)
+	}
+
+	// Build freshness reminders: memory files get their own reminder, all files get change detection.
+	prefix := buildFreshnessPrefix(t.freshnessTracker, filePath, info.ModTime())
+
 	return coretool.Result{
-		Output: renderOutput(output, memoryFreshnessReminder(filePath, info.ModTime())),
+		Output: renderOutput(output, prefix),
 		Meta: map[string]any{
 			"data":                              output,
 			"read_state":                        buildReadStateSnapshot(filePath, info.ModTime(), offset, input.Limit, time.Now()),
@@ -320,6 +350,18 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"dynamic_skill_dir_triggers":        triggerMeta.DynamicSkillDirTriggers,
 		},
 	}, nil
+}
+
+// buildFreshnessPrefix composes the memory freshness reminder and the generic change-detection reminder.
+func buildFreshnessPrefix(tracker *FreshnessTracker, filePath string, modTime time.Time) string {
+	var parts []string
+	if mem := memoryFreshnessReminder(filePath, modTime); mem != "" {
+		parts = append(parts, mem)
+	}
+	if change := tracker.BuildReminder(filePath, modTime); change != "" {
+		parts = append(parts, change)
+	}
+	return strings.Join(parts, "")
 }
 
 // buildFileUnchangedResult reuses prior full-read state to suppress duplicate text payloads.
