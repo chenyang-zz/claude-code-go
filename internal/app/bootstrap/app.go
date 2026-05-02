@@ -48,6 +48,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
+	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
@@ -296,7 +297,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 		}, cfg.ProjectPath)
 
-	scheduler := cron.NewScheduler(cron.SchedulerOptions{
+
+		// Initialize PromptSuggestion system (post-sampling suggestion generation).
+		_, _ = promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {
+			engine.RegisterPostSamplingHook(engine.PostSamplingHook(hook))
+		}, cfg.ProjectPath)
+		scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
 	scheduler.Start()
