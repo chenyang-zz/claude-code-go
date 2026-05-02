@@ -46,6 +46,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/loader"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
+	"github.com/sheepzhao/claude-code-go/internal/services/sessionmemory"
 	mcpproxy "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
@@ -281,6 +282,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	// Initialize Magic Docs system (detection and tracking; subagent execution wired later).
 	magicdocs.InitMagicDocs(nil, func(hook magicdocs.PostTurnHookFunc) {
+		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
+	})
+
+	// Initialize Session Memory system (threshold-based extraction; subagent execution wired later).
+	sessionmemory.InitSessionMemory(nil, func(hook sessionmemory.PostTurnHookFunc) {
 		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	})
 

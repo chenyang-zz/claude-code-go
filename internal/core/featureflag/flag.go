@@ -25,6 +25,10 @@ const (
 	// FlagCoordinatorMode gates the coordinator mode agents.
 	// When enabled, coordinator-specific agents are registered.
 	FlagCoordinatorMode = "COORDINATOR_MODE"
+	// FlagSessionMemory gates the session memory extraction system.
+	// When enabled, post-turn hooks extract key information from the
+	// conversation and persist it as structured markdown files.
+	FlagSessionMemory = "SESSION_MEMORY"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
