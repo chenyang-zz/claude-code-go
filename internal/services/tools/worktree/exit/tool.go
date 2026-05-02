@@ -3,6 +3,7 @@ package exit
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
@@ -195,12 +196,14 @@ func (t *Tool) fireWorktreeRemoveHook(ctx context.Context, worktreePath string) 
 	if !t.hookCfg.HasEvent(hook.EventWorktreeRemove) {
 		return
 	}
+	// Use parent directory as CWD since worktreePath was just removed.
+	parentDir := filepath.Dir(worktreePath)
 	hookInput := hook.WorktreeRemoveHookInput{
 		BaseHookInput: hook.BaseHookInput{
-			CWD: worktreePath,
+			CWD: parentDir,
 		},
 		HookEventName: string(hook.EventWorktreeRemove),
 		WorktreePath:  worktreePath,
 	}
-	_ = t.hooks.RunHooks(ctx, hook.EventWorktreeRemove, hookInput, worktreePath)
+	_ = t.hooks.RunHooks(ctx, hook.EventWorktreeRemove, hookInput, parentDir)
 }

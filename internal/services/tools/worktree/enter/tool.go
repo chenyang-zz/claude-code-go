@@ -139,6 +139,13 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		results := t.hooks.RunHooks(ctx, hook.EventWorktreeCreate, hookInput, call.Context.WorkingDir)
 		if runtimehooks.HasBlockingResult(results) {
 			errs := runtimehooks.BlockingErrors(results)
+			// Rollback the created worktree (consistent with TaskCreated hook pattern).
+			if removeErr := t.manager.RemoveWorktree(result.Path, true); removeErr != nil {
+				logger.WarnCF("enter_worktree_tool", "failed to rollback worktree after hook blocked", map[string]any{
+					"path":  result.Path,
+					"error": removeErr.Error(),
+				})
+			}
 			return coretool.Result{Error: fmt.Sprintf("WorktreeCreate blocked by hook:\n%s", strings.Join(errs, "\n"))}, nil
 		}
 	}

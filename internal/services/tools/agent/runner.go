@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/conversation"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
@@ -57,6 +58,9 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		return Output{}, fmt.Errorf("agent type %q not found in registry", input.SubagentType)
 	}
 
+	// Generate a unique per-run agent ID (mirrors TS runAgent.ts where agentId is a UUID).
+	agentID := fmt.Sprintf("agent-%s-%s", def.AgentType, uuid.NewString()[:8])
+
 	logger.DebugCF("agent.runner", "running agent", map[string]any{
 		"agent_type": def.AgentType,
 		"model":      def.Model,
@@ -95,10 +99,10 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	}
 
 	// 2.5 Fire SubagentStart hooks and collect additional context.
-	// This matches the TS runAgent.ts pattern where hook output is appended as a
+	// This matches the TS runAgent.ts pattern where hook output is prepended as a
 	// user message to the sub-agent's initial prompt.
 	_, blocked, blockingMessages, additionalContext := r.ParentRuntime.RunSubagentStartHooks(
-		ctx, input.SubagentType, def.AgentType, input.Cwd,
+		ctx, agentID, def.AgentType, input.Cwd,
 	)
 	if blocked {
 		return Output{}, fmt.Errorf("subagent start blocked by hook: %s",
@@ -173,7 +177,7 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		msgs = append([]message.Message{hookMsg}, msgs...)
 	}
 	req := conversation.RunRequest{
-		SessionID: fmt.Sprintf("agent-%s-%d", def.AgentType, time.Now().Unix()),
+		SessionID: agentID,
 		Messages:  msgs,
 		CWD:       input.Cwd,
 		System:    systemPrompt,
