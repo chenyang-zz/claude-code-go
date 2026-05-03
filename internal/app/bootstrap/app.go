@@ -49,6 +49,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
 	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
+	"github.com/sheepzhao/claude-code-go/internal/services/teammemsync"
 	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
@@ -339,6 +340,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		HomeDir:            strings.TrimSpace(cfg.HomeDir),
 		Config:             &cfg,
 		SubscriptionLoader: claudeAILimitsLoader,
+	})
+
+	// Initialize team memory sync system (team memory file synchronization).
+	teammemsync.Init(teammemsync.InitOptions{
+		HomeDir:     strings.TrimSpace(cfg.HomeDir),
+		Config:      &cfg,
+		ProjectRoot: cfg.ProjectPath,
 	})
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{

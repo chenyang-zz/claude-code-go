@@ -59,6 +59,10 @@ const (
 	// When enabled, /reload-plugins downloads the latest settings from the
 	// Anthropic backend before refreshing plugins.
 	FlagSettingsSyncPull = "SETTINGS_SYNC_PULL"
+	// FlagTeamMemorySync gates the Team Memory Sync system.
+	// When enabled, team memory files are synchronized between the local
+	// filesystem and the Claude.ai backend API.
+	FlagTeamMemorySync = "TEAM_MEMORY_SYNC"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
