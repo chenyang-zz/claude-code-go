@@ -165,6 +165,48 @@ func fetchTeamMemoryHashes(
 		return &HashesResult{Success: true, EntryChecksums: make(map[string]string)}
 	}
 
+
+		// Auth failures — surface immediately before decode.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return &HashesResult{
+				Success:    false,
+				Error:      fmt.Sprintf("Not authorized for hashes probe (HTTP %d)", resp.StatusCode),
+				ErrorType:  "auth",
+				HTTPStatus: resp.StatusCode,
+			}
+		}
+
+		// Non-200 response — reject before decode to avoid misclassifying errors.
+		if resp.StatusCode != http.StatusOK {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+			return &HashesResult{
+				Success:    false,
+				Error:      fmt.Sprintf("Unexpected hashes probe status %d: %s", resp.StatusCode, string(errBody)),
+				ErrorType:  "unknown",
+				HTTPStatus: resp.StatusCode,
+			}
+		}
+
+		// Auth failures — surface immediately before decode.
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return &HashesResult{
+				Success:    false,
+				Error:      fmt.Sprintf("Not authorized for hashes probe (HTTP %d)", resp.StatusCode),
+				ErrorType:  "auth",
+				HTTPStatus: resp.StatusCode,
+			}
+		}
+
+		// Non-200 response — reject before decode to avoid misclassifying errors.
+		if resp.StatusCode != http.StatusOK {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+			return &HashesResult{
+				Success:    false,
+				Error:      fmt.Sprintf("Unexpected hashes probe status %d: %s", resp.StatusCode, string(errBody)),
+				ErrorType:  "unknown",
+				HTTPStatus: resp.StatusCode,
+			}
+		}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var result struct {
@@ -247,6 +289,7 @@ func PullTeamMemory(
 	}
 	if result.IsEmpty || result.Data == nil {
 		state.ServerChecksums = make(map[string]string)
+		state.LastKnownChecksum = ""
 		return true, 0, 0, false, ""
 	}
 
