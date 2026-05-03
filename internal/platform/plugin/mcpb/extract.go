@@ -12,6 +12,10 @@ import (
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
+// errPathTraversal is returned when a ZIP entry attempts to escape the
+// extraction root directory via relative path components.
+var errPathTraversal = fmt.Errorf("path traversal detected in MCPB archive")
+
 // ExtractMcpb extracts a ZIP-encoded MCPB file from data into extractPath.
 // File mode bits from the ZIP central directory are preserved for executable
 // files. onProgress is called with status messages (may be nil).
@@ -39,21 +43,33 @@ func ExtractMcpb(data []byte, extractPath string, onProgress ProgressCallback) e
 
 		fullPath := filepath.Join(extractPath, f.Name)
 
+		// Reject entries that escape the extraction root (zip slip).
+		cleaned := filepath.Clean(fullPath)
+		cleanRoot := filepath.Clean(extractPath)
+		if !strings.HasPrefix(cleaned, cleanRoot+string(os.PathSeparator)) &&
+			cleaned != cleanRoot {
+			logger.WarnCF("plugin.mcpb", "rejecting path traversal in MCPB archive", map[string]any{
+				"entry": f.Name,
+				"path":  cleaned,
+			})
+			return errPathTraversal
+		}
+
 		// Ensure parent directory exists.
-		if dir := filepath.Dir(fullPath); dir != extractPath {
+		if dir := filepath.Dir(cleaned); dir != cleanRoot {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", dir, err)
 			}
 		}
 
 		// Write file content.
-		if err := writeZipFile(f, fullPath); err != nil {
+		if err := writeZipFile(f, cleaned); err != nil {
 			return fmt.Errorf("failed to extract %s: %w", f.Name, err)
 		}
 
 		// Preserve executable permission.
 		if mode := f.Mode(); mode&0o111 != 0 {
-			if err := os.Chmod(fullPath, mode&0o777); err != nil {
+			if err := os.Chmod(cleaned, mode&0o777); err != nil {
 				// Swallow permission errors (NFS root_squash, FUSE mounts).
 				logger.DebugCF("plugin.mcpb", "chmod failed (non-fatal)", map[string]any{
 					"file":  f.Name,

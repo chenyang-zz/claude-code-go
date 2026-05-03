@@ -117,12 +117,21 @@ func ExtractMcpbServers(plugin *LoadedPlugin) ([]*McpServerConfig, error) {
 			PluginPath: plugin.Path,
 			PluginID:   plugin.Name,
 		}
-		result, _, err := mcpb.LoadMcpbConfig(src, cl, nil, nil)
+		result, needsConfig, err := mcpb.LoadMcpbConfig(src, cl, nil, nil)
 		if err != nil {
 			logger.DebugCF("plugin.mcpb", "failed to load MCPB config", map[string]any{
 				"source": src,
 				"plugin": plugin.Name,
 				"error":  err.Error(),
+			})
+			continue
+		}
+		if needsConfig != nil {
+			logger.WarnCF("plugin.mcpb", "MCPB server requires user configuration", map[string]any{
+				"source":     src,
+				"plugin":     plugin.Name,
+				"server":     needsConfig.Manifest.Name,
+				"fieldCount": len(needsConfig.ConfigSchema),
 			})
 			continue
 		}

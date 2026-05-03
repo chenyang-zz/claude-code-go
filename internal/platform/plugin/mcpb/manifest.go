@@ -91,6 +91,12 @@ func BuildMcpServerConfig(manifest *McpbManifest, extractedPath string, userConf
 		config.Transport = "stdio"
 	}
 
+	// Resolve relative command paths against the extraction directory so
+	// bundled binaries/scripts start from the correct working directory.
+	if config.Command != "" && !filepath.IsAbs(config.Command) {
+		config.Command = filepath.Join(extractedPath, config.Command)
+	}
+
 	// Apply user config substitution.
 	if userConfig != nil {
 		substituteUserConfig(config, userConfig)
