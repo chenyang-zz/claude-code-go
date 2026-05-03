@@ -21,6 +21,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
 	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -129,6 +130,10 @@ var errContinueHandled = errors.New("continue flow already handled")
 
 // Run parses the CLI args and dispatches either a supported slash command or one text turn.
 func (r *Runner) Run(ctx context.Context, args []string) error {
+	// Fire-and-forget: upload local settings to remote (interactive CLI only).
+	// Non-blocking and fail-open — a failed upload is silently discarded.
+	settingssync.UploadUserSettingsInBackground()
+
 	parsed, err := ParseArgs(args)
 	if err != nil {
 		return err

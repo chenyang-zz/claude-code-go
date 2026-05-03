@@ -7,6 +7,7 @@ import (
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	"github.com/sheepzhao/claude-code-go/internal/platform/plugin"
+	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -41,6 +42,12 @@ func (c ReloadPluginsCommand) Execute(ctx context.Context, args command.Args) (c
 	var result *plugin.RefreshResult
 	var summary *plugin.RegistrationSummary
 	var err error
+
+	// Re-pull remote user settings before the plugin cache sweep so
+	// enabledPlugins / extraKnownMarketplaces pushed from the user's other
+	// device take effect. Fail-open: a download failure does not block the
+	// reload.
+	settingssync.RedownloadUserSettings(ctx)
 
 	// Prefer the reloader pipeline when available.
 	if c.Reloader != nil {

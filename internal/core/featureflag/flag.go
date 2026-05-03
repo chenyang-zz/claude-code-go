@@ -51,6 +51,14 @@ const (
 	// When enabled, the runtime checks admin-configurable feature restrictions
 	// for Team and Enterprise subscribers.
 	FlagPolicyLimits = "POLICY_LIMITS"
+	// FlagSettingsSyncPush gates the settings sync upload (push) path.
+	// When enabled, interactive CLI sessions upload changed settings files
+	// to the Anthropic backend in the background.
+	FlagSettingsSyncPush = "SETTINGS_SYNC_PUSH"
+	// FlagSettingsSyncPull gates the settings sync download (pull) path.
+	// When enabled, /reload-plugins downloads the latest settings from the
+	// Anthropic backend before refreshing plugins.
+	FlagSettingsSyncPull = "SETTINGS_SYNC_PULL"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

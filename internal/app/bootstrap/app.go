@@ -48,6 +48,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
+	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
 	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	agenttool "github.com/sheepzhao/claude-code-go/internal/services/tools/agent"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/agent/builtin"
@@ -328,6 +329,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 
 	// Initialize organizational policy limits system.
 	policylimits.Init(policylimits.InitOptions{
+		HomeDir:            strings.TrimSpace(cfg.HomeDir),
+		Config:             &cfg,
+		SubscriptionLoader: claudeAILimitsLoader,
+	})
+
+	// Initialize settings sync system (cross-device settings synchronization).
+	settingssync.Init(settingssync.InitOptions{
 		HomeDir:            strings.TrimSpace(cfg.HomeDir),
 		Config:             &cfg,
 		SubscriptionLoader: claudeAILimitsLoader,
