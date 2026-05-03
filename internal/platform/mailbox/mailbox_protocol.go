@@ -253,11 +253,12 @@ func IsPlanApprovalRequest(messageText string) (*PlanApprovalRequestMessage, boo
 }
 
 // PlanApprovalResponseMessage is sent by the team leader in response to a
-// plan approval request.
+// plan approval request. Field names use snake_case to match the legacy
+// protocol format used in SendMessage prompt guidance.
 type PlanApprovalResponseMessage struct {
 	Type           string `json:"type"` // always "plan_approval_response"
-	RequestID      string `json:"requestId"`
-	Approved       bool   `json:"approved"`
+	RequestID      string `json:"request_id"`
+	Approve        bool   `json:"approve"`
 	Feedback       string `json:"feedback,omitempty"`
 	Timestamp      string `json:"timestamp"`
 	PermissionMode string `json:"permissionMode,omitempty"`
@@ -381,6 +382,34 @@ func IsShutdownRejected(messageText string) (*ShutdownRejectedMessage, bool) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Shutdown Response (Legacy unified protocol)
+// ────────────────────────────────────────────────────────────────────────────
+
+// ShutdownResponseMessage is the legacy unified shutdown response format used
+// in SendMessage prompt guidance. Teammates are instructed to reply with
+// {"type":"shutdown_response","request_id":"...","approve":true/false}.
+// This is semantically equivalent to the newer shutdown_approved /
+// shutdown_rejected split but uses a single type with an approve boolean.
+type ShutdownResponseMessage struct {
+	Type      string `json:"type"` // always "shutdown_response"
+	RequestID string `json:"request_id"`
+	Approve   bool   `json:"approve"`
+}
+
+// IsShutdownResponse checks if a message text contains a legacy shutdown
+// response message.
+func IsShutdownResponse(messageText string) (*ShutdownResponseMessage, bool) {
+	var msg ShutdownResponseMessage
+	if err := json.Unmarshal([]byte(messageText), &msg); err != nil {
+		return nil, false
+	}
+	if msg.Type != "shutdown_response" {
+		return nil, false
+	}
+	return &msg, true
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Task Assignment
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -491,6 +520,7 @@ var structuredTypes = map[string]bool{
 	"sandbox_permission_response":   true,
 	"shutdown_request":              true,
 	"shutdown_approved":             true,
+	"shutdown_response":             true, // legacy unified format
 	"team_permission_update":        true,
 	"mode_set_request":              true,
 	"plan_approval_request":         true,

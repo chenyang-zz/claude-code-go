@@ -242,6 +242,51 @@ func TestIsShutdownRejected_Valid(t *testing.T) {
 	}
 }
 
+// ── ShutdownResponse (legacy unified) ─────────────────────────────────────
+
+func TestIsShutdownResponse_Valid(t *testing.T) {
+	// Legacy format from send_message_prompt.go guidance
+	msg := ShutdownResponseMessage{
+		Type:      "shutdown_response",
+		RequestID: "sd-1",
+		Approve:   true,
+	}
+	data, _ := json.Marshal(msg)
+	parsed, ok := IsShutdownResponse(string(data))
+	if !ok {
+		t.Fatal("expected shutdown_response")
+	}
+	if !parsed.Approve {
+		t.Error("Approve should be true")
+	}
+}
+
+func TestIsShutdownResponse_LegacyFormat(t *testing.T) {
+	// Exact format from send_message_prompt.go guidance
+	legacy := `{"type":"shutdown_response","request_id":"sd-1","approve":true}`
+	parsed, ok := IsShutdownResponse(legacy)
+	if !ok {
+		t.Fatal("expected shutdown_response from legacy format")
+	}
+	if !parsed.Approve {
+		t.Error("Approve should be true")
+	}
+	if parsed.RequestID != "sd-1" {
+		t.Errorf("RequestID = %q, want sd-1", parsed.RequestID)
+	}
+}
+
+func TestIsShutdownResponse_Reject(t *testing.T) {
+	legacy := `{"type":"shutdown_response","request_id":"sd-2","approve":false}`
+	parsed, ok := IsShutdownResponse(legacy)
+	if !ok {
+		t.Fatal("expected shutdown_response")
+	}
+	if parsed.Approve {
+		t.Error("Approve should be false")
+	}
+}
+
 // ── PlanApproval ──────────────────────────────────────────────────────────
 
 func TestIsPlanApprovalRequest_Valid(t *testing.T) {
@@ -274,7 +319,7 @@ func TestIsPlanApprovalResponse_Valid(t *testing.T) {
 	msg := PlanApprovalResponseMessage{
 		Type:      "plan_approval_response",
 		RequestID: "plan-1",
-		Approved:  true,
+		Approve:   true,
 		Feedback:  "looks good",
 		Timestamp: "2026-05-04T10:00:00Z",
 	}
@@ -283,8 +328,24 @@ func TestIsPlanApprovalResponse_Valid(t *testing.T) {
 	if !ok {
 		t.Fatal("expected plan_approval_response")
 	}
-	if !parsed.Approved {
-		t.Error("Approved should be true")
+	if !parsed.Approve {
+		t.Error("Approve should be true")
+	}
+}
+
+// Verify plan_approval_response accepts snake_case legacy format from prompt guidance.
+func TestIsPlanApprovalResponse_LegacyFormat(t *testing.T) {
+	// This is the format instructed in send_message_prompt.go
+	legacy := `{"type":"plan_approval_response","request_id":"plan-1","approve":false,"feedback":"add error handling"}`
+	parsed, ok := IsPlanApprovalResponse(legacy)
+	if !ok {
+		t.Fatal("expected plan_approval_response from legacy format")
+	}
+	if parsed.Approve {
+		t.Error("Approve should be false from legacy format")
+	}
+	if parsed.RequestID != "plan-1" {
+		t.Errorf("RequestID = %q, want plan-1", parsed.RequestID)
 	}
 }
 
@@ -386,6 +447,7 @@ func TestIsStructuredProtocolMessage_AllTypes(t *testing.T) {
 		{"sandbox_permission_response", `{"type":"sandbox_permission_response","requestId":"r1","host":"h","allow":true,"timestamp":"t"}`},
 		{"shutdown_request", `{"type":"shutdown_request","requestId":"r1","from":"leader","timestamp":"t"}`},
 		{"shutdown_approved", `{"type":"shutdown_approved","requestId":"r1","from":"worker","timestamp":"t"}`},
+		{"shutdown_response", `{"type":"shutdown_response","request_id":"r1","approve":true}`},
 		{"team_permission_update", `{"type":"team_permission_update","permissionUpdate":{"type":"addRules","rules":[],"behavior":"allow","destination":"session"},"directoryPath":"/x","toolName":"t"}`},
 		{"mode_set_request", `{"type":"mode_set_request","mode":"acceptEdits","from":"leader"}`},
 		{"plan_approval_request", `{"type":"plan_approval_request","from":"w","timestamp":"t","planFilePath":"p","planContent":"c","requestId":"r1"}`},
