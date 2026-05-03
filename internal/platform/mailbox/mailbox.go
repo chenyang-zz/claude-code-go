@@ -233,3 +233,75 @@ func ClearMailbox(agentName, teamName, homeDir string) error {
 	_, err = f.WriteString("[]")
 	return err
 }
+
+// MarkMessageAsReadByIndex marks a single message at the given index as read.
+// Uses file locking to prevent race conditions when multiple agents read/write
+// concurrently. Returns nil if the index is out of bounds or the message is
+// already read.
+func MarkMessageAsReadByIndex(agentName, teamName, homeDir string, messageIndex int) error {
+	inboxPath := getInboxPath(agentName, teamName, homeDir)
+	lockPath := getLockPath(inboxPath)
+
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	return withLock(lockPath, func() error {
+		messages, err := ReadMailbox(agentName, teamName, homeDir)
+		if err != nil {
+			return err
+		}
+		if messageIndex < 0 || messageIndex >= len(messages) {
+			return nil
+		}
+		if messages[messageIndex].Read {
+			return nil
+		}
+
+		messages[messageIndex].Read = true
+
+		data, err := json.MarshalIndent(messages, "", "  ")
+		if err != nil {
+			return fmt.Errorf("mailbox: marshal messages: %w", err)
+		}
+		return os.WriteFile(inboxPath, data, 0o644)
+	})
+}
+
+// MarkMessagesAsReadByPredicate marks all messages matching the predicate as
+// read. Uses file locking to prevent race conditions. Unread messages that
+// match the predicate are updated; already-read messages and non-matching
+// messages are left unchanged.
+func MarkMessagesAsReadByPredicate(agentName, teamName, homeDir string, predicate func(Message) bool) error {
+	inboxPath := getInboxPath(agentName, teamName, homeDir)
+	lockPath := getLockPath(inboxPath)
+
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	return withLock(lockPath, func() error {
+		messages, err := ReadMailbox(agentName, teamName, homeDir)
+		if err != nil {
+			return err
+		}
+		if len(messages) == 0 {
+			return nil
+		}
+
+		changed := false
+		for i, m := range messages {
+			if !m.Read && predicate(m) {
+				messages[i].Read = true
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+
+		data, err := json.MarshalIndent(messages, "", "  ")
+		if err != nil {
+			return fmt.Errorf("mailbox: marshal messages: %w", err)
+		}
+		return os.WriteFile(inboxPath, data, 0o644)
+	})
+}
