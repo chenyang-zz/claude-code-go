@@ -280,33 +280,3 @@ func PushTeamMemory(
 	}
 }
 
-// SyncTeamMemory performs a bidirectional sync: pull from server, then push
-// local changes back. Server entries take precedence on conflict.
-func SyncTeamMemory(
-	ctx context.Context,
-	state *SyncState,
-	baseURL string,
-	repoSlug string,
-	accessToken string,
-	projectRoot string,
-) (success bool, filesPulled int, filesPushed int, errStr string) {
-	// 1. Pull remote → local (skip ETag cache for full sync).
-	ok, pulled, entries, _, pullErr := PullTeamMemory(ctx, state, baseURL, repoSlug, accessToken, projectRoot, true)
-	if !ok {
-		return false, pulled, 0, pullErr
-	}
-
-	// 2. Push local → remote (with conflict resolution).
-	pushResult := PushTeamMemory(ctx, state, baseURL, repoSlug, accessToken, projectRoot)
-	if !pushResult.Success {
-		return false, pulled, pushResult.FilesUploaded, pushResult.Error
-	}
-
-	_ = entries // entry count from pull, not needed for sync return
-
-	logger.InfoCF("teammemsync", "sync completed", map[string]any{
-		"files_pulled": pulled,
-		"files_pushed": pushResult.FilesUploaded,
-	})
-	return true, pulled, pushResult.FilesUploaded, ""
-}
