@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sheepzhao/claude-code-go/internal/platform/plugin/mcpb"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -97,4 +98,81 @@ func LoadMcpServersFromFile(filePath string) ([]*McpServerConfig, error) {
 		"count": len(configs),
 	})
 	return configs, nil
+}
+
+// ExtractMcpbServers discovers and loads MCPB (.mcpb / .dxt) files from a
+// plugin directory. For each MCPB source found, it loads the packaged MCP
+// server configuration and returns it as a McpServerConfig with IsMcpb set
+// to true. MCPB loading failures are non-fatal — the function returns as many
+// configs as it can successfully load and logs errors for the rest.
+func ExtractMcpbServers(plugin *LoadedPlugin) ([]*McpServerConfig, error) {
+	sources := discoverMcpbSources(plugin.Path)
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	var configs []*McpServerConfig
+	for _, src := range sources {
+		cl := &mcpb.ConfigLoader{
+			PluginPath: plugin.Path,
+			PluginID:   plugin.Name,
+		}
+		result, _, err := mcpb.LoadMcpbConfig(src, cl, nil, nil)
+		if err != nil {
+			logger.DebugCF("plugin.mcpb", "failed to load MCPB config", map[string]any{
+				"source": src,
+				"plugin": plugin.Name,
+				"error":  err.Error(),
+			})
+			continue
+		}
+		if result == nil {
+			continue
+		}
+
+		cfg := &McpServerConfig{
+			Name:         result.McpConfig.Name,
+			Transport:    result.McpConfig.Transport,
+			Command:      result.McpConfig.Command,
+			Args:         result.McpConfig.Args,
+			Env:          result.McpConfig.Env,
+			URL:          result.McpConfig.URL,
+			Headers:      result.McpConfig.Headers,
+			PluginName:   plugin.Name,
+			PluginPath:   plugin.Path,
+			PluginSource: plugin.Name,
+			Scope:        "dynamic",
+			IsMcpb:       true,
+		}
+		configs = append(configs, cfg)
+	}
+
+	logger.DebugCF("plugin.mcpb", "extracted MCPB servers", map[string]any{
+		"plugin": plugin.Name,
+		"total":  len(sources),
+		"loaded": len(configs),
+	})
+	return configs, nil
+}
+
+// discoverMcpbSources finds .mcpb and .dxt files directly inside the plugin
+// root directory. It returns relative paths suitable for passing to the MCPB
+// loader (which resolves them relative to the plugin path).
+func discoverMcpbSources(pluginPath string) []string {
+	entries, err := os.ReadDir(pluginPath)
+	if err != nil {
+		return nil
+	}
+
+	var sources []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if mcpb.IsMcpbSource(name) {
+			sources = append(sources, name)
+		}
+	}
+	return sources
 }

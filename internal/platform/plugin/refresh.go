@@ -60,12 +60,20 @@ func (l *PluginLoader) RefreshActivePlugins() (*RefreshResult, error) {
 			allAgents = append(allAgents, agents...)
 		}
 
-		// MCP servers.
+		// MCP servers (from .mcp.json).
 		mcpServers, err := ExtractMcpServers(plugin)
 		if err != nil {
 			extraErrors = append(extraErrors, err.Error())
 		} else {
 			mcpCount += len(mcpServers)
+		}
+
+		// MCPB servers (from .mcpb / .dxt files).
+		mcpbServers, err := ExtractMcpbServers(plugin)
+		if err != nil {
+			extraErrors = append(extraErrors, err.Error())
+		} else {
+			mcpCount += len(mcpbServers)
 		}
 
 		// LSP servers.
