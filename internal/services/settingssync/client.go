@@ -225,13 +225,13 @@ func UploadUserSettings(ctx context.Context, baseURL, accessToken string, entrie
 func exponentialBackoff(attempt int) time.Duration {
 	exp := float64(uint(1) << attempt)
 	delay := baseDelay.Seconds() * exp
-	if delay > maxDelay.Seconds() {
-		delay = maxDelay.Seconds()
-	}
 	jitter := delay * jitterFraction * (2*rand.Float64() - 1)
 	delay += jitter
-	if delay < 0 {
+	if delay < baseDelay.Seconds() {
 		delay = baseDelay.Seconds()
+	}
+	if delay > maxDelay.Seconds() {
+		delay = maxDelay.Seconds()
 	}
 	return time.Duration(math.Ceil(delay * float64(time.Second)))
 }

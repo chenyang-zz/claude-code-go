@@ -226,7 +226,7 @@ func TestClientStreamSendsMaxCompletionTokensForOfficialOpenAI(t *testing.T) {
 		Provider:   "openai-compatible",
 		APIKey:     "test-key",
 		BaseURL:    defaultBaseURL, // official OpenAI endpoint
-		HTTPClient: server.Client(),
+		HTTPClient: &http.Client{Transport: &rewriteTransport{host: server.Listener.Addr().String()}},
 	})
 
 	stream, err := client.Stream(context.Background(), model.Request{
@@ -592,4 +592,15 @@ func contains(haystack, needle []byte) bool {
 		}
 	}
 	return false
+}
+
+// rewriteTransport rewrites HTTPS requests to HTTP and directs them to a
+// local test server host. This lets tests set BaseURL to the official OpenAI
+// endpoint (triggering isOfficialOpenAI()) while routing traffic locally.
+type rewriteTransport struct{ host string }
+
+func (t *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.URL.Scheme = "http"
+	req.URL.Host = t.host
+	return http.DefaultTransport.RoundTrip(req)
 }
