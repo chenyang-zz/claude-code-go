@@ -1290,6 +1290,7 @@ func newPromptBuilder(cfg coreconfig.Config, registry agent.Registry) *prompts.P
 		prompts.BriefToolPromptSection{},
 		prompts.SleepPromptSection{},
 		prompts.TodoWritePromptSection{},
+		prompts.TeamMemoryPromptSection{},
 		prompts.BriefSection{},
 		prompts.ProactiveSection{},
 	)
