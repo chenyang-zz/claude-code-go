@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -96,6 +97,10 @@ func (t *Tool) Invoke(ctx context.Context, call tool.Call) (tool.Result, error) 
 	input, err := tool.DecodeInput[remoteTriggerInput](t.InputSchema(), call.Input)
 	if err != nil {
 		return tool.Result{Error: err.Error()}, nil
+	}
+
+	if allowed, reason := policylimits.IsAllowed(policylimits.ActionAllowRemoteSessions); !allowed {
+		return tool.Result{Error: reason}, nil
 	}
 
 	// Validate action enum membership.

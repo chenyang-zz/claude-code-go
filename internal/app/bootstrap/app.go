@@ -43,6 +43,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
 	"github.com/sheepzhao/claude-code-go/internal/services/claudeailimits"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
+	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
@@ -322,6 +323,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	}
 	claudeailimits.Init(claudeailimits.InitOptions{
 		Store:              globalSettingsStore,
+		SubscriptionLoader: claudeAILimitsLoader,
+	})
+
+	// Initialize organizational policy limits system.
+	policylimits.Init(policylimits.InitOptions{
+		HomeDir:            strings.TrimSpace(cfg.HomeDir),
+		Config:             &cfg,
 		SubscriptionLoader: claudeAILimitsLoader,
 	})
 

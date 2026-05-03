@@ -47,6 +47,10 @@ const (
 	// and persists the latest ClaudeAILimits snapshot for engine error
 	// messages and `/usage` `/stats` rendering.
 	FlagClaudeAILimits = "CLAUDEAI_LIMITS"
+	// FlagPolicyLimits gates the organizational policy limits system.
+	// When enabled, the runtime checks admin-configurable feature restrictions
+	// for Team and Enterprise subscribers.
+	FlagPolicyLimits = "POLICY_LIMITS"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
