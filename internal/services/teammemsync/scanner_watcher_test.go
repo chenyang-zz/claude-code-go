@@ -397,6 +397,9 @@ func TestWatcher_NotifyWrite(t *testing.T) {
 // ─── Integration: PushTeamMemory Secret Filtering ──────────────────
 
 func TestPushTeamMemory_SecretFiltering(t *testing.T) {
+	// Enable the secret scanner feature flag for integration tests.
+	t.Setenv("CLAUDE_FEATURE_TEAM_MEMORY_SCANNER", "1")
+
 	t.Run("filters entries with secrets — clean entries pass through", func(t *testing.T) {
 		projectRoot := t.TempDir()
 		teamDir := GetTeamMemPath(projectRoot)

@@ -287,6 +287,7 @@ func (w *TeamMemoryWatcher) executePush() {
 	defer func() {
 		w.pushInProgress = false
 		w.pushCond.Broadcast()
+		w.mu.Unlock()
 	}()
 
 	if err != nil {

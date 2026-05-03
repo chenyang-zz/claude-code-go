@@ -157,24 +157,27 @@ func PushTeamMemory(
 		return &PushResult{Success: true, FilesUploaded: 0}
 	}
 
-	// Scan for secrets before upload. Files containing detected secrets
-	// are excluded from the push and reported in SkippedSecrets.
+	// Scan for secrets before upload (gated by TEAM_MEMORY_SCANNER flag).
+	// Files containing detected secrets are excluded from the push and
+	// reported in SkippedSecrets.
 	var skippedSecrets []SkippedSecretFile
-	for key, content := range entries {
-		matches := ScanForSecrets(content)
-		for _, m := range matches {
-			skippedSecrets = append(skippedSecrets, SkippedSecretFile{
-				Path:   key,
-				RuleID: m.RuleID,
-				Label:  m.Label,
-			})
-		}
-		if len(matches) > 0 {
-			delete(entries, key)
-			logger.WarnCF("teammemsync", "skipping file with detected secret", map[string]any{
-				"file":  key,
-				"count": len(matches),
-			})
+	if IsScannerEnabled() {
+		for key, content := range entries {
+			matches := ScanForSecrets(content)
+			for _, m := range matches {
+				skippedSecrets = append(skippedSecrets, SkippedSecretFile{
+					Path:   key,
+					RuleID: m.RuleID,
+					Label:  m.Label,
+				})
+			}
+			if len(matches) > 0 {
+				delete(entries, key)
+				logger.WarnCF("teammemsync", "skipping file with detected secret", map[string]any{
+					"file":  key,
+					"count": len(matches),
+				})
+			}
 		}
 	}
 
