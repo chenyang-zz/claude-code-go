@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -25,6 +26,10 @@ func (c WebSetupCommand) Metadata() command.Metadata {
 // Execute accepts no required arguments and reports the stable /web-setup fallback.
 func (c WebSetupCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	_ = ctx
+
+	if allowed, reason := policylimits.IsAllowed(policylimits.ActionAllowRemoteSessions); !allowed {
+		return command.Result{Output: reason}, nil
+	}
 
 	raw := strings.TrimSpace(args.RawLine)
 

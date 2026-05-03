@@ -3,6 +3,7 @@ package bundled
 import (
 	"os"
 
+	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
 )
 
@@ -104,7 +105,11 @@ This skill requires authentication with a claude.ai account. If you get an auth 
 
 func registerScheduleRemoteAgentsSkill() {
 	isEnabled := func() bool {
-		return os.Getenv("CLAUDE_CODE_REMOTE_AGENTS") != ""
+		if os.Getenv("CLAUDE_CODE_REMOTE_AGENTS") == "" {
+			return false
+		}
+		allowed, _ := policylimits.IsAllowed(policylimits.ActionAllowRemoteSessions)
+		return allowed
 	}
 
 	skill.RegisterBundledSkill(skill.BundledSkillDefinition{

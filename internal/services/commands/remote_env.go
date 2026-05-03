@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -24,7 +25,10 @@ func (c RemoteEnvCommand) Metadata() command.Metadata {
 // Execute reports the stable /remote-env fallback supported by the current Go host.
 func (c RemoteEnvCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	_ = ctx
-	_ = args
+
+	if allowed, reason := policylimits.IsAllowed(policylimits.ActionAllowRemoteSessions); !allowed {
+		return command.Result{Output: reason}, nil
+	}
 
 	logger.DebugCF("commands", "rendered remote-env command fallback output", map[string]any{
 		"remote_env_config_available": false,
