@@ -239,6 +239,22 @@ func ClearMailbox(agentName, teamName, homeDir string) error {
 // concurrently. Returns nil if the index is out of bounds or the message is
 // already read.
 func MarkMessageAsReadByIndex(agentName, teamName, homeDir string, messageIndex int) error {
+	// Bail out early if the inbox is empty — nothing to mark.
+	messages, err := ReadMailbox(agentName, teamName, homeDir)
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 || messageIndex < 0 || messageIndex >= len(messages) {
+		return nil
+	}
+	if messages[messageIndex].Read {
+		return nil
+	}
+
+	if err := ensureInboxDir(agentName, teamName, homeDir); err != nil {
+		return err
+	}
+
 	inboxPath := getInboxPath(agentName, teamName, homeDir)
 	lockPath := getLockPath(inboxPath)
 
@@ -246,6 +262,7 @@ func MarkMessageAsReadByIndex(agentName, teamName, homeDir string, messageIndex 
 	defer globalMu.Unlock()
 
 	return withLock(lockPath, func() error {
+		// Re-read after acquiring lock to get the latest state.
 		messages, err := ReadMailbox(agentName, teamName, homeDir)
 		if err != nil {
 			return err
@@ -272,6 +289,19 @@ func MarkMessageAsReadByIndex(agentName, teamName, homeDir string, messageIndex 
 // match the predicate are updated; already-read messages and non-matching
 // messages are left unchanged.
 func MarkMessagesAsReadByPredicate(agentName, teamName, homeDir string, predicate func(Message) bool) error {
+	// Bail out early if the inbox is empty — nothing to mark.
+	messages, err := ReadMailbox(agentName, teamName, homeDir)
+	if err != nil {
+		return err
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+
+	if err := ensureInboxDir(agentName, teamName, homeDir); err != nil {
+		return err
+	}
+
 	inboxPath := getInboxPath(agentName, teamName, homeDir)
 	lockPath := getLockPath(inboxPath)
 
@@ -279,6 +309,7 @@ func MarkMessagesAsReadByPredicate(agentName, teamName, homeDir string, predicat
 	defer globalMu.Unlock()
 
 	return withLock(lockPath, func() error {
+		// Re-read after acquiring lock to get the latest state.
 		messages, err := ReadMailbox(agentName, teamName, homeDir)
 		if err != nil {
 			return err
