@@ -112,7 +112,7 @@ func BuildEntriesFromLocalFiles(cwd, configHome, projectID string) map[string]st
 	}
 
 	// 2. Global user memory: ~/.claude/CLAUDE.md
-	userMemoryPath := filepath.Join(configHome, "CLAUDE.md")
+	userMemoryPath := filepath.Join(configHome, ".claude", "CLAUDE.md")
 	content = TryReadFile(userMemoryPath)
 	if content != nil {
 		entries[KeyUserMemory] = string(content)

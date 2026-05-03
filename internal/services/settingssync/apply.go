@@ -32,7 +32,7 @@ func ApplyRemoteEntriesToLocal(entries map[string]string, cwd, configHome, proje
 
 	// 2. Global user memory
 	if content, ok := entries[KeyUserMemory]; ok {
-		path := filepath.Join(configHome, "CLAUDE.md")
+		path := filepath.Join(configHome, ".claude", "CLAUDE.md")
 		if !exceedsSizeLimit(content, path) {
 			if WriteFileForSync(path, content) {
 				memoryWritten = true

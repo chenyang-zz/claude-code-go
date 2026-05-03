@@ -112,10 +112,10 @@ func fetchUserSettingsGET(ctx context.Context, baseURL, accessToken string) (*Se
 
 // FetchUserSettings performs GET with retry (up to maxRetries attempts).
 // Returns the fetched data, an isEmpty indicator, or an error.
-func FetchUserSettings(ctx context.Context, baseURL, accessToken string) (*SettingsSyncFetchResult, error) {
+func FetchUserSettings(ctx context.Context, baseURL, accessToken string, maxRetries int) (*SettingsSyncFetchResult, error) {
 	var lastResult *SettingsSyncFetchResult
 
-	for attempt := 0; attempt <= defaultMaxRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		result, err := fetchUserSettingsGET(ctx, baseURL, accessToken)
 		if err != nil {
 			return nil, err
@@ -131,14 +131,14 @@ func FetchUserSettings(ctx context.Context, baseURL, accessToken string) (*Setti
 		}
 
 		// No more retries left.
-		if attempt >= defaultMaxRetries {
+		if attempt >= maxRetries {
 			return result, nil
 		}
 
 		delay := exponentialBackoff(attempt)
 		logger.DebugCF("settingssync", "fetch retry", map[string]any{
 			"attempt":  attempt + 1,
-			"max":      defaultMaxRetries,
+			"max":      maxRetries,
 			"delay_ms": delay.Milliseconds(),
 		})
 		select {

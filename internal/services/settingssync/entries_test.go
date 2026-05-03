@@ -82,7 +82,7 @@ func TestBuildEntriesFromLocalFiles_AllPresent(t *testing.T) {
 	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"theme":"dark"}`), 0o644)
 
 	// Create ~/.claude/CLAUDE.md
-	os.WriteFile(filepath.Join(home, "CLAUDE.md"), []byte("User memory content"), 0o644)
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("User memory content"), 0o644)
 
 	// Create <cwd>/.claude/settings.local.json
 	projectClaudeDir := filepath.Join(cwd, ".claude")
@@ -117,7 +117,7 @@ func TestBuildEntriesFromLocalFiles_NoProjectID(t *testing.T) {
 	claudeDir := filepath.Join(home, ".claude")
 	os.MkdirAll(claudeDir, 0o755)
 	os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(`{"theme":"dark"}`), 0o644)
-	os.WriteFile(filepath.Join(home, "CLAUDE.md"), []byte("User memory"), 0o644)
+	os.WriteFile(filepath.Join(claudeDir, "CLAUDE.md"), []byte("User memory"), 0o644)
 
 	entries := BuildEntriesFromLocalFiles("", home, "")
 

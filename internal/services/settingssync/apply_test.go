@@ -58,7 +58,7 @@ func TestApplyRemoteEntriesToLocal_AllFourKeys(t *testing.T) {
 	}
 
 	// Verify user memory written
-	userMem := filepath.Join(home, "CLAUDE.md")
+	userMem := filepath.Join(home, ".claude", "CLAUDE.md")
 	data, err = os.ReadFile(userMem)
 	if err != nil {
 		t.Fatalf("user memory not written: %v", err)
@@ -105,7 +105,7 @@ func TestApplyRemoteEntriesToLocal_NoProjectID(t *testing.T) {
 	}
 
 	// Verify user memory written
-	userMem := filepath.Join(home, "CLAUDE.md")
+	userMem := filepath.Join(home, ".claude", "CLAUDE.md")
 	if _, err := os.ReadFile(userMem); err != nil {
 		t.Errorf("user memory not written: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestApplyRemoteEntriesToLocal_PartialEntries(t *testing.T) {
 	}
 
 	// Memory should NOT be written (not in entries)
-	userMem := filepath.Join(home, "CLAUDE.md")
+	userMem := filepath.Join(home, ".claude", "CLAUDE.md")
 	if _, err := os.ReadFile(userMem); err == nil {
 		t.Error("memory should not be written when absent from entries")
 	}

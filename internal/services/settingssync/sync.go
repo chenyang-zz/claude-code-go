@@ -57,7 +57,7 @@ func UploadUserSettingsInBackground() {
 		logger.DebugCF("settingssync", "upload starting", nil)
 
 		// 1. Fetch current remote entries.
-		result, err := FetchUserSettings(context.Background(), baseURL, accessToken)
+		result, err := FetchUserSettings(context.Background(), baseURL, accessToken, defaultMaxRetries)
 		if err != nil || !result.Success {
 			logger.WarnCF("settingssync", "upload fetch failed", map[string]any{
 				"success": result != nil && result.Success,
@@ -146,7 +146,7 @@ func doDownloadUserSettings(ctx context.Context, maxRetries int) bool {
 
 	logger.DebugCF("settingssync", "download starting", nil)
 
-	result, err := FetchUserSettings(ctx, baseURL, accessToken)
+	result, err := FetchUserSettings(ctx, baseURL, accessToken, maxRetries)
 	if err != nil || !result.Success {
 		logger.WarnCF("settingssync", "download fetch failed", map[string]any{
 			"success": result != nil && result.Success,
