@@ -157,6 +157,35 @@ func PushTeamMemory(
 		return &PushResult{Success: true, FilesUploaded: 0}
 	}
 
+	// Scan for secrets before upload. Files containing detected secrets
+	// are excluded from the push and reported in SkippedSecrets.
+	var skippedSecrets []SkippedSecretFile
+	for key, content := range entries {
+		matches := ScanForSecrets(content)
+		for _, m := range matches {
+			skippedSecrets = append(skippedSecrets, SkippedSecretFile{
+				Path:   key,
+				RuleID: m.RuleID,
+				Label:  m.Label,
+			})
+		}
+		if len(matches) > 0 {
+			delete(entries, key)
+			logger.WarnCF("teammemsync", "skipping file with detected secret", map[string]any{
+				"file":  key,
+				"count": len(matches),
+			})
+		}
+	}
+
+	if len(entries) == 0 {
+		return &PushResult{
+			Success:        true,
+			FilesUploaded:  0,
+			SkippedSecrets: skippedSecrets,
+		}
+	}
+
 	// Hash each local entry once. Reused across conflict retries.
 	localHashes := make(map[string]string, len(entries))
 	for key, content := range entries {
@@ -175,7 +204,7 @@ func PushTeamMemory(
 
 		if len(delta) == 0 {
 			// Nothing to upload. Fast path after fresh pull with no local edits.
-			return &PushResult{Success: true, FilesUploaded: 0}
+			return &PushResult{Success: true, FilesUploaded: 0, SkippedSecrets: skippedSecrets}
 		}
 
 		// Split into PUT-sized batches.
@@ -205,7 +234,7 @@ func PushTeamMemory(
 		}
 
 		if lastResult == nil {
-			return &PushResult{Success: true, FilesUploaded: 0}
+			return &PushResult{Success: true, FilesUploaded: 0, SkippedSecrets: skippedSecrets}
 		}
 
 		if lastResult.Success {
@@ -216,6 +245,7 @@ func PushTeamMemory(
 			return &PushResult{
 				Success:       true,
 				FilesUploaded: filesUploaded,
+			SkippedSecrets: skippedSecrets,
 				Checksum:      lastResult.Checksum,
 			}
 		}
@@ -232,6 +262,7 @@ func PushTeamMemory(
 			return &PushResult{
 				Success:       false,
 				FilesUploaded: filesUploaded,
+			SkippedSecrets: skippedSecrets,
 				Error:         lastResult.Error,
 				ErrorType:     lastResult.ErrorType,
 				HTTPStatus:    lastResult.HTTPStatus,
@@ -246,6 +277,7 @@ func PushTeamMemory(
 				Conflict:    true,
 				Error:       "Conflict resolution failed after retries",
 				ErrorType:   "conflict",
+			SkippedSecrets: skippedSecrets,
 			}
 		}
 
@@ -261,6 +293,7 @@ func PushTeamMemory(
 				Conflict:    true,
 				Error:       fmt.Sprintf("Conflict resolution hashes probe failed: %s", probe.Error),
 				ErrorType:   "conflict",
+			SkippedSecrets: skippedSecrets,
 			}
 		}
 

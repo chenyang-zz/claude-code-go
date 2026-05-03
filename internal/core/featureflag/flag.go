@@ -63,6 +63,14 @@ const (
 	// When enabled, team memory files are synchronized between the local
 	// filesystem and the Claude.ai backend API.
 	FlagTeamMemorySync = "TEAM_MEMORY_SYNC"
+	// FlagTeamMemoryScanner gates secret scanning of team memory files before push.
+	// When enabled, team memory content is scanned against gitleaks rules
+	// and files containing detected secrets are excluded from upload.
+	FlagTeamMemoryScanner = "TEAM_MEMORY_SCANNER"
+	// FlagTeamMemoryWatcher gates the team memory file watcher.
+	// When enabled, the team memory directory is watched for file changes
+	// via fsnotify and changes trigger debounced push operations.
+	FlagTeamMemoryWatcher = "TEAM_MEMORY_WATCHER"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
