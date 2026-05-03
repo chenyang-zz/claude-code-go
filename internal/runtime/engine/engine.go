@@ -1254,8 +1254,8 @@ func (e *Runtime) RunTeammateIdleHooks(ctx context.Context, teammateName, teamNa
 
 // RunConfigChangeHooks fires ConfigChange hooks when a settings file changes.
 // It returns the collected hook results, whether any hook blocked (exit code 2),
-// and the blocking message contents. Blocking results for policy_settings source
-// are ignored (enterprise-managed settings must never be blocked).
+// and the blocking message contents. Blocking results for hook.SourcePolicySettings
+// ("policySettings") source are ignored (enterprise-managed settings must never be blocked).
 func (e *Runtime) RunConfigChangeHooks(ctx context.Context, source, filePath, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
 	if !e.shouldRunStopHooks(hook.EventConfigChange) {
 		return nil, false, nil
@@ -1275,7 +1275,7 @@ func (e *Runtime) RunConfigChangeHooks(ctx context.Context, source, filePath, cw
 		return nil, false, nil
 	}
 	if hasBlockingHookResult(results) {
-		// policy_settings changes are never blocked.
+		// hook.SourcePolicySettings changes are never blocked.
 		if source == string(hook.SourcePolicySettings) {
 			return results, false, nil
 		}
@@ -2023,11 +2023,20 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		if isFileWriteTool(call.Name) {
 			if e.shouldRunStopHooks(hook.EventFileChanged) {
 				var filePath string
-				if fp, ok := call.Input["file_path"].(string); ok {
-					filePath = fp
+				switch call.Name {
+				case "Write", "Edit":
+					if fp, ok := call.Input["file_path"].(string); ok {
+						filePath = fp
+					}
+				case "NotebookEdit":
+					if np, ok := call.Input["notebook_path"].(string); ok {
+						filePath = np
+					}
 				}
 				if filePath != "" {
-					e.RunFileChangedHooks(ctx, filePath, "change", e.workingDir(""))
+					if _, blocked, blockingMsgs := e.RunFileChangedHooks(ctx, filePath, "change", e.workingDir("")); blocked {
+						return attachAdditionalContext(coretool.Result{Error: strings.Join(blockingMsgs, "\n")}, additionalContext), nil
+					}
 				}
 			}
 		}
@@ -2343,7 +2352,7 @@ func isToolInterrupt(result coretool.Result, invokeErr error) bool {
 // operation that should trigger FileChanged hooks on success.
 func isFileWriteTool(name string) bool {
 	switch name {
-	case "Write", "Edit":
+	case "Write", "Edit", "NotebookEdit":
 		return true
 	default:
 		return false

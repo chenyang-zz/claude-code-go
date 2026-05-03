@@ -139,7 +139,7 @@ func TestConfigChangeHookInputType(t *testing.T) {
 			CWD:       "/repo",
 		},
 		HookEventName: "ConfigChange",
-		Source:        "project_settings",
+		Source:        "projectSettings",
 		FilePath:      "/repo/.claude/settings.json",
 	}
 
@@ -156,8 +156,8 @@ func TestConfigChangeHookInputType(t *testing.T) {
 	if parsed["hook_event_name"] != "ConfigChange" {
 		t.Fatalf("hook_event_name = %v, want ConfigChange", parsed["hook_event_name"])
 	}
-	if parsed["source"] != "project_settings" {
-		t.Fatalf("source = %v, want project_settings", parsed["source"])
+	if parsed["source"] != "projectSettings" {
+		t.Fatalf("source = %v, want projectSettings", parsed["source"])
 	}
 	if parsed["file_path"] != "/repo/.claude/settings.json" {
 		t.Fatalf("file_path = %v, want /repo/.claude/settings.json", parsed["file_path"])
@@ -178,7 +178,7 @@ func TestRunConfigChangeHooksDispatched(t *testing.T) {
 	}
 	runtime.HookRunner = hookRunner
 
-	results, blocked, blockingMessages := runtime.RunConfigChangeHooks(context.Background(), "project_settings", "/repo/.claude/settings.json", "/workspace")
+	results, blocked, blockingMessages := runtime.RunConfigChangeHooks(context.Background(), "projectSettings", "/repo/.claude/settings.json", "/workspace")
 
 	if len(hookRunner.calls) != 1 {
 		t.Fatalf("call count = %d, want 1", len(hookRunner.calls))
@@ -191,8 +191,8 @@ func TestRunConfigChangeHooksDispatched(t *testing.T) {
 	if !ok {
 		t.Fatalf("input type = %T, want hook.ConfigChangeHookInput", hookRunner.calls[0].input)
 	}
-	if input.Source != "project_settings" {
-		t.Fatalf("source = %q, want project_settings", input.Source)
+	if input.Source != "projectSettings" {
+		t.Fatalf("source = %q, want projectSettings", input.Source)
 	}
 	if input.FilePath != "/repo/.claude/settings.json" {
 		t.Fatalf("file_path = %q, want /repo/.claude/settings.json", input.FilePath)
@@ -205,7 +205,7 @@ func TestRunConfigChangeHooksDispatched(t *testing.T) {
 	}
 }
 
-// TestRunConfigChangeHooksPolicySettingsBlockingIgnored verifies policy_settings source ignores blocking.
+// TestRunConfigChangeHooksPolicySettingsBlockingIgnored verifies policySettings source ignores blocking.
 func TestRunConfigChangeHooksPolicySettingsBlockingIgnored(t *testing.T) {
 	hookRunner := &fakeStopHookRunner{
 		results: []hook.HookResult{{ExitCode: 2, Stderr: "blocked"}},
@@ -659,7 +659,7 @@ func TestAllStatusPermissionHooksSkippedWhenDisabled(t *testing.T) {
 		{
 			name: "ConfigChange",
 			run: func(r *Runtime) {
-				r.RunConfigChangeHooks(context.Background(), "user_settings", "", "/repo")
+				r.RunConfigChangeHooks(context.Background(), "userSettings", "", "/repo")
 			},
 		},
 		{

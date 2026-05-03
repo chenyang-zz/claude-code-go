@@ -302,7 +302,7 @@ type TeammateIdleHookInput struct {
 
 // ConfigChangeHookInput is the JSON payload piped to ConfigChange event hooks via stdin.
 // Hooks receive this when a settings file changes and can block the change
-// by returning exit code 2 (except for policy_settings source where blocking is ignored).
+// by returning exit code 2 (except for hook.SourcePolicySettings source where blocking is ignored).
 type ConfigChangeHookInput struct {
 	BaseHookInput
 	// HookEventName is always "ConfigChange".
@@ -376,8 +376,8 @@ type PermissionRequestHookInput struct {
 }
 
 // PermissionDeniedHookInput is the JSON payload piped to PermissionDenied event hooks via stdin.
-// Hooks receive this when a tool operation is denied permission and can signal retry
-// by returning exit code 2.
+// Hooks receive this when a tool operation is denied permission.
+// This is a fire-and-forget observability event; blocking is not supported.
 type PermissionDeniedHookInput struct {
 	BaseHookInput
 	// HookEventName is always "PermissionDenied".
