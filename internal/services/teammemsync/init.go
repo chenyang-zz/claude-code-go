@@ -29,10 +29,12 @@ type InitOptions struct {
 // Safe to call multiple times; the most recent options win.
 func Init(opts InitOptions) {
 	logger.DebugCF("teammemsync", "initialised", map[string]any{
-		"home_dir":      opts.HomeDir,
-		"project_root":  opts.ProjectRoot,
-		"config_present": opts.Config != nil,
-		"feature_enabled": IsFeatureEnabled(),
-		"team_mem_enabled": IsTeamMemoryEnabled(),
+		"home_dir":          opts.HomeDir,
+		"project_root":      opts.ProjectRoot,
+		"config_present":    opts.Config != nil,
+		"feature_enabled":   IsFeatureEnabled(),
+		"team_mem_enabled":  IsTeamMemoryEnabled(),
+		"scanner_enabled":   IsScannerEnabled(),
+		"watcher_enabled":   IsWatcherEnabled(),
 	})
 }
