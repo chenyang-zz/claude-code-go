@@ -129,7 +129,7 @@ func (r *PluginRegistrar) RegisterAll(result *RefreshResult, baseHooks hook.Hook
 		summary.HooksEventsRegistered = count
 	}
 
-	// 4. Register MCP servers (re-extract from plugins).
+	// 4. Register MCP servers (re-extract from plugins, including MCPB).
 	if r.McpRegistry != nil && len(result.Plugins) > 0 {
 		var allMcpServers []*McpServerConfig
 		for _, p := range result.Plugins {
@@ -139,6 +139,14 @@ func (r *PluginRegistrar) RegisterAll(result *RefreshResult, baseHooks hook.Hook
 				continue
 			}
 			allMcpServers = append(allMcpServers, servers...)
+
+			// Also extract MCPB servers (.mcpb / .dxt files).
+			mcpbServers, err := ExtractMcpbServers(p)
+			if err != nil {
+				summary.Errors = append(summary.Errors, fmt.Sprintf("mcpb extract %q: %v", p.Name, err))
+				continue
+			}
+			allMcpServers = append(allMcpServers, mcpbServers...)
 		}
 		if len(allMcpServers) > 0 {
 			count, err := r.RegisterMcpServers(allMcpServers)
