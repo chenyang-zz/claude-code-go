@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestValidateSlugValid(t *testing.T) {
@@ -69,6 +70,7 @@ func TestValidateSlugMaxLength(t *testing.T) {
 func TestFindGitRoot(t *testing.T) {
 	m := NewManager()
 	dir := t.TempDir()
+	t.Cleanup(func() { removeAllWithRetry(dir) })
 	initGitRepo(t, dir)
 
 	root, err := m.FindGitRoot(dir)
@@ -95,6 +97,7 @@ func TestFindGitRootNotRepo(t *testing.T) {
 func TestCreateAndRemoveWorktree(t *testing.T) {
 	m := NewManager()
 	dir := t.TempDir()
+	t.Cleanup(func() { removeAllWithRetry(dir) })
 	initGitRepo(t, dir)
 	addCommit(t, dir)
 
@@ -123,6 +126,7 @@ func TestCreateAndRemoveWorktree(t *testing.T) {
 func TestCreateWorktreeReuse(t *testing.T) {
 	m := NewManager()
 	dir := t.TempDir()
+	t.Cleanup(func() { removeAllWithRetry(dir) })
 	initGitRepo(t, dir)
 	addCommit(t, dir)
 
@@ -144,6 +148,7 @@ func TestCreateWorktreeReuse(t *testing.T) {
 func TestCountWorktreeChanges(t *testing.T) {
 	m := NewManager()
 	dir := t.TempDir()
+	t.Cleanup(func() { removeAllWithRetry(dir) })
 	initGitRepo(t, dir)
 	addCommit(t, dir)
 
@@ -208,5 +213,16 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v failed: %s: %v", args, string(out), err)
+	}
+}
+
+// removeAllWithRetry retries os.RemoveAll to work around macOS TempDir
+// cleanup races where .git directories may fail with ENOTEMPTY.
+func removeAllWithRetry(dir string) {
+	for i := 0; i < 5; i++ {
+		if err := os.RemoveAll(dir); err == nil {
+			return
+		}
+		time.Sleep(time.Duration(i+1) * 10 * time.Millisecond)
 	}
 }
