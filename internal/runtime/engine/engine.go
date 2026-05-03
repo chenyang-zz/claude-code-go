@@ -1225,6 +1225,198 @@ func (e *Runtime) RunSubagentStartHooks(ctx context.Context, agentID string, age
 	return results, false, nil, ""
 }
 
+// RunTeammateIdleHooks fires TeammateIdle hooks when a teammate agent goes idle.
+// It returns the collected hook results, whether any hook blocked (exit code 2),
+// and the blocking message contents.
+func (e *Runtime) RunTeammateIdleHooks(ctx context.Context, teammateName, teamName, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventTeammateIdle) {
+		return nil, false, nil
+	}
+	input := hook.TeammateIdleHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventTeammateIdle),
+		TeammateName:  teammateName,
+		TeamName:      teamName,
+	}
+	results = e.runHooks(ctx, hook.EventTeammateIdle, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
+// RunConfigChangeHooks fires ConfigChange hooks when a settings file changes.
+// It returns the collected hook results, whether any hook blocked (exit code 2),
+// and the blocking message contents. Blocking results for policy_settings source
+// are ignored (enterprise-managed settings must never be blocked).
+func (e *Runtime) RunConfigChangeHooks(ctx context.Context, source, filePath, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventConfigChange) {
+		return nil, false, nil
+	}
+	input := hook.ConfigChangeHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventConfigChange),
+		Source:        source,
+		FilePath:      filePath,
+	}
+	results = e.runHooks(ctx, hook.EventConfigChange, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		// policy_settings changes are never blocked.
+		if source == string(hook.SourcePolicySettings) {
+			return results, false, nil
+		}
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
+// RunInstructionsLoadedHooks fires InstructionsLoaded hooks when instruction files
+// are loaded. This is a fire-and-forget observability event; blocking is not supported.
+func (e *Runtime) RunInstructionsLoadedHooks(ctx context.Context, filePath, memoryType, loadReason, cwd string, globs []string, triggerFilePath, parentFilePath string) {
+	if !e.shouldRunStopHooks(hook.EventInstructionsLoaded) {
+		return
+	}
+	input := hook.InstructionsLoadedHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName:   string(hook.EventInstructionsLoaded),
+		FilePath:        filePath,
+		MemoryType:      memoryType,
+		LoadReason:      loadReason,
+		Globs:           globs,
+		TriggerFilePath: triggerFilePath,
+		ParentFilePath:  parentFilePath,
+	}
+	e.runHooks(ctx, hook.EventInstructionsLoaded, input, cwd)
+}
+
+// RunCwdChangedHooks fires CwdChanged hooks when the working directory changes.
+// It returns the collected hook results, whether any hook blocked (exit code 2),
+// and the blocking message contents.
+func (e *Runtime) RunCwdChangedHooks(ctx context.Context, oldCwd, newCwd, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventCwdChanged) {
+		return nil, false, nil
+	}
+	input := hook.CwdChangedHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventCwdChanged),
+		OldCWD:        oldCwd,
+		NewCWD:        newCwd,
+	}
+	results = e.runHooks(ctx, hook.EventCwdChanged, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
+// RunFileChangedHooks fires FileChanged hooks when a file is modified.
+// It returns the collected hook results, whether any hook blocked (exit code 2),
+// and the blocking message contents.
+func (e *Runtime) RunFileChangedHooks(ctx context.Context, filePath, changeEvent, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventFileChanged) {
+		return nil, false, nil
+	}
+	input := hook.FileChangedHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventFileChanged),
+		FilePath:      filePath,
+		Event:         changeEvent,
+	}
+	results = e.runHooks(ctx, hook.EventFileChanged, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
+// RunPermissionRequestHooks fires PermissionRequest hooks when a tool operation
+// requests permission. It returns the collected hook results, whether any hook
+// blocked (exit code 2), and the blocking message contents.
+func (e *Runtime) RunPermissionRequestHooks(ctx context.Context, toolName string, toolInput json.RawMessage, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventPermissionRequest) {
+		return nil, false, nil
+	}
+	input := hook.PermissionRequestHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventPermissionRequest),
+		ToolName:      toolName,
+		ToolInput:     toolInput,
+	}
+	results = e.runHooks(ctx, hook.EventPermissionRequest, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
+// RunPermissionDeniedHooks fires PermissionDenied hooks when a tool operation
+// is denied permission. It returns the collected hook results, whether any hook
+// blocked (exit code 2), and the blocking message contents.
+func (e *Runtime) RunPermissionDeniedHooks(ctx context.Context, toolName string, toolInput json.RawMessage, toolUseID, reason, cwd string) (results []hook.HookResult, blocked bool, blockingMessages []string) {
+	if !e.shouldRunStopHooks(hook.EventPermissionDenied) {
+		return nil, false, nil
+	}
+	input := hook.PermissionDeniedHookInput{
+		BaseHookInput: hook.BaseHookInput{
+			SessionID:      e.sessionID,
+			TranscriptPath: e.TranscriptPath,
+			CWD:            e.workingDir(cwd),
+		},
+		HookEventName: string(hook.EventPermissionDenied),
+		ToolName:      toolName,
+		ToolInput:     toolInput,
+		ToolUseID:     toolUseID,
+		Reason:        reason,
+	}
+	results = e.runHooks(ctx, hook.EventPermissionDenied, input, cwd)
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	if hasBlockingHookResult(results) {
+		return results, true, blockingStderrMessages(results)
+	}
+	return results, false, nil
+}
+
 // workingDir returns the working directory used for hook execution context.
 func (e *Runtime) workingDir(requestCWD string) string {
 	if e == nil {
@@ -1826,6 +2018,20 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 				return attachAdditionalContext(coretool.Result{Error: strings.Join(errs, "\n")}, additionalContext), nil
 			}
 		}
+
+		// FileChanged hooks: run after successful file write/edit operations.
+		if isFileWriteTool(call.Name) {
+			if e.shouldRunStopHooks(hook.EventFileChanged) {
+				var filePath string
+				if fp, ok := call.Input["file_path"].(string); ok {
+					filePath = fp
+				}
+				if filePath != "" {
+					e.RunFileChangedHooks(ctx, filePath, "change", e.workingDir(""))
+				}
+			}
+		}
+
 		return attachAdditionalContext(result, additionalContext), nil
 	}
 
@@ -1969,6 +2175,12 @@ func (e *Runtime) requestHookApproval(ctx context.Context, call coretool.Call, r
 
 // executeFilesystemApproval resolves one filesystem approval request through the runtime prompt and one-shot retry flow.
 func (e *Runtime) executeFilesystemApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.PermissionError, out chan<- event.Event) (coretool.Result, error) {
+	// PermissionRequest hooks: run before the approval prompt is surfaced.
+	toolInput, _ := json.Marshal(call.Input)
+	if _, blocked, errs := e.RunPermissionRequestHooks(ctx, call.Name, toolInput, e.workingDir("")); blocked {
+		return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+	}
+
 	out <- event.Event{
 		Type:      event.TypeApprovalRequired,
 		Timestamp: time.Now(),
@@ -1995,6 +2207,8 @@ func (e *Runtime) executeFilesystemApproval(ctx context.Context, call coretool.C
 		if strings.TrimSpace(decision.Reason) == "" {
 			decision.Reason = fmt.Sprintf("Permission to %s %s was not granted.", permissionErr.Access, permissionErr.Path)
 		}
+		// PermissionDenied hooks: run after permission is denied.
+		e.RunPermissionDeniedHooks(ctx, call.Name, toolInput, call.ID, decision.Reason, e.workingDir(""))
 		return coretool.Result{Error: decision.Reason}, nil
 	}
 
@@ -2009,6 +2223,12 @@ func (e *Runtime) executeFilesystemApproval(ctx context.Context, call coretool.C
 
 // executeBashApproval resolves one Bash approval request through the runtime prompt and one-shot retry flow.
 func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.BashPermissionError, out chan<- event.Event) (coretool.Result, error) {
+	// PermissionRequest hooks: run before the approval prompt is surfaced.
+	toolInput, _ := json.Marshal(call.Input)
+	if _, blocked, errs := e.RunPermissionRequestHooks(ctx, call.Name, toolInput, e.workingDir("")); blocked {
+		return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+	}
+
 	out <- event.Event{
 		Type:      event.TypeApprovalRequired,
 		Timestamp: time.Now(),
@@ -2035,6 +2255,8 @@ func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, p
 		if strings.TrimSpace(decision.Reason) == "" {
 			decision.Reason = fmt.Sprintf("Permission to execute %q was not granted.", permissionErr.Command)
 		}
+		// PermissionDenied hooks: run after permission is denied.
+		e.RunPermissionDeniedHooks(ctx, call.Name, toolInput, call.ID, decision.Reason, e.workingDir(""))
 		return coretool.Result{Error: decision.Reason}, nil
 	}
 
@@ -2048,6 +2270,12 @@ func (e *Runtime) executeBashApproval(ctx context.Context, call coretool.Call, p
 
 // executeWebFetchApproval resolves one WebFetch approval request through the runtime prompt and one-shot retry flow.
 func (e *Runtime) executeWebFetchApproval(ctx context.Context, call coretool.Call, permissionErr *corepermission.WebFetchPermissionError, out chan<- event.Event) (coretool.Result, error) {
+	// PermissionRequest hooks: run before the approval prompt is surfaced.
+	toolInput, _ := json.Marshal(call.Input)
+	if _, blocked, errs := e.RunPermissionRequestHooks(ctx, call.Name, toolInput, e.workingDir("")); blocked {
+		return coretool.Result{Error: strings.Join(errs, "\n")}, nil
+	}
+
 	out <- event.Event{
 		Type:      event.TypeApprovalRequired,
 		Timestamp: time.Now(),
@@ -2074,6 +2302,8 @@ func (e *Runtime) executeWebFetchApproval(ctx context.Context, call coretool.Cal
 		if strings.TrimSpace(decision.Reason) == "" {
 			decision.Reason = fmt.Sprintf("Permission to fetch %q was not granted.", permissionErr.URL)
 		}
+		// PermissionDenied hooks: run after permission is denied.
+		e.RunPermissionDeniedHooks(ctx, call.Name, toolInput, call.ID, decision.Reason, e.workingDir(""))
 		return coretool.Result{Error: decision.Reason}, nil
 	}
 
@@ -2107,6 +2337,17 @@ func isToolInterrupt(result coretool.Result, invokeErr error) bool {
 		return true
 	}
 	return strings.Contains(renderToolFailure(result, invokeErr), "AbortError")
+}
+
+// isFileWriteTool reports whether the tool name corresponds to a file mutation
+// operation that should trigger FileChanged hooks on success.
+func isFileWriteTool(name string) bool {
+	switch name {
+	case "Write", "Edit":
+		return true
+	default:
+		return false
+	}
 }
 
 // maxToolIterations returns the configured loop cap, falling back to the default minimum when unset.

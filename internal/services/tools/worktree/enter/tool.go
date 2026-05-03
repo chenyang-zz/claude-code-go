@@ -150,6 +150,25 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		}
 	}
 
+	// Fire CwdChanged hooks after the working directory has changed.
+	// This is a post-change notification hook. Blocking (exit code 2) returns
+	// an error to the caller.
+	if t.shouldRunWorktreeHooks(hook.EventCwdChanged) {
+		cwdHookInput := hook.CwdChangedHookInput{
+			BaseHookInput: hook.BaseHookInput{
+				CWD: result.Path,
+			},
+			HookEventName: string(hook.EventCwdChanged),
+			OldCWD:        call.Context.WorkingDir,
+			NewCWD:        result.Path,
+		}
+		results := t.hooks.RunHooks(ctx, hook.EventCwdChanged, cwdHookInput, call.Context.WorkingDir)
+		if runtimehooks.HasBlockingResult(results) {
+			errs := runtimehooks.BlockingErrors(results)
+			return coretool.Result{Error: fmt.Sprintf("CwdChanged blocked by hook:\n%s", strings.Join(errs, "\n"))}, nil
+		}
+	}
+
 	logger.DebugCF("enter_worktree_tool", "worktree created", map[string]any{
 		"slug":        slug,
 		"path":        result.Path,

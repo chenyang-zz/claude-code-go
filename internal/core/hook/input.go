@@ -287,6 +287,111 @@ type SessionEndHookInput struct {
 	Reason string `json:"reason"`
 }
 
+// TeammateIdleHookInput is the JSON payload piped to TeammateIdle event hooks via stdin.
+// Hooks receive this when a teammate agent goes idle and can block the idle transition
+// by returning exit code 2.
+type TeammateIdleHookInput struct {
+	BaseHookInput
+	// HookEventName is always "TeammateIdle".
+	HookEventName string `json:"hook_event_name"`
+	// TeammateName is the name of the teammate agent that went idle.
+	TeammateName string `json:"teammate_name"`
+	// TeamName is the optional team name the agent belongs to.
+	TeamName string `json:"team_name,omitempty"`
+}
+
+// ConfigChangeHookInput is the JSON payload piped to ConfigChange event hooks via stdin.
+// Hooks receive this when a settings file changes and can block the change
+// by returning exit code 2 (except for policy_settings source where blocking is ignored).
+type ConfigChangeHookInput struct {
+	BaseHookInput
+	// HookEventName is always "ConfigChange".
+	HookEventName string `json:"hook_event_name"`
+	// Source identifies which settings layer changed.
+	Source string `json:"source"`
+	// FilePath is the optional path of the changed settings file.
+	FilePath string `json:"file_path,omitempty"`
+}
+
+// InstructionsLoadedHookInput is the JSON payload piped to InstructionsLoaded event hooks via stdin.
+// Hooks receive this when instruction files (CLAUDE.md, .claude/PROJECT.md) are loaded.
+// This is a fire-and-forget observability event; blocking is not supported.
+type InstructionsLoadedHookInput struct {
+	BaseHookInput
+	// HookEventName is always "InstructionsLoaded".
+	HookEventName string `json:"hook_event_name"`
+	// FilePath is the path of the loaded instruction file.
+	FilePath string `json:"file_path"`
+	// MemoryType identifies the instruction scope: "User", "Project", "Local", or "Managed".
+	MemoryType string `json:"memory_type"`
+	// LoadReason indicates why the file was loaded.
+	LoadReason string `json:"load_reason"`
+	// Globs is the optional list of glob patterns that matched.
+	Globs []string `json:"globs,omitempty"`
+	// TriggerFilePath is the optional file path that triggered the load.
+	TriggerFilePath string `json:"trigger_file_path,omitempty"`
+	// ParentFilePath is the optional parent file path for nested loads.
+	ParentFilePath string `json:"parent_file_path,omitempty"`
+}
+
+// CwdChangedHookInput is the JSON payload piped to CwdChanged event hooks via stdin.
+// Hooks receive this when the working directory changes and can block the operation
+// by returning exit code 2.
+type CwdChangedHookInput struct {
+	BaseHookInput
+	// HookEventName is always "CwdChanged".
+	HookEventName string `json:"hook_event_name"`
+	// OldCWD is the previous working directory.
+	OldCWD string `json:"old_cwd"`
+	// NewCWD is the new working directory.
+	NewCWD string `json:"new_cwd"`
+}
+
+// FileChangedHookInput is the JSON payload piped to FileChanged event hooks via stdin.
+// Hooks receive this when a watched file changes and can block further processing
+// by returning exit code 2.
+type FileChangedHookInput struct {
+	BaseHookInput
+	// HookEventName is always "FileChanged".
+	HookEventName string `json:"hook_event_name"`
+	// FilePath is the path of the changed file.
+	FilePath string `json:"file_path"`
+	// Event describes the type of change: "change", "add", or "unlink".
+	Event string `json:"event"`
+}
+
+// PermissionRequestHookInput is the JSON payload piped to PermissionRequest event hooks via stdin.
+// Hooks receive this when a tool operation requests permission and can block the operation
+// by returning exit code 2.
+type PermissionRequestHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PermissionRequest".
+	HookEventName string `json:"hook_event_name"`
+	// ToolName is the name of the tool requesting permission.
+	ToolName string `json:"tool_name"`
+	// ToolInput contains the raw tool arguments as JSON.
+	ToolInput json.RawMessage `json:"tool_input"`
+	// PermissionSuggestions is the optional list of permission update suggestions.
+	PermissionSuggestions json.RawMessage `json:"permission_suggestions,omitempty"`
+}
+
+// PermissionDeniedHookInput is the JSON payload piped to PermissionDenied event hooks via stdin.
+// Hooks receive this when a tool operation is denied permission and can signal retry
+// by returning exit code 2.
+type PermissionDeniedHookInput struct {
+	BaseHookInput
+	// HookEventName is always "PermissionDenied".
+	HookEventName string `json:"hook_event_name"`
+	// ToolName is the name of the tool that was denied.
+	ToolName string `json:"tool_name"`
+	// ToolInput contains the raw tool arguments as JSON.
+	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolUseID is the unique identifier for this tool use call.
+	ToolUseID string `json:"tool_use_id"`
+	// Reason explains why permission was denied.
+	Reason string `json:"reason"`
+}
+
 // HookResult captures the outcome of executing a single hook command.
 type HookResult struct {
 	// ExitCode is the process exit code.
