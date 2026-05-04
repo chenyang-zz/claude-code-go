@@ -1227,6 +1227,12 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 		}
 
+		// Haiku models are Anthropic-only; reset any stale singleton when
+		// bootstrapping with a non-Anthropic provider to avoid cross-provider
+		// leakage in long-lived test or REPL processes.
+		haiku.InitHaiku(haiku.InitOptions{})
+		toolusesummary.InitToolUseSummary(toolusesummary.InitOptions{})
+
 		return &EngineAssembly{
 			Engine:         runtime,
 			Policy:         policy,
