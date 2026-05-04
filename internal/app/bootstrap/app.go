@@ -49,6 +49,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
+	"github.com/sheepzhao/claude-code-go/internal/services/microcompact"
 	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/preventsleep"
@@ -137,6 +138,10 @@ type App struct {
 	// Haiku helper (secondary model). nil when FlagWebFetchSummary is
 	// disabled or Haiku is unavailable.
 	WebFetchSummary *webfetchsummary.Service
+	// Microcompact clears expired tool results before sending requests
+	// to the API (time-based microcompact). nil when FlagMicroCompact is
+	// disabled.
+	Microcompact *microcompact.MicrocompactService
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -431,6 +436,10 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		internallogging.Init(internallogging.InitOptions{})
 	}
 
+	// Initialize the time-based microcompact service. Self-contained
+	// (no external dependencies), gated by FlagMicroCompact (off by default).
+	microcompact.InitMicrocompactService()
+
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
@@ -451,6 +460,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		DateTimeParser:          datetimeparser.CurrentService(),
 		ShellPrefix:             shellprefix.CurrentService(),
 		WebFetchSummary:         webfetchsummary.CurrentService(),
+		Microcompact:            microcompact.CurrentService(),
 	}, nil
 }
 

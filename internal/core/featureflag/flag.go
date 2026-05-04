@@ -123,6 +123,12 @@ const (
 	// summarize fetched web page content via a secondary model prompt.
 	// Off by default.
 	FlagWebFetchSummary = "WEB_FETCH_SUMMARY"
+	// FlagMicroCompact gates the time-based microcompact service
+	// (services/microcompact). When enabled, the runtime automatically
+	// clears expired tool results before sending requests to the API,
+	// reducing prompt size when the server-side prompt cache has expired.
+	// Off by default.
+	FlagMicroCompact = "MICRO_COMPACT"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
