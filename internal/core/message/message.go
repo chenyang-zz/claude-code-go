@@ -6,4 +6,7 @@ type Message struct {
 	Role Role `json:"role"`
 	// Content stores the ordered content blocks associated with the message.
 	Content []ContentPart `json:"content"`
+	// Timestamp is an optional ISO 8601 timestamp for the message, used by
+	// time-based microcompact to compute the gap since the last assistant turn.
+	Timestamp string `json:"timestamp,omitempty"`
 }
