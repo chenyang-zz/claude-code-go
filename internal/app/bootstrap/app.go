@@ -50,6 +50,8 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/microcompact"
+	"github.com/sheepzhao/claude-code-go/internal/services/autocompact"
+	"github.com/sheepzhao/claude-code-go/internal/services/sessionmemorycompact"
 	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/preventsleep"
@@ -142,6 +144,12 @@ type App struct {
 	// to the API (time-based microcompact). nil when FlagMicroCompact is
 	// disabled.
 	Microcompact *microcompact.MicrocompactService
+	// Autocompact performs context-pressure-driven auto-compact threshold
+	// calculations and trigger decisions. nil when FlagAutoCompact is disabled.
+	Autocompact *autocompact.AutoCompactService
+	// SessionMemoryCompact provides session-memory-based compaction logic.
+	// nil when FlagSessionMemoryCompact is disabled.
+	SessionMemoryCompact *sessionmemorycompact.SessionMemoryCompactService
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -440,6 +448,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	// (no external dependencies), gated by FlagMicroCompact (off by default).
 	microcompact.InitMicrocompactService()
 
+	// Initialize the auto-compact service. Gated by FlagAutoCompact (off by default).
+	autocompact.InitAutoCompactService()
+
+	// Initialize the session memory compact service. Gated by FlagSessionMemoryCompact (off by default).
+	sessionmemorycompact.InitSessionMemoryCompactService()
+
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
@@ -461,6 +475,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		ShellPrefix:             shellprefix.CurrentService(),
 		WebFetchSummary:         webfetchsummary.CurrentService(),
 		Microcompact:            microcompact.CurrentService(),
+		Autocompact:            autocompact.CurrentService(),
+		SessionMemoryCompact:    sessionmemorycompact.CurrentService(),
 	}, nil
 }
 
