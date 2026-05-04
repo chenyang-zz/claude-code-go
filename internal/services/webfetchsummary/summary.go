@@ -41,7 +41,7 @@ func NewService(querier haiku.Querier) *Service {
 // user's prompt. Returns the assistant text or a fallback message.
 //
 // Returns ("", nil) when the service is nil, the feature flag is disabled,
-// the content is empty, or ctx is cancelled.
+// the content is empty, or ctx is cancelled (returns ctx.Err()).
 func (s *Service) Summarize(ctx context.Context, content string, prompt string, isPreapprovedDomain bool) (string, error) {
 	if s == nil || s.querier == nil {
 		return "", nil
@@ -58,23 +58,31 @@ func (s *Service) Summarize(ctx context.Context, content string, prompt string, 
 
 	// Truncate content to avoid "Prompt is too long" errors from the
 	// secondary model.
-	truncated := content
+	// Truncate to stay within MaxContentLength including the truncation marker.
+	var truncated string
 	if len(content) > MaxContentLength {
-		truncated = content[:MaxContentLength] + "\n\n[Content truncated due to length...]"
+		const marker = "\n\n[Content truncated due to length...]"
+		limit := MaxContentLength - len(marker)
+		if limit < 0 {
+			limit = 0
+		}
+		truncated = content[:limit] + marker
+	} else {
+		truncated = content
 	}
 
 	modelPrompt := makeSecondaryModelPrompt(truncated, prompt, isPreapprovedDomain)
 
 	logger.DebugCF("webfetchsummary", "summarize_start", map[string]any{
-		"content_len":          len(truncated),
-		"prompt_len":           len(prompt),
-		"preapproved_domain":   isPreapprovedDomain,
+		"content_len":        len(truncated),
+		"prompt_len":         len(prompt),
+		"preapproved_domain": isPreapprovedDomain,
 	})
 
 	result, err := s.querier.Query(ctx, haiku.QueryParams{
-		SystemPrompt:             "", // empty system prompt, matching TS
-		UserPrompt:               modelPrompt,
-		QuerySource:              querySource,
+		SystemPrompt: "", // empty system prompt, matching TS
+		UserPrompt:   modelPrompt,
+		QuerySource:  querySource,
 	})
 	if err != nil {
 		logger.DebugCF("webfetchsummary", "haiku_query_failed", map[string]any{

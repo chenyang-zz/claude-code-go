@@ -43,7 +43,7 @@ func NewService(querier haiku.Querier) *Service {
 //   - ("", error): the Haiku call itself failed
 //
 // Returns ("", nil) when the service is nil, the feature flag is disabled,
-// the command is empty, or ctx is cancelled.
+// the command is empty, or ctx is cancelled (returns ctx.Err()).
 func (s *Service) Extract(ctx context.Context, command string, policySpec string) (string, error) {
 	if s == nil || s.querier == nil {
 		return "", nil
@@ -64,10 +64,10 @@ func (s *Service) Extract(ctx context.Context, command string, policySpec string
 	})
 
 	result, err := s.querier.Query(ctx, haiku.QueryParams{
-		SystemPrompt:       systemPrompt,
-		UserPrompt:         policySpec + "\n\nCommand: " + trimmed,
-		MaxOutputTokens:    64,
-		QuerySource:        querySource,
+		SystemPrompt:    systemPrompt,
+		UserPrompt:      policySpec + "\n\nCommand: " + trimmed,
+		MaxOutputTokens: 64,
+		QuerySource:     querySource,
 	})
 	if err != nil {
 		logger.DebugCF("shellprefix", "haiku_query_failed", map[string]any{
@@ -99,13 +99,16 @@ func (s *Service) Extract(ctx context.Context, command string, policySpec string
 // Haiku response. Returns "" when the prefix is rejected (dangerous, "none",
 // injection, mismatch) and the validated prefix otherwise.
 func classifyPrefix(rawPrefix string, command string) string {
+	// Normalize to lowercase for sentinel checks to prevent case-based bypass.
+	lower := strings.ToLower(rawPrefix)
+
 	// Check for command injection detection first.
-	if rawPrefix == "command_injection_detected" {
+	if lower == "command_injection_detected" {
 		return ""
 	}
 
 	// Reject bare "git" — never accept as a prefix.
-	if rawPrefix == "git" {
+	if lower == "git" {
 		return ""
 	}
 
@@ -115,7 +118,7 @@ func classifyPrefix(rawPrefix string, command string) string {
 	}
 
 	// "none" means Haiku found no meaningful prefix.
-	if rawPrefix == "none" {
+	if lower == "none" {
 		return ""
 	}
 
