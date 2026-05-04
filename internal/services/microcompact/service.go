@@ -38,12 +38,12 @@ func NewMicrocompactService() *MicrocompactService {
 // for this request. Returns the measured gap and active config when the trigger
 // fires, or nil when it doesn't.
 // Aligns with TS evaluateTimeBasedTrigger (microCompact.ts:422-444).
+//
+// Note: The Enabled field in the config is not checked here because service
+// creation is already gated by the MICRO_COMPACT feature flag at init time.
+// If the service is non-nil, time-based microcompact is considered enabled.
 func (s *MicrocompactService) EvaluateTimeBasedTrigger(messages []Message, querySource string) *TimeBasedTriggerResult {
 	cfg := DefaultTimeBasedMCConfig()
-
-	if !cfg.Enabled {
-		return nil
-	}
 
 	// Require a main-thread querySource. Subagents should not trigger time-based MC.
 	if querySource == "" || !isMainThreadSource(querySource) {

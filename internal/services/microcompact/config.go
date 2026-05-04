@@ -20,9 +20,11 @@ type TimeBasedMCConfig struct {
 
 // DefaultTimeBasedMCConfig returns the default time-based microcompact configuration.
 // GrowthBook defaults are replaced by feature-flag-gated static values.
+// Note: The Enabled field is not checked at runtime — service creation is gated
+// by the MICRO_COMPACT feature flag at init time.
 func DefaultTimeBasedMCConfig() TimeBasedMCConfig {
 	return TimeBasedMCConfig{
-		Enabled:             false,
+		Enabled:             true,
 		GapThresholdMinutes: 60,
 		KeepRecent:          5,
 	}

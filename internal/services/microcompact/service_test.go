@@ -10,9 +10,19 @@ func TestEvaluateTimeBasedTrigger_Disabled(t *testing.T) {
 		{Type: "assistant", Timestamp: "2026-05-04T10:00:00Z", Content: []ContentPart{{Type: "text", Text: "hello"}}},
 	}
 
+	// Service creation is gated by the feature flag at init time, so
+	// EvaluateTimeBasedTrigger does not check Enabled separately.
+	// With a valid querySource, an assistant message, and a gap > 60min,
+	// the trigger should fire.
 	result := s.EvaluateTimeBasedTrigger(msgs, "repl_main_thread")
-	if result != nil {
-		t.Fatalf("expected nil for disabled flag, got %+v", result)
+	if result == nil {
+		t.Fatal("expected non-nil trigger result for valid inputs")
+	}
+	if result.GapMinutes < 60 {
+		t.Fatalf("expected gapMinutes >= 60 (gap is from May 4 to now), got %f", result.GapMinutes)
+	}
+	if result.Config.GapThresholdMinutes != 60 {
+		t.Fatalf("expected GapThresholdMinutes=60, got %d", result.Config.GapThresholdMinutes)
 	}
 }
 
