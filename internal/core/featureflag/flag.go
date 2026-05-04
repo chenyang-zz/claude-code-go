@@ -75,6 +75,21 @@ const (
 	// When enabled, a small/fast model generates a brief session recap after
 	// the user has been idle for a configurable threshold (default 5 minutes).
 	FlagAwaySummary = "AWAY_SUMMARY"
+	// FlagNotifier gates the terminal notification dispatch service.
+	// When enabled, the bootstrap layer constructs a notifier service that
+	// fans Notification hook events out to the configured terminal channel
+	// (iTerm2 / Kitty / Ghostty / terminal bell / auto-detect / disabled).
+	FlagNotifier = "NOTIFIER"
+	// FlagPreventSleep gates the macOS sleep-prevention service. When
+	// enabled, the bootstrap layer initialises the prevent-sleep registry
+	// (caffeinate subprocess + restart loop). The service is a no-op on
+	// non-darwin platforms regardless of the flag value.
+	FlagPreventSleep = "PREVENT_SLEEP"
+	// FlagInternalLogging gates the Ant-internal diagnostic logging path
+	// (Kubernetes namespace + OCI container ID extraction). Replaces the
+	// TS-side esbuild USER_TYPE=ant build define with a runtime feature
+	// flag so non-Ant deployments incur zero filesystem reads.
+	FlagInternalLogging = "INTERNAL_LOGGING"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

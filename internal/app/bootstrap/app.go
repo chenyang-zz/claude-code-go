@@ -46,7 +46,10 @@ import (
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
+	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
+	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
+	"github.com/sheepzhao/claude-code-go/internal/services/preventsleep"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/internal/services/promptsuggestion"
 	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
@@ -92,6 +95,13 @@ type App struct {
 	PluginWatcher *plugin.Watcher
 	// PromptSuggestionCleanup aborts in-progress suggestion/speculation work on shutdown.
 	PromptSuggestionCleanup func()
+	// PreventSleepCleanup tears down the macOS sleep-prevention service
+	// (caffeinate subprocess + restart loop) on shutdown. nil when the
+	// service is disabled by FlagPreventSleep.
+	PreventSleepCleanup func()
+	// Notifier dispatches terminal notifications (iTerm2 / Kitty / Ghostty
+	// / bell / auto-detect). nil when FlagNotifier is disabled.
+	Notifier *notifier.Service
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -351,6 +361,42 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		ProjectRoot: cfg.ProjectPath,
 	})
 
+	// Initialize OS platform services (notifier / preventSleep / internalLogging).
+	// Each service is gated by an independent feature flag (off by default)
+	// so deployments can opt into terminal notifications, macOS sleep
+	// prevention, and Ant-internal diagnostic logging without changing the
+	// wiring topology.
+	var notifierService *notifier.Service
+	if notifier.IsNotifierEnabled() {
+		// engine.HookRunner does not expose RunNotificationHooks (it is a
+		// method on *engine.Runtime, not the abstract HookRunner interface).
+		// Both DefaultEngineFactory branches store *engine.Runtime in
+		// EngineAssembly.Engine, so a type assertion recovers the concrete
+		// dispatcher; if a future factory returns a different Engine impl
+		// the notifier simply skips the hook step.
+		var hookRunner notifier.HookRunner
+		if rt, ok := eng.(*engine.Runtime); ok {
+			hookRunner = rt
+		}
+		projectPath := cfg.ProjectPath
+		notifierService = notifier.Init(notifier.InitOptions{
+			HookRunner: hookRunner,
+			ChannelGetter: func() string {
+				return strings.TrimSpace(os.Getenv("CLAUDE_NOTIFIER_CHANNEL"))
+			},
+			CWDGetter: func() string { return projectPath },
+		})
+	}
+
+	var preventSleepCleanup func()
+	if preventsleep.IsPreventSleepEnabled() {
+		preventSleepCleanup = preventsleep.Init(preventsleep.InitOptions{})
+	}
+
+	if internallogging.IsInternalLoggingEnabled() {
+		internallogging.Init(internallogging.InitOptions{})
+	}
+
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
@@ -362,6 +408,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		Scheduler:               scheduler,
 		PluginWatcher:           pluginWatcher,
 		PromptSuggestionCleanup: psCleanup,
+		PreventSleepCleanup:     preventSleepCleanup,
+		Notifier:                notifierService,
 	}, nil
 }
 
@@ -1581,6 +1629,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	}
 	if a.PromptSuggestionCleanup != nil {
 		defer a.PromptSuggestionCleanup()
+	}
+	if a.PreventSleepCleanup != nil {
+		defer a.PreventSleepCleanup()
 	}
 	return a.Runner.Run(ctx, args)
 }
