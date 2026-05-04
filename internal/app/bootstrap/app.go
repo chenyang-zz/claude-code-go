@@ -41,6 +41,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/repl"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/autodream"
+	"github.com/sheepzhao/claude-code-go/internal/services/awaysummary"
 	"github.com/sheepzhao/claude-code-go/internal/services/claudeailimits"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
@@ -303,6 +304,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	autodream.InitAutoDream(nil, func(hook autodream.PostTurnHookFunc) {
 		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	}, cfg.ProjectPath)
+
 
 	// Initialize PromptSuggestion system (post-sampling suggestion generation).
 	_, psCleanup := promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {
@@ -1048,6 +1050,7 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				RateLimitErrorAnnotator: rateLimitErrorAnnotator,
 			})
 		}
+
 		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
 		runtime.StatsCollector = sharedRuntimeStats
 		runtime.StatsCollector = sharedRuntimeStats
@@ -1084,6 +1087,12 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		} else {
 			runtime.ToolCatalog = engine.DescribeTools(modules.Tools)
 		}
+
+		// Initialize AwaySummary system with the live model client.
+		awaysummary.InitAwaySummary(runtime.Client, func(hook awaysummary.PostTurnHookFunc) {
+			engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
+		}, extractmemories.GetAutoMemPath(cfg.ProjectPath), awaysummary.DefaultConfig())
+
 
 		return &EngineAssembly{
 			Engine:         runtime,
