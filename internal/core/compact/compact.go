@@ -3,11 +3,35 @@ package compact
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
+)
+
+const (
+	// MaxPTLRetries is the maximum number of prompt-too-long retry attempts
+	// when the compact request itself hits the token limit. Matches TS MAX_PTL_RETRIES.
+	MaxPTLRetries = 3
+
+	// ptlRetryMarker is the synthetic user message content prepended when
+	// the head of the conversation is truncated for a PTL retry.
+	// Matches TS PTL_RETRY_MARKER.
+	ptlRetryMarker = "[earlier conversation truncated for compaction retry]"
+
+	// promptTooLongErrorMessage is the prefix that the API returns when a
+	// request exceeds the model's context window. Matches TS PROMPT_TOO_LONG_ERROR_MESSAGE.
+	promptTooLongErrorMessage = "Prompt is too long"
+
+	// ErrorMessagePromptTooLong is the user-facing error message returned when
+	// PTL retries are exhausted. Matches TS ERROR_MESSAGE_PROMPT_TOO_LONG.
+	ErrorMessagePromptTooLong = "Conversation too long. Press esc twice to go up a few messages and try again."
+
+	// compactSummaryPrefix is the opening text of a compact summary message,
+	// used to identify and strip stale summaries during partial compact.
+	compactSummaryPrefix = "This session is being continued from a previous conversation"
 )
 
 // CompactionResult holds the output of a successful compaction.
@@ -24,6 +48,9 @@ type CompactionResult struct {
 	PreTokenCount int
 	// PostTokenCount is the estimated token count after compaction.
 	PostTokenCount int
+	// Attachments contains post-compact attachments (files, plan, skills)
+	// that should be injected into the new context window.
+	Attachments []PostCompactAttachment
 	// Usage is the token usage reported by the summary model call.
 	Usage model.Usage
 }
@@ -38,6 +65,43 @@ type CompactRequest struct {
 	CustomInstructions string
 	// TranscriptPath is the optional path to the full transcript file.
 	TranscriptPath string
+	// ReadFileState is the current file state cache for post-compact file restoration.
+	ReadFileState map[string]FileReadState
+	// PlanContent is the current plan file content for post-compact plan restoration.
+	PlanContent string
+	// PlanFilePath is the path to the plan file.
+	PlanFilePath string
+	// InvokedSkills lists skills invoked during this session for post-compact restoration.
+	InvokedSkills []SkillInfo
+}
+
+// PartialCompactRequest contains the inputs for a partial compaction operation.
+// Aligns with TS partialCompactConversation parameters.
+type PartialCompactRequest struct {
+	// AllMessages is the full conversation history.
+	AllMessages []message.Message
+	// PivotIndex is the index that splits messages into "before" and "after" portions.
+	PivotIndex int
+	// Direction controls which portion is summarized:
+	//   - "from": summarize messages after PivotIndex, keep earlier
+	//   - "up_to": summarize messages before PivotIndex, keep later
+	Direction string
+	// Model is the active model identifier.
+	Model string
+	// CustomInstructions are optional user-supplied instructions for the summary.
+	CustomInstructions string
+	// UserFeedback is optional user context to include in the summary instructions.
+	UserFeedback string
+	// TranscriptPath is the optional path to the full transcript file.
+	TranscriptPath string
+	// ReadFileState is the current file state cache for post-compact file restoration.
+	ReadFileState map[string]FileReadState
+	// PlanContent is the current plan file content for post-compact plan restoration.
+	PlanContent string
+	// PlanFilePath is the path to the plan file.
+	PlanFilePath string
+	// InvokedSkills lists skills invoked during this session for post-compact restoration.
+	InvokedSkills []SkillInfo
 }
 
 // CompactConversation performs a full compaction of the conversation:
@@ -79,12 +143,41 @@ func CompactConversation(ctx context.Context, client model.Client, req CompactRe
 	messagesToSummarize, preservedTail := splitMessagesForCompaction(stripped)
 	messagesToSummarize = append([]message.Message(nil), messagesToSummarize...)
 	preservedTail = append([]message.Message(nil), preservedTail...)
-	messagesToSummarize = append(messagesToSummarize, summaryRequest)
 
-	// Call LLM to generate summary via direct streaming.
-	summary, usage, err := streamCompactSummary(ctx, client, req.Model, messagesToSummarize)
-	if err != nil {
-		return nil, fmt.Errorf("compact summary generation failed: %w", err)
+	// PTL retry loop: if the compact request itself hits prompt-too-long,
+	// truncate the oldest API-round groups and retry rather than leaving the
+	// user stuck. Matches TS compactConversation PTL retry (compact.ts:449-491).
+	apiMessages := append([]message.Message(nil), messagesToSummarize...)
+	var summary string
+	var usage model.Usage
+	ptlAttempts := 0
+	for {
+		apiMessagesWithReq := append(append([]message.Message(nil), apiMessages...), summaryRequest)
+		var err error
+		summary, usage, err = streamCompactSummary(ctx, client, req.Model, apiMessagesWithReq)
+		if err != nil {
+			return nil, fmt.Errorf("compact summary generation failed: %w", err)
+		}
+
+		if !strings.HasPrefix(summary, promptTooLongErrorMessage) {
+			break
+		}
+
+		// Compact request hit prompt-too-long. Try truncating head groups.
+		ptlAttempts++
+		truncated := TruncateHeadForPTLRetry(apiMessages, 0)
+		if ptlAttempts > MaxPTLRetries || len(truncated) == 0 {
+			logger.DebugCF("compact", "PTL retries exhausted", map[string]any{
+				"ptl_attempts": ptlAttempts,
+			})
+			return nil, fmt.Errorf(ErrorMessagePromptTooLong)
+		}
+		logger.DebugCF("compact", "PTL retry, truncating head", map[string]any{
+			"attempt":            ptlAttempts,
+			"dropped_messages":   len(apiMessages) - len(truncated),
+			"remaining_messages": len(truncated),
+		})
+		apiMessages = truncated
 	}
 
 	// Format the summary: strip analysis tags, convert <summary> tags.
@@ -98,11 +191,15 @@ func CompactConversation(ctx context.Context, client model.Client, req CompactRe
 
 	postTokenCount := EstimateTokens(postMessages)
 
+	// Generate post-compact attachments (files, plan, skills).
+	attachments := buildPostCompactAttachments(req.ReadFileState, req.PlanContent, req.PlanFilePath, req.InvokedSkills)
+
 	logger.DebugCF("compact", "compaction complete", map[string]any{
 		"pre_token_count":  preTokenCount,
 		"post_token_count": postTokenCount,
 		"messages_before":  len(req.Messages),
 		"messages_after":   len(postMessages),
+		"attachments":      len(attachments),
 	})
 
 	return &CompactionResult{
@@ -111,6 +208,7 @@ func CompactConversation(ctx context.Context, client model.Client, req CompactRe
 		Summary:         formattedSummary,
 		PreTokenCount:   preTokenCount,
 		PostTokenCount:  postTokenCount,
+		Attachments:     attachments,
 		Usage:           usage,
 	}, nil
 }
@@ -292,4 +390,355 @@ func containsToolUse(msg message.Message) bool {
 		}
 	}
 	return false
+}
+
+// isCompactSummaryMessage checks whether a message is a compact summary
+// by detecting the standard summary prefix text. This is a simplified version
+// of TS's isCompactSummary flag — Go messages don't carry that flag natively,
+// so we detect by content prefix instead.
+func isCompactSummaryMessage(msg *message.Message) bool {
+	if msg.Role != message.RoleUser {
+		return false
+	}
+	for _, part := range msg.Content {
+		if part.Type == "text" && strings.HasPrefix(part.Text, compactSummaryPrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// groupMessagesByRoleBoundary groups messages at assistant role boundaries.
+// This is a simplified version of GroupMessagesByApiRound for use with
+// plain []message.Message (no MessageWithID wrapper). A new group starts
+// whenever an assistant message is encountered and the current group is
+// non-empty. This approximates API-round boundaries without requiring IDs.
+func groupMessagesByRoleBoundary(messages []message.Message) [][]message.Message {
+	var groups [][]message.Message
+	var current []message.Message
+
+	for _, msg := range messages {
+		if msg.Role == message.RoleAssistant && len(current) > 0 {
+			groups = append(groups, current)
+			current = []message.Message{msg}
+		} else {
+			current = append(current, msg)
+		}
+	}
+
+	if len(current) > 0 {
+		groups = append(groups, current)
+	}
+	return groups
+}
+
+// TruncateHeadForPTLRetry drops the oldest API-round groups from messages
+// to reduce token count. When tokenGap is > 0, it drops groups until the
+// accumulated token estimate covers the gap. When tokenGap is 0 (gap unknown),
+// it falls back to dropping 20% of groups.
+//
+// At least one group is always kept. If the first remaining message is an
+// assistant message, a synthetic user marker is prepended to satisfy the
+// API contract (first message must be role=user).
+//
+// Returns the (possibly empty) truncated slice — callers must check len > 0.
+// Aligns with TS truncateHeadForPTLRetry (compact.ts:243-291).
+func TruncateHeadForPTLRetry(messages []message.Message, tokenGap int) []message.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	// Strip our own synthetic marker from a previous retry before grouping.
+	// Otherwise it becomes its own group 0 and the 20% fallback stalls.
+	input := messages
+	if len(input) > 0 &&
+		input[0].Role == message.RoleUser &&
+		len(input[0].Content) == 1 &&
+		input[0].Content[0].Type == "text" &&
+		input[0].Content[0].Text == ptlRetryMarker {
+		input = input[1:]
+	}
+
+	groups := groupMessagesByRoleBoundary(input)
+	if len(groups) < 2 {
+		return nil
+	}
+
+	var dropCount int
+	if tokenGap > 0 {
+		// Drop groups until accumulated tokens cover the gap.
+		acc := 0
+		dropCount = 0
+		for _, g := range groups {
+			acc += EstimateTokens(g)
+			dropCount++
+			if acc >= tokenGap {
+				break
+			}
+		}
+	} else {
+		// Fallback: drop 20% of groups.
+		dropCount = int(math.Max(1, float64(len(groups))*0.2))
+	}
+
+	// Keep at least one group so there's something to summarize.
+	dropCount = int(math.Min(float64(dropCount), float64(len(groups)-1)))
+	if dropCount < 1 {
+		return nil
+	}
+
+	// Flatten the remaining groups.
+	sliced := make([]message.Message, 0)
+	for _, g := range groups[dropCount:] {
+		sliced = append(sliced, g...)
+	}
+
+	// If the first remaining message is an assistant, prepend a synthetic
+	// user marker — the API rejects requests where the first message is
+	// role=assistant.
+	if len(sliced) > 0 && sliced[0].Role == message.RoleAssistant {
+		marker := message.Message{
+			Role: message.RoleUser,
+			Content: []message.ContentPart{
+				message.TextPart(ptlRetryMarker),
+			},
+		}
+		result := make([]message.Message, 0, 1+len(sliced))
+		result = append(result, marker)
+		result = append(result, sliced...)
+		return result
+	}
+
+	return sliced
+}
+
+// PartialCompactConversation performs a partial compaction of the conversation.
+// It summarizes either messages after the pivot ("from") or before the pivot
+// ("up_to"), keeping the other portion intact.
+//
+// Aligns with TS partialCompactConversation (compact.ts:772-1106).
+func PartialCompactConversation(ctx context.Context, client model.Client, req PartialCompactRequest) (*CompactionResult, error) {
+	if len(req.AllMessages) == 0 {
+		return nil, fmt.Errorf("not enough messages to compact")
+	}
+
+	if req.PivotIndex < 0 || req.PivotIndex > len(req.AllMessages) {
+		return nil, fmt.Errorf("pivot index %d out of range [0, %d]", req.PivotIndex, len(req.AllMessages))
+	}
+
+	// Determine which portion to summarize and which to keep.
+	var messagesToSummarize []message.Message
+	var messagesToKeep []message.Message
+
+	if req.Direction == "up_to" {
+		messagesToSummarize = req.AllMessages[:req.PivotIndex]
+		// 'up_to' must strip old compact boundaries/summaries from the kept
+		// portion: a stale boundary in kept would shadow the new summary.
+		messagesToKeep = filterProgressMessages(
+			stripCompactBoundariesAndSummaries(req.AllMessages[req.PivotIndex:]),
+		)
+	} else {
+		// "from" is the default: summarize after pivot, keep before.
+		messagesToSummarize = req.AllMessages[req.PivotIndex:]
+		messagesToKeep = filterProgressMessages(req.AllMessages[:req.PivotIndex])
+	}
+
+	if len(messagesToSummarize) == 0 {
+		if req.Direction == "up_to" {
+			return nil, fmt.Errorf("nothing to summarize before the selected message")
+		}
+		return nil, fmt.Errorf("nothing to summarize after the selected message")
+	}
+
+	preCompactTokenCount := EstimateTokens(req.AllMessages)
+
+	logger.DebugCF("compact", "starting partial compaction", map[string]any{
+		"direction":            req.Direction,
+		"pivot_index":          req.PivotIndex,
+		"messages_to_summarize": len(messagesToSummarize),
+		"messages_to_keep":     len(messagesToKeep),
+		"pre_token_count":      preCompactTokenCount,
+		"model":                req.Model,
+	})
+
+	// Build custom instructions from user feedback.
+	customInstructions := req.CustomInstructions
+	if strings.TrimSpace(req.UserFeedback) != "" {
+		feedbackPart := "User context: " + req.UserFeedback
+		if customInstructions != "" {
+			customInstructions += "\n\n" + feedbackPart
+		} else {
+			customInstructions = feedbackPart
+		}
+	}
+
+	// Strip images from messages to summarize.
+	stripped := stripImagesFromMessages(messagesToSummarize)
+
+	// Build the partial compact prompt.
+	compactPrompt := GetPartialCompactPrompt(customInstructions, req.Direction)
+	summaryRequest := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(compactPrompt),
+		},
+	}
+
+	// For 'up_to', send only messagesToSummarize (prefix hits cache).
+	// For 'from', send allMessages (tail wouldn't cache).
+	// PTL retry breaks the cache prefix but unblocks the user.
+	var apiMessages []message.Message
+	if req.Direction == "up_to" {
+		apiMessages = stripped
+	} else {
+		apiMessages = stripImagesFromMessages(req.AllMessages)
+	}
+
+	// PTL retry loop: matches TS partialCompactConversation PTL loop.
+	var summary string
+	var usage model.Usage
+	ptlAttempts := 0
+	for {
+		apiMessagesWithReq := append(append([]message.Message(nil), apiMessages...), summaryRequest)
+		var err error
+		summary, usage, err = streamCompactSummary(ctx, client, req.Model, apiMessagesWithReq)
+		if err != nil {
+			return nil, fmt.Errorf("partial compact summary generation failed: %w", err)
+		}
+
+		if !strings.HasPrefix(summary, promptTooLongErrorMessage) {
+			break
+		}
+
+		// Partial compact request hit prompt-too-long. Truncate and retry.
+		ptlAttempts++
+		truncated := TruncateHeadForPTLRetry(apiMessages, 0)
+		if ptlAttempts > MaxPTLRetries || len(truncated) == 0 {
+			logger.DebugCF("compact", "partial compact PTL retries exhausted", map[string]any{
+				"ptl_attempts": ptlAttempts,
+				"direction":    req.Direction,
+			})
+			return nil, fmt.Errorf(ErrorMessagePromptTooLong)
+		}
+		logger.DebugCF("compact", "partial compact PTL retry, truncating head", map[string]any{
+			"attempt":            ptlAttempts,
+			"dropped_messages":   len(apiMessages) - len(truncated),
+			"remaining_messages": len(truncated),
+			"path":               "partial",
+		})
+		apiMessages = truncated
+	}
+
+	if summary == "" {
+		return nil, fmt.Errorf("failed to generate conversation summary - response did not contain valid text content")
+	}
+
+	// Format the summary: strip analysis tags, convert <summary> tags.
+	formattedSummary := FormatCompactSummary(summary)
+
+	// Build the result. Use "manual" trigger for partial compact.
+	boundary := CreateBoundaryMessage(TriggerManual, preCompactTokenCount, len(messagesToSummarize))
+	summaryText := GetCompactUserSummaryMessage(summary, false, req.TranscriptPath, len(messagesToKeep) > 0)
+	summaryMsg := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(summaryText),
+		},
+	}
+	summaryMessages := []message.Message{summaryMsg}
+
+	// Assemble post-compact messages:
+	// direction="from": boundary + summary + messagesToKeep
+	// direction="up_to": boundary + summary (messagesToKeep follow separately)
+	var postMessages []message.Message
+	if req.Direction == "up_to" {
+		postMessages = BuildPostCompactMessages(boundary, summaryMessages...)
+	} else {
+		postMessages = BuildPostCompactMessages(boundary, summaryMessages...)
+		postMessages = append(postMessages, messagesToKeep...)
+	}
+
+	postTokenCount := EstimateTokens(postMessages)
+
+	// Generate post-compact attachments (files, plan, skills).
+	attachments := buildPostCompactAttachments(req.ReadFileState, req.PlanContent, req.PlanFilePath, req.InvokedSkills)
+
+	logger.DebugCF("compact", "partial compaction complete", map[string]any{
+		"direction":         req.Direction,
+		"pre_token_count":   preCompactTokenCount,
+		"post_token_count":  postTokenCount,
+		"messages_before":   len(req.AllMessages),
+		"messages_after":    len(postMessages),
+		"messages_kept":     len(messagesToKeep),
+		"messages_summarized": len(messagesToSummarize),
+		"attachments":       len(attachments),
+	})
+
+	return &CompactionResult{
+		Boundary:        boundary,
+		SummaryMessages: summaryMessages,
+		Summary:         formattedSummary,
+		PreTokenCount:   preCompactTokenCount,
+		PostTokenCount:  postTokenCount,
+		Attachments:     attachments,
+		Usage:           usage,
+	}, nil
+}
+
+// filterProgressMessages removes progress-type messages from a slice.
+// Go's message.Message doesn't have a progress type in the current schema,
+// but this is kept for forward compatibility with TS alignment.
+func filterProgressMessages(messages []message.Message) []message.Message {
+	result := make([]message.Message, 0, len(messages))
+	for _, msg := range messages {
+		// In the current Go message model there is no explicit "progress" type.
+		// This filter is a no-op placeholder for future TS alignment.
+		// Progress messages in TS have type="progress"; in Go they would need
+		// a similar discriminator. For now, include all messages.
+		result = append(result, msg)
+	}
+	return result
+}
+
+// stripCompactBoundariesAndSummaries removes compact boundary markers and
+// compact summary messages from a message slice. Used by the "up_to" partial
+// compact path to strip stale boundaries from the kept portion.
+func stripCompactBoundariesAndSummaries(messages []message.Message) []message.Message {
+	result := make([]message.Message, 0, len(messages))
+	for _, msg := range messages {
+		if IsCompactBoundary(&msg) {
+			continue
+		}
+		if isCompactSummaryMessage(&msg) {
+			continue
+		}
+		result = append(result, msg)
+	}
+	return result
+}
+
+// buildPostCompactAttachments generates post-compact attachments for files,
+// plan, and skills. Returns an empty slice if no attachment data is provided.
+func buildPostCompactAttachments(readFileState map[string]FileReadState, planContent, planFilePath string, invokedSkills []SkillInfo) []PostCompactAttachment {
+	var attachments []PostCompactAttachment
+
+	// File attachments from recently read files.
+	if len(readFileState) > 0 {
+		fileAttachments := CreatePostCompactFileAttachments(readFileState, PostCompactMaxFilesToRestore, PostCompactTokenBudget)
+		attachments = append(attachments, fileAttachments...)
+	}
+
+	// Plan attachment.
+	if att := CreatePlanAttachment(planContent, planFilePath); att != nil {
+		attachments = append(attachments, *att)
+	}
+
+	// Skill attachment.
+	if len(invokedSkills) > 0 {
+		if att := CreateSkillAttachment(invokedSkills, PostCompactMaxTokensPerSkill, PostCompactSkillsTokenBudget); att != nil {
+			attachments = append(attachments, *att)
+		}
+	}
+
+	return attachments
 }

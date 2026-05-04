@@ -757,7 +757,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 	if got := cmds[2].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "compact",
-		Description: "Clear conversation history but keep a summary in context",
+		Description: "Compact conversation history, keeping a summary in context",
 		Usage:       "/compact [instructions]",
 	}) {
 		t.Fatalf("newCommandRegistry() third metadata = %#v, want compact metadata", got)
