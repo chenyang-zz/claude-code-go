@@ -37,6 +37,7 @@ func IsInitialized() bool {
 func InitAwaySummary(client model.Client, registerPostTurnHook func(hook PostTurnHookFunc), memBaseDir string, cfg Config) *System {
 	if !IsAwaySummaryEnabled() {
 		logger.DebugCF("awaysummary", "skipping init: away summary disabled", nil)
+		currentSystem = nil
 		return nil
 	}
 
@@ -89,7 +90,7 @@ func CheckAndGenerate(ctx context.Context, messages []message.Message) *message.
 	})
 
 	return &message.Message{
-		Role: message.RoleSystem,
+		Role: message.RoleUser,
 		Content: []message.ContentPart{
 			message.TextPart(text),
 		},
