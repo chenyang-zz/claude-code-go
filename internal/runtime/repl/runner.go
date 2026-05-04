@@ -21,6 +21,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
+	"github.com/sheepzhao/claude-code-go/internal/services/awaysummary"
 	"github.com/sheepzhao/claude-code-go/internal/services/settingssync"
 	"github.com/sheepzhao/claude-code-go/internal/services/tips"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
@@ -236,6 +237,15 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 			tips.OnTipShown(tip)
 		}
 	}
+
+	// Check if user was away and generate summary before the model turn.
+	if awayMsg := awaysummary.CheckAndGenerate(ctx, history.Messages); awayMsg != nil {
+		awayHistory := history.Clone()
+		awayHistory.Append(*awayMsg)
+		history = awayHistory
+	}
+
+
 
 	requestHistory := history.Clone()
 	requestHistory.Append(message.Message{

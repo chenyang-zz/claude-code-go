@@ -71,6 +71,10 @@ const (
 	// When enabled, the team memory directory is watched for file changes
 	// via fsnotify and changes trigger debounced push operations.
 	FlagTeamMemoryWatcher = "TEAM_MEMORY_WATCHER"
+	// FlagAwaySummary gates the away summary ("while you were away") feature.
+	// When enabled, a small/fast model generates a brief session recap after
+	// the user has been idle for a configurable threshold (default 5 minutes).
+	FlagAwaySummary = "AWAY_SUMMARY"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
