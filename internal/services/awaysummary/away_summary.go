@@ -87,6 +87,10 @@ func (s *System) Generate(ctx context.Context, messages []message.Message) (stri
 		return "", nil
 	}
 
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+
 	recent := messages
 	if len(recent) > cfg.MaxMessages {
 		recent = recent[len(recent)-cfg.MaxMessages:]
