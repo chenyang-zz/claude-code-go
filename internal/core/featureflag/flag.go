@@ -90,6 +90,19 @@ const (
 	// TS-side esbuild USER_TYPE=ant build define with a runtime feature
 	// flag so non-Ant deployments incur zero filesystem reads.
 	FlagInternalLogging = "INTERNAL_LOGGING"
+	// FlagHaikuQuery names the env-variable suffix gating the Haiku
+	// single-prompt query helper (services/haiku). Unlike most flags here,
+	// the helper applies a reverse-default reading on this name: it is on
+	// by default and only disabled when CLAUDE_FEATURE_HAIKU is set to "0"
+	// or "false". The constant is kept here so the haiku package and the
+	// generic IsEnabled reader share a single source of truth for the name.
+	FlagHaikuQuery = "HAIKU"
+	// FlagToolUseSummary gates the tool use summary helper
+	// (services/toolusesummary). Generates a ~30-character single-line
+	// label describing what a completed tool batch accomplished, used by
+	// the SDK to surface progress. Off by default; set
+	// CLAUDE_FEATURE_TOOL_USE_SUMMARY=1 to enable.
+	FlagToolUseSummary = "TOOL_USE_SUMMARY"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
