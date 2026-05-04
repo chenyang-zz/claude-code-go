@@ -61,7 +61,7 @@ func (s *MicrocompactService) EvaluateTimeBasedTrigger(messages []Message, query
 		return nil
 	}
 
-	ts, err := time.Parse(time.RFC3339, lastAssistant.Timestamp)
+	ts, err := tryParseTimestamp(lastAssistant.Timestamp)
 	if err != nil {
 		return nil
 	}
@@ -76,6 +76,28 @@ func (s *MicrocompactService) EvaluateTimeBasedTrigger(messages []Message, query
 		Config:     cfg,
 	}
 }
+
+// tryParseTimestamp attempts to parse an ISO 8601 / RFC 3339 timestamp.
+// Handles RFC3339, RFC3339Nano, and common ISO 8601 variants.
+func tryParseTimestamp(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+	}
+	for _, f := range formats {
+		ts, err := time.Parse(f, s)
+		if err == nil {
+			return ts, nil
+		}
+	}
+	return time.Time{}, errTimestampParse
+}
+
+// errTimestampParse is returned when none of the attempted formats parse.
+var errTimestampParse = &time.ParseError{}
 
 // MicrocompactMessages orchestrates tool-result compaction for the given messages.
 // In the Go implementation, only the time-based path is active (cached MC is ant-only).
@@ -136,11 +158,10 @@ func (s *MicrocompactService) maybeTimeBasedMicrocompact(messages []Message, que
 		newContent := make([]ContentPart, len(msg.Content))
 		for j, block := range msg.Content {
 			if block.Type == "tool_result" && clearSet[block.ToolUseID] && block.Text != TIME_BASED_MC_CLEARED_MESSAGE {
-				newContent[j] = ContentPart{
-					Type:      "tool_result",
-					ToolUseID: block.ToolUseID,
-					Text:      TIME_BASED_MC_CLEARED_MESSAGE,
-				}
+				// Preserve all block fields, only replace the Text content.
+				cleared := block
+				cleared.Text = TIME_BASED_MC_CLEARED_MESSAGE
+				newContent[j] = cleared
 				touched = true
 			} else {
 				newContent[j] = block

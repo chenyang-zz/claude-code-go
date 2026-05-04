@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	initMu     sync.Mutex
-	globalSvc  *MicrocompactService
+	initMu    sync.Mutex
+	globalSvc *MicrocompactService
 )
 
 // InitMicrocompactService creates and registers the global microcompact service.
