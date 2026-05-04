@@ -2,6 +2,7 @@ package sessiontitle
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 )
@@ -35,8 +36,9 @@ func ExtractConversationText(messages []message.Message) string {
 		}
 	}
 	text := strings.Join(parts, "\n")
-	if len(text) > maxConversationText {
-		return text[len(text)-maxConversationText:]
+	if utf8.RuneCountInString(text) > maxConversationText {
+		runes := []rune(text)
+		return string(runes[len(runes)-maxConversationText:])
 	}
 	return text
 }

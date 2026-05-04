@@ -50,6 +50,9 @@ func (s *Service) Parse(ctx context.Context, input string, format string) (DateT
 	if trimmed == "" {
 		return DateTimeParseResult{Success: false, Error: "empty input"}, nil
 	}
+	if format != "date" && format != "date-time" {
+		return DateTimeParseResult{Success: false, Error: "invalid format: must be 'date' or 'date-time'"}, nil
+	}
 	if err := ctx.Err(); err != nil {
 		return DateTimeParseResult{}, err
 	}
@@ -74,7 +77,9 @@ func (s *Service) Parse(ctx context.Context, input string, format string) (DateT
 		formatDescription = fmt.Sprintf(dateTimeFormatDescriptionTemplate, offsetStr)
 	}
 
-	userPrompt := fmt.Sprintf(userPromptTemplate, currentDateTime, offsetStr, dayOfWeek, trimmed, formatDescription)
+	escapedInput := strings.ReplaceAll(trimmed, `"`, `\"`)
+
+	userPrompt := fmt.Sprintf(userPromptTemplate, currentDateTime, offsetStr, dayOfWeek, escapedInput, formatDescription)
 
 	result, err := s.querier.Query(ctx, haiku.QueryParams{
 		SystemPrompt:            systemPrompt,

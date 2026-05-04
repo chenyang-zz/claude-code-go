@@ -3,7 +3,9 @@ package sessiontitle
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
@@ -256,5 +258,26 @@ func TestExtractConversationText_Truncates(t *testing.T) {
 	result := ExtractConversationText(messages)
 	if len(result) != maxConversationText {
 		t.Errorf("len = %d, want %d", len(result), maxConversationText)
+	}
+}
+
+func TestExtractConversationText_TruncatesMultibyte(t *testing.T) {
+	// 1000 ASCII chars followed by 200 multi-byte runes (中 = 3 bytes each).
+	prefix := strings.Repeat("a", maxConversationText)
+	suffix := strings.Repeat("中", 200)
+	messages := []message.Message{
+		{
+			Role:    message.RoleUser,
+			Content: []message.ContentPart{{Type: "text", Text: prefix + suffix}},
+		},
+	}
+	result := ExtractConversationText(messages)
+	// The result should contain exactly maxConversationText runes,
+	// which in this case is the 200 "中" runes.
+	if utf8.RuneCountInString(result) != maxConversationText {
+		t.Errorf("rune count = %d, want %d", utf8.RuneCountInString(result), maxConversationText)
+	}
+	if !strings.Contains(result, "中") {
+		t.Error("expected result to contain multi-byte runes")
 	}
 }

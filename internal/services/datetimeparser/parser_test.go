@@ -3,6 +3,7 @@ package datetimeparser
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
@@ -97,6 +98,44 @@ func TestParse_EmptyInput(t *testing.T) {
 	}
 	if len(mq.calls) != 0 {
 		t.Error("expected no querier calls")
+	}
+}
+
+func TestParse_InvalidFormat(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_DATETIME_PARSER", "1")
+	mq := &mockQuerier{}
+	svc := NewService(mq)
+
+	result, err := svc.Parse(context.Background(), "tomorrow", "datetime")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Success {
+		t.Error("expected failure for invalid format")
+	}
+	if len(mq.calls) != 0 {
+		t.Error("expected no querier calls")
+	}
+}
+
+func TestParse_InputWithQuotes(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_DATETIME_PARSER", "1")
+	mq := &mockQuerier{result: &haiku.QueryResult{Text: "2025-01-01"}}
+	svc := NewService(mq)
+
+	result, err := svc.Parse(context.Background(), `tomorrow at "3pm"`, "date")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got error: %s", result.Error)
+	}
+	if len(mq.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(mq.calls))
+	}
+	// Verify quotes are escaped in the user prompt.
+	if !strings.Contains(mq.calls[0].UserPrompt, `\"3pm\"`) {
+		t.Errorf("expected escaped quotes in prompt, got: %q", mq.calls[0].UserPrompt)
 	}
 }
 
