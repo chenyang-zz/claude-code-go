@@ -46,6 +46,7 @@ import (
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
+	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
@@ -63,6 +64,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill/bundled"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/tool_search"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/web_search"
+	"github.com/sheepzhao/claude-code-go/internal/services/toolusesummary"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -102,6 +104,14 @@ type App struct {
 	// Notifier dispatches terminal notifications (iTerm2 / Kitty / Ghostty
 	// / bell / auto-detect). nil when FlagNotifier is disabled.
 	Notifier *notifier.Service
+	// Haiku is the single-prompt Haiku query helper used by downstream
+	// services (e.g. tool use summary). nil when the Anthropic provider
+	// is not selected or FlagHaikuQuery is disabled.
+	Haiku *haiku.Service
+	// ToolUseSummary generates ~30-character labels for completed tool
+	// batches via the Haiku helper. nil when FlagToolUseSummary is
+	// disabled or Haiku is unavailable.
+	ToolUseSummary *toolusesummary.Service
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -410,6 +420,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		PromptSuggestionCleanup: psCleanup,
 		PreventSleepCleanup:     preventSleepCleanup,
 		Notifier:                notifierService,
+		Haiku:                   haiku.CurrentService(),
+		ToolUseSummary:          toolusesummary.CurrentService(),
 	}, nil
 }
 
@@ -1140,6 +1152,19 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		awaysummary.InitAwaySummary(runtime.Client, func(hook awaysummary.PostTurnHookFunc) {
 			engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 		}, extractmemories.GetAutoMemPath(cfg.ProjectPath), awaysummary.DefaultConfig())
+
+		// Initialize Haiku helper bound to the live Anthropic client. The
+		// Haiku models served here are the source for downstream small/fast
+		// query helpers (tool use summary, etc.). InitHaiku resets the
+		// singleton to nil when FlagHaikuQuery is off or runtime.Client is nil.
+		haiku.InitHaiku(haiku.InitOptions{Client: runtime.Client})
+
+		// Initialize the tool use summary service against the haiku
+		// singleton. The querier handle is captured eagerly so the service
+		// remains usable even if haiku is later re-initialised.
+		toolusesummary.InitToolUseSummary(toolusesummary.InitOptions{
+			Querier: haiku.CurrentService(),
+		})
 
 
 		return &EngineAssembly{
