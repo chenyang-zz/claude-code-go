@@ -66,15 +66,15 @@ func (s *Service) Parse(ctx context.Context, input string, format string) (DateT
 	}
 	hours := offsetMin / 60
 	minutes := offsetMin % 60
-	timezone := fmt.Sprintf("UTC%c%02d:%02d", sign, hours, minutes)
+	offsetStr := fmt.Sprintf("%c%02d:%02d", sign, hours, minutes)
 	dayOfWeek := now.Weekday().String()
 
 	formatDescription := dateFormatDescription
 	if format == "date-time" {
-		formatDescription = fmt.Sprintf(dateTimeFormatDescriptionTemplate, timezone)
+		formatDescription = fmt.Sprintf(dateTimeFormatDescriptionTemplate, offsetStr)
 	}
 
-	userPrompt := fmt.Sprintf(userPromptTemplate, currentDateTime, timezone, dayOfWeek, trimmed, formatDescription)
+	userPrompt := fmt.Sprintf(userPromptTemplate, currentDateTime, offsetStr, dayOfWeek, trimmed, formatDescription)
 
 	result, err := s.querier.Query(ctx, haiku.QueryParams{
 		SystemPrompt:            systemPrompt,
