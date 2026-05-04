@@ -188,8 +188,8 @@ func TestAdjustIndexToPreserveAPIInvariants_ToolPair(t *testing.T) {
 
 	// Start at index 2 (only tool_result kept) - should adjust back to 1
 	idx := AdjustIndexToPreserveAPIInvariants(msgs, 2)
-	if idx > 2 {
-		t.Errorf("expected index <= 2, got %d", idx)
+	if idx != 1 {
+		t.Errorf("expected adjustment to index 1 (include tool_use), got %d", idx)
 	}
 }
 
@@ -202,6 +202,14 @@ func TestCalculateMessagesToKeepIndex_Empty(t *testing.T) {
 
 func TestCalculateMessagesToKeepIndex_AllKept(t *testing.T) {
 	ResetSessionMemoryCompactConfig()
+	// Set minimum config to force deterministic behavior for small messages
+	SetSessionMemoryCompactConfig(SessionMemoryCompactConfig{
+		MinTokens:            10,
+		MinTextBlockMessages: 1,
+		MaxTokens:            10000,
+	})
+	defer ResetSessionMemoryCompactConfig()
+
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "msg1"}}},
 		{Role: message.RoleAssistant, Content: []message.ContentPart{{Type: "text", Text: "response1"}}},
@@ -209,15 +217,24 @@ func TestCalculateMessagesToKeepIndex_AllKept(t *testing.T) {
 		{Role: message.RoleAssistant, Content: []message.ContentPart{{Type: "text", Text: "response2"}}},
 	}
 
-	// With lastSummarizedIndex=-1 and small messages, all should be kept
+	// With lastSummarizedIndex=-1 and small messages, the algorithm should
+	// keep all messages by expanding backwards
 	idx := CalculateMessagesToKeepIndex(msgs, -1)
-	if idx < 0 || idx > len(msgs) {
-		t.Errorf("expected valid index in [0,%d], got %d", len(msgs), idx)
+	if idx != 0 {
+		t.Errorf("expected index 0 (all messages kept with lastSummarizedIndex=-1), got %d", idx)
 	}
 }
 
 func TestCalculateMessagesToKeepIndex_AfterLastSummarized(t *testing.T) {
 	ResetSessionMemoryCompactConfig()
+	// Set zero min config so the algorithm does NOT expand backwards
+	SetSessionMemoryCompactConfig(SessionMemoryCompactConfig{
+		MinTokens:            0,
+		MinTextBlockMessages: 0,
+		MaxTokens:            10000,
+	})
+	defer ResetSessionMemoryCompactConfig()
+
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "old content"}}},
 		{Role: message.RoleAssistant, Content: []message.ContentPart{{Type: "text", Text: "old response"}}},
@@ -226,13 +243,18 @@ func TestCalculateMessagesToKeepIndex_AfterLastSummarized(t *testing.T) {
 	}
 
 	// lastSummarizedIndex=1 means keep messages starting from index 2
+	// With min config set to 0 for both thresholds, the algorithm should NOT
+	// expand backwards and startIndex should be exactly 2
 	idx := CalculateMessagesToKeepIndex(msgs, 1)
-	if idx < 0 || idx > 2 {
-		t.Errorf("expected index in [0,2], got %d", idx)
+	if idx != 2 {
+		t.Errorf("expected index 2 (start after lastSummarizedIndex=1), got %d", idx)
 	}
 }
 
 func TestShouldUseSessionMemoryCompaction_DefaultOff(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_SESSION_MEMORY_COMPACT", "")
+	t.Setenv("ENABLE_CLAUDE_CODE_SM_COMPACT", "")
+	t.Setenv("DISABLE_CLAUDE_CODE_SM_COMPACT", "")
 	enabled := ShouldUseSessionMemoryCompaction()
 	if enabled {
 		t.Error("expected session memory compaction to be disabled by default")
@@ -240,6 +262,7 @@ func TestShouldUseSessionMemoryCompaction_DefaultOff(t *testing.T) {
 }
 
 func TestIsSessionMemoryCompactEnabled(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_SESSION_MEMORY_COMPACT", "")
 	enabled := IsSessionMemoryCompactEnabled()
 	if enabled {
 		t.Error("expected session memory compact flag to be disabled by default")

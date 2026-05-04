@@ -104,6 +104,10 @@ func TestCalculateTokenWarningState_AboveThreshold(t *testing.T) {
 }
 
 func TestIsAutoCompactEnabled_DefaultOff(t *testing.T) {
+	// Clear all env vars that could affect the result for hermetic test
+	t.Setenv("CLAUDE_FEATURE_AUTO_COMPACT", "")
+	t.Setenv("DISABLE_COMPACT", "")
+	t.Setenv("DISABLE_AUTO_COMPACT", "")
 	// Without setting env or flag, auto-compact should be off
 	enabled := IsAutoCompactEnabled()
 	if enabled {
@@ -112,8 +116,9 @@ func TestIsAutoCompactEnabled_DefaultOff(t *testing.T) {
 }
 
 func TestIsAutoCompactEnabled_DisableCompactEnv(t *testing.T) {
-	os.Setenv("DISABLE_COMPACT", "1")
-	defer os.Unsetenv("DISABLE_COMPACT")
+	t.Setenv("DISABLE_COMPACT", "1")
+	t.Setenv("CLAUDE_FEATURE_AUTO_COMPACT", "")
+	t.Setenv("DISABLE_AUTO_COMPACT", "")
 
 	enabled := IsAutoCompactEnabled()
 	if enabled {
@@ -122,8 +127,9 @@ func TestIsAutoCompactEnabled_DisableCompactEnv(t *testing.T) {
 }
 
 func TestIsAutoCompactEnabled_DisableAutoCompactEnv(t *testing.T) {
-	os.Setenv("DISABLE_AUTO_COMPACT", "1")
-	defer os.Unsetenv("DISABLE_AUTO_COMPACT")
+	t.Setenv("DISABLE_AUTO_COMPACT", "1")
+	t.Setenv("CLAUDE_FEATURE_AUTO_COMPACT", "")
+	t.Setenv("DISABLE_COMPACT", "")
 
 	enabled := IsAutoCompactEnabled()
 	if enabled {

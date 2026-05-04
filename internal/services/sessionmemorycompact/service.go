@@ -125,18 +125,11 @@ func AdjustIndexToPreserveAPIInvariants(messages []message.Message, startIndex i
 		}
 	}
 
-	// Step 2: Handle thinking blocks that share message ID with kept assistant messages
-	// Collect message IDs from assistant messages in the kept range.
-	// In the Go side we don't have message.ID like TS does, so this step is
-	// simplified: we include the preceding message if it's an assistant message
-	// (which may contain thinking blocks to merge).
-	if adjustedIndex > 0 {
-		prev := messages[adjustedIndex-1]
-		curr := messages[adjustedIndex]
-		if prev.Role == message.RoleAssistant && curr.Role == message.RoleAssistant {
-			adjustedIndex = adjustedIndex - 1
-		}
-	}
+	// Step 2: Handle thinking blocks that share message ID with kept assistant messages.
+	// In the TS version this uses message.message.id; the Go side currently lacks
+	// this field, so this step is conservative — we don't check for shared IDs.
+	// This may be refined when message identity tracking is added.
+	_ = adjustedIndex // Step 2 deferred — Go side has no message.ID field
 
 	return adjustedIndex
 }
@@ -198,6 +191,11 @@ func CalculateMessagesToKeepIndex(messages []message.Message, lastSummarizedInde
 		if totalTokens >= cfg.MinTokens && textBlockMessageCount >= cfg.MinTextBlockMessages {
 			break
 		}
+
+		// Stop if we've gone past all messages
+		if i == 0 {
+			break
+		}
 	}
 
 	// Adjust for tool pairs
@@ -237,10 +235,6 @@ func TrySessionMemoryCompaction(messages []message.Message) *SessionMemoryCompac
 
 	// Simplified: we always fall back to nil (no session memory content)
 	// TODO: read real session memory content via the session memory service
-	if false {
-		// Placeholder for future implementation
-		_ = getSessionMemoryContent
-	}
 
 	// Fallback: session memory not available
 	logger.DebugCF("sessionmemorycompact", "session memory content not available, skipping", nil)

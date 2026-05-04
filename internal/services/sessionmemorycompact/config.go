@@ -32,21 +32,14 @@ func GetSessionMemoryCompactConfig() SessionMemoryCompactConfig {
 	return currentSMCompactConfig
 }
 
-// SetSessionMemoryCompactConfig updates the current configuration with any
-// non-zero fields in the provided config. Zero-valued fields keep their
-// current values.
+// SetSessionMemoryCompactConfig updates the current configuration with all
+// provided fields. Zero-valued fields are applied (allows explicit reset to 0).
 func SetSessionMemoryCompactConfig(cfg SessionMemoryCompactConfig) {
 	configMu.Lock()
 	defer configMu.Unlock()
-	if cfg.MinTokens > 0 {
-		currentSMCompactConfig.MinTokens = cfg.MinTokens
-	}
-	if cfg.MinTextBlockMessages > 0 {
-		currentSMCompactConfig.MinTextBlockMessages = cfg.MinTextBlockMessages
-	}
-	if cfg.MaxTokens > 0 {
-		currentSMCompactConfig.MaxTokens = cfg.MaxTokens
-	}
+	currentSMCompactConfig.MinTokens = cfg.MinTokens
+	currentSMCompactConfig.MinTextBlockMessages = cfg.MinTextBlockMessages
+	currentSMCompactConfig.MaxTokens = cfg.MaxTokens
 }
 
 // ResetSessionMemoryCompactConfig resets the current configuration to defaults.

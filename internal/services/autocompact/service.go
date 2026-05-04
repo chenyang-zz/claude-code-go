@@ -47,7 +47,11 @@ func GetEffectiveContextWindowSize(model string) int {
 
 	output := GetMaxOutputTokensForModel(model)
 	reserved := min(output, MAX_OUTPUT_TOKENS_FOR_SUMMARY)
-	return window - reserved
+	result := window - reserved
+	if result < 0 {
+		result = 0
+	}
+	return result
 }
 
 // GetMaxOutputTokensForModel returns the maximum output tokens for the given
