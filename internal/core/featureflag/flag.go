@@ -103,6 +103,16 @@ const (
 	// the SDK to surface progress. Off by default; set
 	// CLAUDE_FEATURE_TOOL_USE_SUMMARY=1 to enable.
 	FlagToolUseSummary = "TOOL_USE_SUMMARY"
+	// FlagSessionTitle gates the AI-generated session title feature.
+	// When enabled, the runtime generates a concise sentence-case title
+	// from the session description via the Haiku helper. Off by default.
+	FlagSessionTitle = "SESSION_TITLE"
+	// FlagRenameSuggestion gates the /rename command's AI-generated
+	// kebab-case session name suggestion. Off by default.
+	FlagRenameSuggestion = "RENAME_SUGGESTION"
+	// FlagDateTimeParser gates the natural-language date/time parser
+	// used by MCP elicitation validation. Off by default.
+	FlagDateTimeParser = "DATETIME_PARSER"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

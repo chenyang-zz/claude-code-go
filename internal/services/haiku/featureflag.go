@@ -13,13 +13,9 @@ package haiku
 import (
 	"os"
 	"strings"
-)
 
-// FlagHaikuQuery is the feature flag environment-variable suffix gating the
-// haiku query helper. It mirrors the constant declared in
-// internal/core/featureflag for symmetry; the helper applies a reverse-default
-// reading on the same variable.
-const FlagHaikuQuery = "HAIKU"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
+)
 
 // IsHaikuEnabled reports whether the haiku query helper is enabled.
 //
@@ -28,7 +24,7 @@ const FlagHaikuQuery = "HAIKU"
 // differs from featureflag.IsEnabled, whose generic reading treats unset as
 // disabled.
 func IsHaikuEnabled() bool {
-	val := os.Getenv("CLAUDE_FEATURE_" + FlagHaikuQuery)
+	val := os.Getenv("CLAUDE_FEATURE_" + featureflag.FlagHaikuQuery)
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "0", "false":
 		return false
