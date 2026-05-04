@@ -113,6 +113,16 @@ const (
 	// FlagDateTimeParser gates the natural-language date/time parser
 	// used by MCP elicitation validation. Off by default.
 	FlagDateTimeParser = "DATETIME_PARSER"
+	// FlagShellPrefix gates the shell command prefix extraction helper
+	// (services/shellprefix). Uses the Haiku helper to determine the
+	// leading command prefix for BashTool permission classification.
+	// Off by default.
+	FlagShellPrefix = "SHELL_PREFIX"
+	// FlagWebFetchSummary gates the web fetch content summarization
+	// helper (services/webfetchsummary). Uses the Haiku helper to
+	// summarize fetched web page content via a secondary model prompt.
+	// Off by default.
+	FlagWebFetchSummary = "WEB_FETCH_SUMMARY"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

@@ -51,6 +51,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/rename"
 	"github.com/sheepzhao/claude-code-go/internal/services/sessiontitle"
+	"github.com/sheepzhao/claude-code-go/internal/services/shellprefix"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
 	"github.com/sheepzhao/claude-code-go/internal/services/preventsleep"
@@ -68,6 +69,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/tool_search"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/web_search"
 	"github.com/sheepzhao/claude-code-go/internal/services/toolusesummary"
+	"github.com/sheepzhao/claude-code-go/internal/services/webfetchsummary"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -127,7 +129,15 @@ type App struct {
 	// ISO 8601 format via the Haiku helper. nil when FlagDateTimeParser
 	// is disabled or Haiku is unavailable.
 	DateTimeParser *datetimeparser.Service
-}
+		// ShellPrefix extracts shell command prefixes via the Haiku helper
+		// for BashTool permission classification. nil when FlagShellPrefix
+		// is disabled or Haiku is unavailable.
+		ShellPrefix *shellprefix.Service
+		// WebFetchSummary summarizes fetched web page content via the
+		// Haiku helper (secondary model). nil when FlagWebFetchSummary is
+		// disabled or Haiku is unavailable.
+		WebFetchSummary *webfetchsummary.Service
+	}
 
 // NewApp builds the production app wiring from the default config loader.
 func NewApp() (*App, error) {
@@ -440,6 +450,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		SessionTitle:            sessiontitle.CurrentService(),
 		Rename:                  rename.CurrentService(),
 		DateTimeParser:          datetimeparser.CurrentService(),
+		ShellPrefix:             shellprefix.CurrentService(),
+		WebFetchSummary:         webfetchsummary.CurrentService(),
 	}, nil
 }
 
