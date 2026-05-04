@@ -129,6 +129,16 @@ const (
 	// reducing prompt size when the server-side prompt cache has expired.
 	// Off by default.
 	FlagMicroCompact = "MICRO_COMPACT"
+	// FlagAutoCompact gates the auto-compact service
+	// (services/autocompact). When enabled, the runtime automatically
+	// triggers compaction when token usage exceeds the auto-compact
+	// threshold. Off by default.
+	FlagAutoCompact = "AUTO_COMPACT"
+	// FlagSessionMemoryCompact gates the session-memory compaction
+	// service (services/sessionmemorycompact). When enabled, the runtime
+	// may use accumulated session memory as a summary source instead of
+	// calling the LLM for compaction. Off by default.
+	FlagSessionMemoryCompact = "SESSION_MEMORY_COMPACT"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
