@@ -139,6 +139,11 @@ const (
 	// may use accumulated session memory as a summary source instead of
 	// calling the LLM for compaction. Off by default.
 	FlagSessionMemoryCompact = "SESSION_MEMORY_COMPACT"
+	// FlagCoordinatorScratchpad gates the coordinator scratchpad directory
+	// feature. When enabled, coordinator mode injects a scratchpad directory
+	// path into worker context so workers can share durable cross-worker
+	// knowledge without permission prompts. Off by default.
+	FlagCoordinatorScratchpad = "COORDINATOR_SCRATCHPAD"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

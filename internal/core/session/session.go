@@ -18,6 +18,9 @@ type Session struct {
 	Messages []message.Message
 	// UpdatedAt records when the session snapshot was last overwritten.
 	UpdatedAt time.Time
+	// Mode stores the session mode ("coordinator" or "normal" or empty).
+	// Used by MatchSessionMode to detect mode mismatches on resume.
+	Mode string
 }
 
 // Clone returns a detached copy of the session so callers can safely mutate it.
@@ -31,5 +34,6 @@ func (s Session) Clone() Session {
 		CustomTitle: s.CustomTitle,
 		Messages:    cloned,
 		UpdatedAt:   s.UpdatedAt,
+		Mode:        s.Mode,
 	}
 }

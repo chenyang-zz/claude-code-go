@@ -19,6 +19,7 @@ import (
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	runtimesession "github.com/sheepzhao/claude-code-go/internal/runtime/session"
 	"github.com/sheepzhao/claude-code-go/internal/services/awaysummary"
@@ -470,6 +471,13 @@ func (r *Runner) consumeRecoveredSnapshot(action string, recovered runtimesessio
 	r.SessionID = recovered.Snapshot.Session.ID
 	if recovered.Snapshot.Session.ProjectPath != "" {
 		r.ProjectPath = recovered.Snapshot.Session.ProjectPath
+	}
+
+	// Check and reconcile coordinator mode with the recovered session.
+	if warning := coordinator.MatchSessionMode(coordinator.ParseSessionMode(recovered.Snapshot.Session.Mode)); warning != "" {
+		if r.Renderer != nil {
+			_ = r.Renderer.RenderLine(warning)
+		}
 	}
 
 	history := conversation.History{

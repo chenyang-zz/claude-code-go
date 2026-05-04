@@ -23,6 +23,7 @@ import (
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
+	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
@@ -257,6 +258,7 @@ func (e *Runtime) resolveSystemPrompt(ctx context.Context, sessionID, cwd, expli
 		EnabledToolNames: buildEnabledToolNameSet(e.ToolCatalog),
 		WorkingDir:       cwd,
 		SessionID:        sessionID,
+		MCPServerNames:   getConnectedMCPServerNames(),
 	})
 	built, err := e.PromptBuilder.Build(builtCtx)
 	if err != nil {
@@ -993,6 +995,22 @@ func buildEnabledToolNameSet(toolDefs []model.ToolDefinition) map[string]struct{
 			continue
 		}
 		names[def.Name] = struct{}{}
+	}
+	return names
+}
+
+// getConnectedMCPServerNames returns the names of currently connected MCP servers.
+func getConnectedMCPServerNames() []string {
+	reg := registry.GetLastRegistry()
+	if reg == nil {
+		return nil
+	}
+	connected := reg.Connected()
+	names := make([]string, 0, len(connected))
+	for _, entry := range connected {
+		if entry.Name != "" {
+			names = append(names, entry.Name)
+		}
 	}
 	return names
 }

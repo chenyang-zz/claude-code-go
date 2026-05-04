@@ -40,8 +40,12 @@ func TestCoordinatorSection_Compute_RendersWorkerTools(t *testing.T) {
 	if !strings.Contains(result, "Workers spawned via the Agent tool have access to these tools: Bash, Read") {
 		t.Fatalf("Compute() = %q, want worker tool summary", result)
 	}
-	if strings.Contains(result, "SendMessage") || strings.Contains(result, "SyntheticOutput") {
-		t.Fatalf("Compute() = %q, want coordinator control tools excluded", result)
+	// The full prompt mentions coordinator tools (SendMessage, TaskStop) in Section 2 "Your Tools".
+	// Verify that worker tool list (Section 3) excludes internal tools.
+	workerSection := result[strings.Index(result, "## 3. Workers"):]
+	workerSection = workerSection[:strings.Index(workerSection, "## 4.")]
+	if strings.Contains(workerSection, "SyntheticOutput") {
+		t.Fatalf("worker section = %q, want SyntheticOutput excluded from worker tools", workerSection)
 	}
 }
 
@@ -69,7 +73,7 @@ func TestPromptBuilder_UsesCoordinatorSectionWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if !strings.Contains(result, "You are Claude Code, an AI assistant that coordinates software engineering tasks across multiple workers.") {
+	if !strings.Contains(result, "You are Claude Code, an AI assistant that orchestrates software engineering tasks across multiple workers.") {
 		t.Fatalf("Build() = %q, want coordinator prompt", result)
 	}
 	if strings.Contains(result, "You are claude-code-go, an interactive agent") {
