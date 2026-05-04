@@ -46,8 +46,11 @@ import (
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 	"github.com/sheepzhao/claude-code-go/internal/services/policylimits"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
+	"github.com/sheepzhao/claude-code-go/internal/services/datetimeparser"
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
+	"github.com/sheepzhao/claude-code-go/internal/services/rename"
+	"github.com/sheepzhao/claude-code-go/internal/services/sessiontitle"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/notifier"
 	"github.com/sheepzhao/claude-code-go/internal/services/preventsleep"
@@ -112,6 +115,18 @@ type App struct {
 	// batches via the Haiku helper. nil when FlagToolUseSummary is
 	// disabled or Haiku is unavailable.
 	ToolUseSummary *toolusesummary.Service
+	// SessionTitle generates a concise sentence-case title for the
+	// current session via the Haiku helper. nil when FlagSessionTitle is
+	// disabled or Haiku is unavailable.
+	SessionTitle *sessiontitle.Service
+	// Rename generates a kebab-case session name suggestion via the
+	// Haiku helper. nil when FlagRenameSuggestion is disabled or Haiku
+	// is unavailable.
+	Rename *rename.Service
+	// DateTimeParser converts natural-language dates and times into
+	// ISO 8601 format via the Haiku helper. nil when FlagDateTimeParser
+	// is disabled or Haiku is unavailable.
+	DateTimeParser *datetimeparser.Service
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -422,6 +437,9 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		Notifier:                notifierService,
 		Haiku:                   haiku.CurrentService(),
 		ToolUseSummary:          toolusesummary.CurrentService(),
+		SessionTitle:            sessiontitle.CurrentService(),
+		Rename:                  rename.CurrentService(),
+		DateTimeParser:          datetimeparser.CurrentService(),
 	}, nil
 }
 
@@ -1166,6 +1184,21 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			Querier: haiku.CurrentService(),
 		})
 
+			// Initialize the session title service against the haiku singleton.
+			sessiontitle.InitSessionTitle(sessiontitle.InitOptions{
+				Querier: haiku.CurrentService(),
+			})
+
+			// Initialize the rename suggestion service against the haiku singleton.
+			rename.InitRename(rename.InitOptions{
+				Querier: haiku.CurrentService(),
+			})
+
+			// Initialize the date/time parser service against the haiku singleton.
+			datetimeparser.InitDateTimeParser(datetimeparser.InitOptions{
+				Querier: haiku.CurrentService(),
+			})
+
 
 		return &EngineAssembly{
 			Engine:         runtime,
@@ -1232,6 +1265,9 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 		// leakage in long-lived test or REPL processes.
 		haiku.InitHaiku(haiku.InitOptions{})
 		toolusesummary.InitToolUseSummary(toolusesummary.InitOptions{})
+		sessiontitle.InitSessionTitle(sessiontitle.InitOptions{})
+		rename.InitRename(rename.InitOptions{})
+		datetimeparser.InitDateTimeParser(datetimeparser.InitOptions{})
 
 		return &EngineAssembly{
 			Engine:         runtime,
