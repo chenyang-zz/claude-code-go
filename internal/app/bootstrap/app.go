@@ -34,6 +34,7 @@ import (
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
 	platformteam "github.com/sheepzhao/claude-code-go/internal/platform/team"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/cron"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/executor"
@@ -150,6 +151,9 @@ type App struct {
 	// SessionMemoryCompact provides session-memory-based compaction logic.
 	// nil when FlagSessionMemoryCompact is disabled.
 	SessionMemoryCompact *sessionmemorycompact.SessionMemoryCompactService
+	// CoordinatorScheduler manages worker agent lifecycle in coordinator mode.
+	// nil when coordinator mode is not active.
+	CoordinatorScheduler *coordinator.Scheduler
 }
 
 // NewApp builds the production app wiring from the default config loader.
@@ -454,6 +458,20 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	// Initialize the session memory compact service. Gated by FlagSessionMemoryCompact (off by default).
 	sessionmemorycompact.InitSessionMemoryCompactService()
 
+	// Initialize coordinator scheduler for worker agent management.
+	// This creates a scheduler that wraps the agent runner for use in coordinator mode.
+	var coordinatorScheduler *coordinator.Scheduler
+	if agentRegistry != nil {
+		// Create a runner adapter using the agent tool's factory pattern
+		if rt, ok := eng.(*engine.Runtime); ok {
+			runnerAdapter := coordinator.NewFactoryAdapter(func() coordinator.AgentRunner {
+				r := agenttool.NewRunner(rt, agentRegistry)
+				return &agentRunnerAdapter{inner: r}
+			})
+			coordinatorScheduler = coordinator.NewScheduler(runnerAdapter, coordinator.DefaultSchedulerConfig())
+		}
+	}
+
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
@@ -477,6 +495,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		Microcompact:            microcompact.CurrentService(),
 		Autocompact:            autocompact.CurrentService(),
 		SessionMemoryCompact:    sessionmemorycompact.CurrentService(),
+		CoordinatorScheduler:    coordinatorScheduler,
 	}, nil
 }
 
@@ -1749,4 +1768,50 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		defer a.PreventSleepCleanup()
 	}
 	return a.Runner.Run(ctx, args)
+}
+
+// agentRunnerAdapter wraps an agent.Runner to implement the coordinator.AgentRunner interface.
+type agentRunnerAdapter struct {
+	inner *agenttool.Runner
+}
+
+// Run executes an agent task and returns the output.
+func (a *agentRunnerAdapter) Run(ctx context.Context, input coordinator.AgentInput) (coordinator.AgentOutput, error) {
+	if a.inner == nil {
+		return coordinator.AgentOutput{}, fmt.Errorf("inner runner is nil")
+	}
+
+	// Convert coordinator input to agent input
+	agentInput := agenttool.Input{
+		Description:  input.Description,
+		Prompt:       input.Prompt,
+		SubagentType: input.SubagentType,
+		Model:        input.Model,
+		Cwd:          input.Cwd,
+	}
+
+	// Execute the agent task
+	agentOutput, err := a.inner.Run(ctx, agentInput)
+	if err != nil {
+		return coordinator.AgentOutput{}, err
+	}
+
+	// Convert agent output to coordinator output
+	var content string
+	if len(agentOutput.Content) > 0 {
+		var parts []string
+		for _, block := range agentOutput.Content {
+			parts = append(parts, block.Text)
+		}
+		content = strings.Join(parts, "")
+	}
+
+	return coordinator.AgentOutput{
+		AgentID:           agentOutput.AgentID,
+		AgentType:         agentOutput.AgentType,
+		Content:           content,
+		TotalToolUseCount: agentOutput.TotalToolUseCount,
+		TotalDurationMs:   agentOutput.TotalDurationMs,
+		TotalTokens:       agentOutput.TotalTokens,
+	}, nil
 }
