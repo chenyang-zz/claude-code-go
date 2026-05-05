@@ -52,15 +52,17 @@ func (p *InboxPoller) Start() {
 		return
 	}
 	p.running = true
-	p.ticker = time.NewTicker(p.interval)
-	p.stopCh = make(chan struct{})
+	ticker := time.NewTicker(p.interval)
+	stopCh := make(chan struct{})
+	p.ticker = ticker
+	p.stopCh = stopCh
 
 	go func() {
 		for {
 			select {
-			case <-p.ticker.C:
+			case <-ticker.C:
 				p.poll()
-			case <-p.stopCh:
+			case <-stopCh:
 				return
 			}
 		}
@@ -96,6 +98,18 @@ func (p *InboxPoller) poll() {
 	// Invoke callback with unread messages
 	p.onMessage(messages)
 
-	// Mark messages as read after successful delivery
-	_ = MarkMessagesAsRead(p.agentName, p.teamName, p.homeDir)
+	// Build a set of (from, timestamp) keys for the messages we delivered.
+	// Only these messages will be marked as read, avoiding a TOCTOU race
+	// where a newly arrived message between ReadUnreadMessages and the mark
+	// operation would be silently lost.
+	keys := make(map[string]struct{}, len(messages))
+	for _, m := range messages {
+		keys[m.From+"\x00"+m.Timestamp] = struct{}{}
+	}
+	_ = MarkMessagesAsReadByPredicate(p.agentName, p.teamName, p.homeDir,
+		func(m Message) bool {
+			_, ok := keys[m.From+"\x00"+m.Timestamp]
+			return ok
+		},
+	)
 }
