@@ -144,6 +144,11 @@ const (
 	// path into worker context so workers can share durable cross-worker
 	// knowledge without permission prompts. Off by default.
 	FlagCoordinatorScratchpad = "COORDINATOR_SCRATCHPAD"
+	// FlagAgentSummary gates the periodic agent progress summarization
+	// feature. When enabled, coordinator-mode sub-agents generate periodic
+	// 3-5 word progress summaries using the forked agent infrastructure.
+	// Off by default.
+	FlagAgentSummary = "AGENT_SUMMARY"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
