@@ -10,6 +10,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
 	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -315,6 +316,13 @@ func (m *Manager) ReplaceMessagesInProject(ctx context.Context, id string, proje
 		snapshot.Session.ProjectPath = projectPath
 	}
 	snapshot.Session.UpdatedAt = m.now()
+	if snapshot.Session.Mode == "" {
+		if coordinator.IsCoordinatorMode() {
+			snapshot.Session.Mode = "coordinator"
+		} else {
+			snapshot.Session.Mode = "normal"
+		}
+	}
 
 	if err := m.save(ctx, snapshot.Session); err != nil {
 		return coresession.Snapshot{}, err

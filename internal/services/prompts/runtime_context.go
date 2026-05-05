@@ -11,6 +11,12 @@ type RuntimeContext struct {
 	WorkingDir string
 	// SessionID stores the current logical session identifier for session-scoped prompt data.
 	SessionID string
+	// MCPServerNames lists the names of connected MCP servers.
+	MCPServerNames []string
+	// ScratchpadDir is the coordinator scratchpad directory path (empty if not set).
+	ScratchpadDir string
+	// SimpleMode reports whether CLAUDE_CODE_SIMPLE is enabled.
+	SimpleMode bool
 }
 
 type runtimeContextKey struct{}
