@@ -646,7 +646,7 @@ func PartialCompactConversation(ctx context.Context, client model.Client, req Pa
 
 	// Build the result. Use "manual" trigger for partial compact.
 	boundary := CreateBoundaryMessage(TriggerManual, preCompactTokenCount, len(messagesToSummarize))
-	summaryText := GetCompactUserSummaryMessage(summary, false, req.TranscriptPath, len(messagesToKeep) > 0)
+	summaryText := GetCompactUserSummaryMessage(summary, false, req.TranscriptPath, req.Direction)
 	summaryMsg := message.Message{
 		Role: message.RoleUser,
 		Content: []message.ContentPart{

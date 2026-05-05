@@ -12,13 +12,13 @@ const (
 	// Search and read tools for clearable results
 	ToolNameGlob      = "Glob"
 	ToolNameGrep      = "Grep"
-	ToolNameFileRead  = "FileRead"
+	ToolNameFileRead  = "Read"
 	ToolNameWebFetch  = "WebFetch"
 	ToolNameWebSearch = "WebSearch"
 
 	// Edit tools for clearable uses
-	ToolNameFileEdit     = "FileEdit"
-	ToolNameFileWrite    = "FileWrite"
+	ToolNameFileEdit     = "Edit"
+	ToolNameFileWrite    = "Write"
 	ToolNameNotebookEdit = "NotebookEdit"
 )
 

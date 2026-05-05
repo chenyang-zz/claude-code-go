@@ -354,21 +354,32 @@ func GetPartialCompactPrompt(customInstructions string, direction string) string
 // GetCompactUserSummaryMessage builds the user-facing message that carries the
 // compact summary into the new context window. It optionally:
 //   - appends a transcript path hint for retrieving pre-compaction details
-//   - notes that recent messages were preserved verbatim
+//   - notes that recent or earlier messages were preserved verbatim
 //   - adds continuation instructions when suppressFollowUp is true
 //
+// direction indicates which portion was summarized:
+//   - "up_to": summarizing earlier messages, keeping recent (default)
+//   - "from": summarizing recent messages, keeping earlier
+//
 // Aligns with TS getCompactUserSummaryMessage.
-func GetCompactUserSummaryMessage(summary string, suppressFollowUp bool, transcriptPath string, recentMessagesPreserved bool) string {
+func GetCompactUserSummaryMessage(summary string, suppressFollowUp bool, transcriptPath string, direction string) string {
 	formattedSummary := FormatCompactSummary(summary)
 
-	baseSummary := "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n" + formattedSummary
+	var baseSummary string
+	if direction == "from" {
+		baseSummary = "This session is being continued from a previous conversation that ran out of context. The summary below covers the recent portion of the conversation.\n\n" + formattedSummary
+	} else {
+		baseSummary = "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n" + formattedSummary
+	}
 
 	if transcriptPath != "" {
 		baseSummary += "\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: " + transcriptPath
 	}
 
-	if recentMessagesPreserved {
+	if direction == "up_to" {
 		baseSummary += "\n\nRecent messages are preserved verbatim."
+	} else if direction == "from" {
+		baseSummary += "\n\nEarlier messages are preserved verbatim."
 	}
 
 	if suppressFollowUp {

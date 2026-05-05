@@ -181,10 +181,12 @@ func CreateSkillAttachment(
 
 // truncateString cuts a string to approximately the given token budget.
 // Since EstimateTokensForText uses len(text)/4, we cap at maxTokens*4 runes.
+// Uses rune count to avoid corrupting multibyte UTF-8 characters.
 func truncateString(s string, maxTokens int) string {
-	maxChars := maxTokens * defaultBytesPerToken
-	if len(s) <= maxChars {
+	maxRunes := maxTokens * defaultBytesPerToken
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
 		return s
 	}
-	return s[:maxChars]
+	return string(runes[:maxRunes])
 }
