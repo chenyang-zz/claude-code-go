@@ -149,6 +149,11 @@ const (
 	// 3-5 word progress summaries using the forked agent infrastructure.
 	// Off by default.
 	FlagAgentSummary = "AGENT_SUMMARY"
+	// FlagLspDiagTracking gates the LSP DiagnosticTracking service.
+	// When enabled, the runtime captures baseline diagnostics before file
+	// edits and reports new diagnostics introduced by model-generated code
+	// changes. Off by default.
+	FlagLspDiagTracking = "LSP_DIAG_TRACKING"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
