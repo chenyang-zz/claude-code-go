@@ -127,5 +127,8 @@ func (f *FactoryAdapter) Run(ctx context.Context, input AgentInput) (AgentOutput
 		return AgentOutput{}, fmt.Errorf("runner factory is nil")
 	}
 	runner := f.factory()
+	if runner == nil {
+		return AgentOutput{}, fmt.Errorf("factory returned nil runner")
+	}
 	return runner.Run(ctx, input)
 }

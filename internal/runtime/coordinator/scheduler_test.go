@@ -116,22 +116,31 @@ func TestSchedulerMaxConcurrentWorkers(t *testing.T) {
 		SubagentType: "worker",
 	}
 
-	// Create first worker
-	_, err := s.CreateWorker(input)
+	// Create first worker and set it to running
+	w1, err := s.CreateWorker(input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	w1.State = WorkerStateRunning
 
-	// Create second worker
-	_, err = s.CreateWorker(input)
+	// Create second worker and set it to running
+	w2, err := s.CreateWorker(input)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	w2.State = WorkerStateRunning
 
-	// Try to create third worker (should fail)
+	// Try to create third worker (should fail because 2 are running)
 	_, err = s.CreateWorker(input)
 	if err == nil {
 		t.Error("expected error for max concurrent workers")
+	}
+
+	// Set first worker to completed; creating another should now succeed
+	w1.State = WorkerStateCompleted
+	_, err = s.CreateWorker(input)
+	if err != nil {
+		t.Errorf("expected no error after worker completed, got: %v", err)
 	}
 }
 

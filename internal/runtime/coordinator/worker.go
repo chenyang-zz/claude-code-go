@@ -120,6 +120,11 @@ func (w *Worker) Execute(ctx context.Context) (AgentOutput, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	// If the worker was stopped (via Stop()), preserve that state
+	if w.State == WorkerStateStopped {
+		return output, fmt.Errorf("worker %q was stopped", w.ID)
+	}
+
 	if err != nil {
 		w.State = WorkerStateFailed
 		w.Error = err

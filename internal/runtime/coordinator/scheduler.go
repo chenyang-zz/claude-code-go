@@ -60,6 +60,9 @@ func (s *Scheduler) Schedule(ctx context.Context, input AgentInput) (AgentOutput
 		return AgentOutput{}, fmt.Errorf("failed to create worker: %w", err)
 	}
 
+	// Ensure worker is removed from tracking map after execution
+	defer s.RemoveWorker(w.ID)
+
 	// Execute worker
 	output, err := w.Execute(ctx)
 	if err != nil {
@@ -85,9 +88,17 @@ func (s *Scheduler) CreateWorker(input AgentInput) (*Worker, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check concurrent worker limit
-	if s.Config.MaxConcurrentWorkers > 0 && len(s.workers) >= s.Config.MaxConcurrentWorkers {
-		return nil, fmt.Errorf("max concurrent workers reached: %d", s.Config.MaxConcurrentWorkers)
+	// Check concurrent worker limit (count only running workers)
+	if s.Config.MaxConcurrentWorkers > 0 {
+		runningCount := 0
+		for _, w := range s.workers {
+			if w.State == WorkerStateRunning {
+				runningCount++
+			}
+		}
+		if runningCount >= s.Config.MaxConcurrentWorkers {
+			return nil, fmt.Errorf("max concurrent workers reached: %d", s.Config.MaxConcurrentWorkers)
+		}
 	}
 
 	// Create worker

@@ -2,7 +2,9 @@ package coordinator
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestNewWorker(t *testing.T) {
@@ -123,5 +125,58 @@ func TestWorkerDuration(t *testing.T) {
 	// Before execution, duration should be 0
 	if d := w.Duration(); d != 0 {
 		t.Errorf("expected 0 duration, got %v", d)
+	}
+}
+
+// blockingRunner is a mock runner that blocks until the context is cancelled.
+type blockingRunner struct {
+	started chan struct{}
+}
+
+func (r *blockingRunner) Run(ctx context.Context, _ AgentInput) (AgentOutput, error) {
+	close(r.started)
+	<-ctx.Done()
+	return AgentOutput{}, ctx.Err()
+}
+
+func TestWorkerStopDuringExecute(t *testing.T) {
+	runner := &blockingRunner{started: make(chan struct{})}
+	input := AgentInput{
+		Description:  "blocking task",
+		Prompt:       "block until stopped",
+		SubagentType: "worker",
+	}
+
+	w := NewWorker(input, runner)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var execErr error
+	go func() {
+		defer wg.Done()
+		_, execErr = w.Execute(context.Background())
+	}()
+
+	// Wait for Execute to start running
+	<-runner.started
+
+	// Give a moment for Execute to be in the Running state
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop the worker while it's executing
+	stopErr := w.Stop()
+	if stopErr != nil {
+		t.Fatalf("unexpected error stopping worker: %v", stopErr)
+	}
+
+	wg.Wait()
+
+	// After Stop + Execute completes, state should be Stopped (not Failed)
+	w.mu.Lock()
+	state := w.State
+	w.mu.Unlock()
+
+	if state != WorkerStateStopped {
+		t.Errorf("expected state %s after stop, got %s (execErr: %v)", WorkerStateStopped, state, execErr)
 	}
 }
