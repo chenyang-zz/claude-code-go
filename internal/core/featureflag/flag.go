@@ -144,6 +144,11 @@ const (
 	// path into worker context so workers can share durable cross-worker
 	// knowledge without permission prompts. Off by default.
 	FlagCoordinatorScratchpad = "COORDINATOR_SCRATCHPAD"
+	// FlagAgentSummary gates the periodic agent progress summarization
+	// feature. When enabled, coordinator-mode sub-agents generate periodic
+	// 3-5 word progress summaries using the forked agent infrastructure.
+	// Off by default.
+	FlagAgentSummary = "AGENT_SUMMARY"
 	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
 	// (getLastPeerDmSummary and useInboxPoller). Off by default.
 	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
