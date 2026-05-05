@@ -2,6 +2,7 @@ package agentsummary
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -191,8 +192,8 @@ func (s *AgentSummarizer) runSummary() {
 		SkipTranscript:  true,
 	})
 	if err != nil {
-		// Check if context was cancelled (stopped).
-		if s.isStopped() {
+		// Check if context was cancelled (stopped or parent context cancelled).
+		if s.isStopped() || s.ctx.Err() != nil {
 			return
 		}
 		logger.DebugCF("agentsummary", "forked agent error", map[string]any{
@@ -234,16 +235,20 @@ func (s *AgentSummarizer) isStopped() bool {
 }
 
 // extractSummary extracts the text content from the last assistant message
-// in the given messages, skipping API error messages.
+// in the given messages, joining all text parts to handle streamed deltas.
 func extractSummary(messages []message.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != message.RoleAssistant {
 			continue
 		}
+		var parts []string
 		for _, part := range messages[i].Content {
 			if part.Type == "text" && part.Text != "" {
-				return part.Text
+				parts = append(parts, part.Text)
 			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "")
 		}
 	}
 	return ""
