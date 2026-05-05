@@ -149,6 +149,9 @@ const (
 	// 3-5 word progress summaries using the forked agent infrastructure.
 	// Off by default.
 	FlagAgentSummary = "AGENT_SUMMARY"
+	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
+	// (getLastPeerDmSummary and useInboxPoller). Off by default.
+	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
