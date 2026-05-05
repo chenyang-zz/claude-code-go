@@ -245,10 +245,17 @@ func DispatchAsync(ctx context.Context, s *Scheduler, input AgentInput) (*Worker
 			defer close(resultCh)
 			result, ok := <-workerCh
 			if !ok {
-				resultCh <- DispatchResult{Error: fmt.Errorf("dispatch failed: channel closed")}
+				err := fmt.Errorf("dispatch failed: channel closed")
+				resultCh <- DispatchResult{
+					Notification: formatErrorNotification("", err),
+					Error:        err,
+				}
 				return
 			}
-			resultCh <- DispatchResult{Error: result.Error}
+			resultCh <- DispatchResult{
+				Notification: formatErrorNotification("", result.Error),
+				Error:        result.Error,
+			}
 		}()
 		return nil, resultCh
 	}

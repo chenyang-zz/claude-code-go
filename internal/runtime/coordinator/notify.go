@@ -33,8 +33,11 @@ func FormatTaskNotification(result WorkerResult) string {
 
 	w := result.Worker
 	status := workerStateToStatus(w.State)
-	statusText := getStatusText(w.State, w.Input.Description)
+	statusText := getStatusText(w.State)
 	summary := fmt.Sprintf("Agent %q %s", w.Input.Description, statusText)
+	if result.Error != nil {
+		summary = fmt.Sprintf("Agent %q failed: %s", w.Input.Description, result.Error.Error())
+	}
 
 	notif := TaskNotification{
 		TaskID:  w.ID,
@@ -64,8 +67,11 @@ func FormatTaskNotificationFromWorker(w *Worker) string {
 	}
 
 	status := workerStateToStatus(w.State)
-	statusText := getStatusText(w.State, w.Input.Description)
+	statusText := getStatusText(w.State)
 	summary := fmt.Sprintf("Agent %q %s", w.Input.Description, statusText)
+	if w.Error != nil {
+		summary = fmt.Sprintf("Agent %q failed: %s", w.Input.Description, w.Error.Error())
+	}
 
 	notif := TaskNotification{
 		TaskID:  w.ID,
@@ -106,7 +112,7 @@ func workerStateToStatus(state WorkerState) string {
 }
 
 // getStatusText returns human-readable status text matching TS format.
-func getStatusText(state WorkerState, description string) string {
+func getStatusText(state WorkerState) string {
 	switch state {
 	case WorkerStateCompleted:
 		return "completed"
