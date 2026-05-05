@@ -42,8 +42,12 @@ func TestCoordinatorSection_Compute_RendersWorkerTools(t *testing.T) {
 	}
 	// The full prompt mentions coordinator tools (SendMessage, TaskStop) in Section 2 "Your Tools".
 	// Verify that worker tool list (Section 3) excludes internal tools.
-	workerSection := result[strings.Index(result, "## 3. Workers"):]
-	workerSection = workerSection[:strings.Index(workerSection, "## 4.")]
+	workerIdx := strings.Index(result, "## 3. Workers")
+	nextIdx := strings.Index(result, "## 4.")
+	if workerIdx < 0 || nextIdx < 0 {
+		t.Fatalf("Compute() missing expected prompt sections; workerIdx=%d, nextIdx=%d", workerIdx, nextIdx)
+	}
+	workerSection := result[workerIdx:nextIdx]
 	if strings.Contains(workerSection, "SyntheticOutput") {
 		t.Fatalf("worker section = %q, want SyntheticOutput excluded from worker tools", workerSection)
 	}

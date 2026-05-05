@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1041,6 +1042,7 @@ func getConnectedMCPServerNames() []string {
 			names = append(names, entry.Name)
 		}
 	}
+	sort.Strings(names)
 	return names
 }
 

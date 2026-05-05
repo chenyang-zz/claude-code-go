@@ -3,21 +3,21 @@ package coordinator
 // AsyncAgentAllowedTools lists the tools available to async agent workers.
 // Corresponds to TS ASYNC_AGENT_ALLOWED_TOOLS in src/constants/tools.ts.
 var AsyncAgentAllowedTools = map[string]struct{}{
-	"FileRead":      {},
-	"WebSearch":     {},
-	"TodoWrite":     {},
-	"Grep":          {},
-	"WebFetch":      {},
-	"Glob":          {},
-	"Bash":          {},
-	"FileEdit":      {},
-	"FileWrite":     {},
-	"NotebookEdit":  {},
-	"Skill":         {},
+	"Read":            {},
+	"WebSearch":       {},
+	"TodoWrite":       {},
+	"Grep":            {},
+	"WebFetch":        {},
+	"Glob":            {},
+	"Bash":            {},
+	"Edit":            {},
+	"Write":           {},
+	"NotebookEdit":    {},
+	"Skill":           {},
 	"SyntheticOutput": {},
-	"ToolSearch":    {},
-	"EnterWorktree": {},
-	"ExitWorktree":  {},
+	"ToolSearch":      {},
+	"EnterWorktree":   {},
+	"ExitWorktree":    {},
 }
 
 // InternalWorkerTools lists tools that are internal to workers and should be
@@ -40,4 +40,4 @@ var CoordinatorModeAllowedTools = map[string]struct{}{
 }
 
 // SimpleModeTools is the reduced tool set used when CLAUDE_CODE_SIMPLE is enabled.
-var SimpleModeTools = []string{"Bash", "FileRead", "FileEdit"}
+var SimpleModeTools = []string{"Bash", "Read", "Edit"}

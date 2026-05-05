@@ -88,8 +88,8 @@ func TestRenderWorkerToolsSummary_FullMode(t *testing.T) {
 
 func TestRenderWorkerToolsSummary_SimpleMode(t *testing.T) {
 	result := RenderWorkerToolsSummary(nil, true)
-	if result != "Bash, FileRead, FileEdit" {
-		t.Fatalf("simple mode = %q, want Bash, FileRead, FileEdit", result)
+	if result != "Bash, Read, Edit" {
+		t.Fatalf("simple mode = %q, want Bash, Read, Edit", result)
 	}
 }
 

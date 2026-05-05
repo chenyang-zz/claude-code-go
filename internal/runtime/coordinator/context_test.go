@@ -33,7 +33,7 @@ func TestBuildCoordinatorUserContext_ScratchpadDisabled(t *testing.T) {
 
 func TestRenderWorkerToolsContext_FullMode(t *testing.T) {
 	ctx := CoordinatorUserContext{
-		EnabledToolNames: map[string]struct{}{"Bash": {}, "FileRead": {}},
+		EnabledToolNames: map[string]struct{}{"Bash": {}, "Read": {}},
 	}
 	result := RenderWorkerToolsContext(ctx, false)
 	if !strings.Contains(result, "Workers spawned via the Agent tool have access to these tools:") {
@@ -47,8 +47,8 @@ func TestRenderWorkerToolsContext_FullMode(t *testing.T) {
 func TestRenderWorkerToolsContext_SimpleMode(t *testing.T) {
 	ctx := CoordinatorUserContext{}
 	result := RenderWorkerToolsContext(ctx, true)
-	if !strings.Contains(result, "Bash, FileRead, FileEdit") {
-		t.Fatalf("simple mode = %q, want Bash, FileRead, FileEdit", result)
+	if !strings.Contains(result, "Bash, Read, Edit") {
+		t.Fatalf("simple mode = %q, want Bash, Read, Edit", result)
 	}
 }
 
