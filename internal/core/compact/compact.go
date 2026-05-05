@@ -156,7 +156,12 @@ func CompactConversation(ctx context.Context, client model.Client, req CompactRe
 		var err error
 		summary, usage, err = streamCompactSummary(ctx, client, req.Model, apiMessagesWithReq)
 		if err != nil {
-			return nil, fmt.Errorf("compact summary generation failed: %w", err)
+			// If the error itself indicates prompt-too-long, treat it as PTL
+			// and fall through to the retry logic below.
+			if !strings.Contains(err.Error(), promptTooLongErrorMessage) {
+				return nil, fmt.Errorf("compact summary generation failed: %w", err)
+			}
+			summary = promptTooLongErrorMessage
 		}
 
 		if !strings.HasPrefix(summary, promptTooLongErrorMessage) {
@@ -603,7 +608,10 @@ func PartialCompactConversation(ctx context.Context, client model.Client, req Pa
 		var err error
 		summary, usage, err = streamCompactSummary(ctx, client, req.Model, apiMessagesWithReq)
 		if err != nil {
-			return nil, fmt.Errorf("partial compact summary generation failed: %w", err)
+			if !strings.Contains(err.Error(), promptTooLongErrorMessage) {
+				return nil, fmt.Errorf("partial compact summary generation failed: %w", err)
+			}
+			summary = promptTooLongErrorMessage
 		}
 
 		if !strings.HasPrefix(summary, promptTooLongErrorMessage) {
@@ -645,7 +653,14 @@ func PartialCompactConversation(ctx context.Context, client model.Client, req Pa
 			message.TextPart(summaryText),
 		},
 	}
-	summaryMessages := []message.Message{summaryMsg}
+	// Include messagesToKeep in summaryMessages so callers using
+	// CompactionResult.SummaryMessages don't drop the kept segment.
+	var summaryMessages []message.Message
+	if req.Direction == "from" {
+		summaryMessages = append([]message.Message{summaryMsg}, messagesToKeep...)
+	} else {
+		summaryMessages = []message.Message{summaryMsg}
+	}
 
 	// Assemble post-compact messages:
 	// direction="from": boundary + summary + messagesToKeep
