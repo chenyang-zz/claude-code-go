@@ -146,3 +146,110 @@ func (s *Scheduler) StopWorker(id string) error {
 
 	return w.Stop()
 }
+
+// WorkerResult holds the result of an async worker execution.
+type WorkerResult struct {
+	// Worker is the completed worker instance.
+	Worker *Worker
+	// Output holds the execution result.
+	Output AgentOutput
+	// Error holds the error if execution failed.
+	Error error
+}
+
+// ScheduleAsync creates and starts a worker in a background goroutine.
+// It returns the worker and a channel that receives the result when complete.
+// The channel is buffered with size 1 and is closed after sending.
+// The worker is removed from the tracking map after execution completes.
+func (s *Scheduler) ScheduleAsync(ctx context.Context, input AgentInput) (*Worker, <-chan WorkerResult) {
+	resultCh := make(chan WorkerResult, 1)
+
+	if s.Runner == nil {
+		resultCh <- WorkerResult{Error: fmt.Errorf("scheduler runner is nil")}
+		close(resultCh)
+		return nil, resultCh
+	}
+
+	w, err := s.CreateWorker(input)
+	if err != nil {
+		resultCh <- WorkerResult{Error: fmt.Errorf("failed to create worker: %w", err)}
+		close(resultCh)
+		return nil, resultCh
+	}
+
+	go func() {
+		defer close(resultCh)
+		defer s.RemoveWorker(w.ID)
+
+		output, execErr := w.Execute(ctx)
+
+		if execErr != nil {
+			logger.WarnCF("coordinator.scheduler", "async worker execution failed", map[string]any{
+				"worker_id": w.ID,
+				"error":     execErr.Error(),
+			})
+		}
+
+		if cleanupErr := w.Cleanup(); cleanupErr != nil {
+			logger.WarnCF("coordinator.scheduler", "async worker cleanup failed", map[string]any{
+				"worker_id": w.ID,
+				"error":     cleanupErr.Error(),
+			})
+		}
+
+		resultCh <- WorkerResult{Worker: w, Output: output, Error: execErr}
+	}()
+
+	logger.DebugCF("coordinator.scheduler", "async worker scheduled", map[string]any{
+		"worker_id":     w.ID,
+		"subagent_type": input.SubagentType,
+	})
+
+	return w, resultCh
+}
+
+// CollectResults reads from multiple async worker result channels and returns
+// all results. It blocks until all channels are closed or the context is done.
+// If the context is cancelled, remaining results are discarded.
+func CollectResults(ctx context.Context, channels []<-chan WorkerResult) []WorkerResult {
+	if len(channels) == 0 {
+		return nil
+	}
+
+	results := make([]WorkerResult, 0, len(channels))
+	merged := mergeChannels(channels)
+
+	for result := range merged {
+		select {
+		case <-ctx.Done():
+			results = append(results, WorkerResult{Error: ctx.Err()})
+			return results
+		default:
+		}
+		results = append(results, result)
+	}
+
+	return results
+}
+
+// mergeChannels combines multiple read-only channels into a single channel.
+// Results are forwarded as they arrive from any input channel.
+// The output channel is closed when all input channels are closed.
+func mergeChannels(channels []<-chan WorkerResult) <-chan WorkerResult {
+	merged := make(chan WorkerResult)
+	go func() {
+		defer close(merged)
+		var wg sync.WaitGroup
+		for _, ch := range channels {
+			wg.Add(1)
+			go func(c <-chan WorkerResult) {
+				defer wg.Done()
+				for result := range c {
+					merged <- result
+				}
+			}(ch)
+		}
+		wg.Wait()
+	}()
+	return merged
+}

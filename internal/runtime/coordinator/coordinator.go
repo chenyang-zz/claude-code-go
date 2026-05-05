@@ -1,10 +1,13 @@
 package coordinator
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 const coordinatorModeEnv = "CLAUDE_CODE_COORDINATOR_MODE"
@@ -212,4 +215,66 @@ func RenderWorkerToolsSummary(toolNames map[string]struct{}, simpleMode bool) st
 
 	sort.Strings(names)
 	return strings.Join(names, ", ")
+}
+
+// DispatchResult holds the result of an async coordinator dispatch.
+type DispatchResult struct {
+	// Worker is the dispatched worker instance.
+	Worker *Worker
+	// Notification is the pre-formatted <task-notification> XML string.
+	// Ready to be injected into the conversation as a user message.
+	Notification string
+	// Error holds the error if dispatch or execution failed.
+	Error error
+}
+
+// DispatchAsync dispatches a worker asynchronously via the Scheduler and returns
+// a channel that delivers the result with a pre-formatted notification.
+// This is the Coordinator-level entry point for async worker dispatch.
+//
+// The returned channel is buffered with size 1 and is closed after sending.
+// When the worker completes, the channel receives a DispatchResult containing
+// the worker, the formatted <task-notification> XML, and any error.
+func DispatchAsync(ctx context.Context, s *Scheduler, input AgentInput) (*Worker, <-chan DispatchResult) {
+	resultCh := make(chan DispatchResult, 1)
+
+	w, workerCh := s.ScheduleAsync(ctx, input)
+	if w == nil {
+		// ScheduleAsync already sent an error to workerCh; drain it and convert
+		go func() {
+			defer close(resultCh)
+			result, ok := <-workerCh
+			if !ok {
+				resultCh <- DispatchResult{Error: fmt.Errorf("dispatch failed: channel closed")}
+				return
+			}
+			resultCh <- DispatchResult{Error: result.Error}
+		}()
+		return nil, resultCh
+	}
+
+	go func() {
+		defer close(resultCh)
+		workerResult, ok := <-workerCh
+		if !ok {
+			resultCh <- DispatchResult{Worker: w, Error: fmt.Errorf("worker channel closed unexpectedly")}
+			return
+		}
+
+		notification := FormatTaskNotification(workerResult)
+
+		logger.DebugCF("coordinator.dispatch", "async dispatch completed", map[string]any{
+			"worker_id": w.ID,
+			"status":    workerStateToStatus(w.State),
+			"has_error": workerResult.Error != nil,
+		})
+
+		resultCh <- DispatchResult{
+			Worker:       w,
+			Notification: notification,
+			Error:        workerResult.Error,
+		}
+	}()
+
+	return w, resultCh
 }
