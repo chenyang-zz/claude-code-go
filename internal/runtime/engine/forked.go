@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -47,20 +48,44 @@ var (
 	lastCacheSafeParams   *CacheSafeParams
 )
 
-// SaveCacheSafeParams stores the given params as the latest cache-safe
-// snapshot. Pass nil to clear the stored state.
+// SaveCacheSafeParams stores a deep copy of the given params as the latest
+// cache-safe snapshot. Pass nil to clear the stored state.
 func SaveCacheSafeParams(params *CacheSafeParams) {
 	lastCacheSafeParamsMu.Lock()
 	defer lastCacheSafeParamsMu.Unlock()
-	lastCacheSafeParams = params
+	if params == nil {
+		lastCacheSafeParams = nil
+		return
+	}
+	copied := *params
+	copied.Messages = append([]message.Message(nil), params.Messages...)
+	if params.SystemContext != nil {
+		copied.SystemContext = make(map[string]string, len(params.SystemContext))
+		for k, v := range params.SystemContext {
+			copied.SystemContext[k] = v
+		}
+	}
+	lastCacheSafeParams = &copied
 }
 
-// GetLastCacheSafeParams returns the most recently saved cache-safe params,
-// or nil if none has been saved.
+// GetLastCacheSafeParams returns a deep copy of the most recently saved
+// cache-safe params, or nil if none has been saved. The caller may mutate
+// the returned value without affecting the stored snapshot.
 func GetLastCacheSafeParams() *CacheSafeParams {
 	lastCacheSafeParamsMu.RLock()
 	defer lastCacheSafeParamsMu.RUnlock()
-	return lastCacheSafeParams
+	if lastCacheSafeParams == nil {
+		return nil
+	}
+	copied := *lastCacheSafeParams
+	copied.Messages = append([]message.Message(nil), lastCacheSafeParams.Messages...)
+	if lastCacheSafeParams.SystemContext != nil {
+		copied.SystemContext = make(map[string]string, len(lastCacheSafeParams.SystemContext))
+		for k, v := range lastCacheSafeParams.SystemContext {
+			copied.SystemContext[k] = v
+		}
+	}
+	return &copied
 }
 
 // ForkedAgentParams configures a forked agent execution.
@@ -101,7 +126,10 @@ type SubagentContextOverrides struct {
 // newAgentID generates a random hex string suitable for use as an agent ID.
 func newAgentID() string {
 	b := make([]byte, 8)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if RNG fails
+		return fmt.Sprintf("agent-%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -184,7 +212,12 @@ func RunForked(ctx context.Context, params ForkedAgentParams) (*ForkedAgentResul
 	var transcriptWriter *transcript.Writer
 	agentID := newAgentID()
 	if !params.SkipTranscript && runtime.TranscriptPath != "" {
-		sidechainPath := runtime.TranscriptPath + "." + agentID + ".jsonl"
+		// Insert agent ID before .jsonl extension to avoid double extensions
+		basePath := runtime.TranscriptPath
+		if ext := ".jsonl"; len(basePath) > len(ext) && basePath[len(basePath)-len(ext):] == ext {
+			basePath = basePath[:len(basePath)-len(ext)]
+		}
+		sidechainPath := basePath + "." + agentID + ".jsonl"
 		tw, err := transcript.NewWriter(sidechainPath)
 		if err != nil {
 			logger.WarnCF("engine", "failed to create sidechain transcript writer", map[string]any{
@@ -249,15 +282,19 @@ func RunForked(ctx context.Context, params ForkedAgentParams) (*ForkedAgentResul
 			case model.EventTypeThinking:
 				assistantContent = append(assistantContent, message.ThinkingPart(evt.Thinking, evt.Signature))
 			case model.EventTypeToolUse:
-				if evt.ToolUse != nil {
-					assistantContent = append(assistantContent, message.ToolUsePart(evt.ToolUse.ID, evt.ToolUse.Name, evt.ToolUse.Input))
+				if evt.ToolUse == nil {
+					return nil, fmt.Errorf("forked agent [%s] received tool_use event with nil payload", forkLabel)
 				}
+				assistantContent = append(assistantContent, message.ToolUsePart(evt.ToolUse.ID, evt.ToolUse.Name, evt.ToolUse.Input))
 			case model.EventTypeDone:
 				if evt.Usage != nil {
 					turnUsage = *evt.Usage
 				}
 				stopReason = string(evt.StopReason)
 			case model.EventTypeError:
+				// Drain remaining stream events to prevent goroutine/resource leaks
+				for range stream {
+				}
 				return nil, fmt.Errorf("forked agent [%s] stream event error: %s", forkLabel, evt.Error)
 			}
 		}
@@ -305,18 +342,24 @@ func RunForked(ctx context.Context, params ForkedAgentParams) (*ForkedAgentResul
 			toolName := part.ToolName
 			toolID := part.ToolUseID
 
-			// Check permission via CanUseTool.
-			if params.CanUseTool != nil && !params.CanUseTool(toolName) {
+			// Check permission via CanUseTool (deny by default if nil).
+			if params.CanUseTool == nil || !params.CanUseTool(toolName) {
 				toolResults = append(toolResults, message.ToolResultPart(toolID, "Tool not available in this context", true))
 				continue
 			}
 
 			// Execute the tool if we have an executor.
 			if forkedRuntime.Executor != nil {
+				cwd, _ := os.Getwd()
 				call := tool.Call{
-					ID:    toolID,
-					Name:  toolName,
-					Input: part.ToolInput,
+					ID:     toolID,
+					Name:   toolName,
+					Input:  part.ToolInput,
+					Source: "forked_agent",
+					Context: tool.UseContext{
+						WorkingDir:    cwd,
+						SessionConfig: forkedRuntime.SessionConfig,
+					},
 				}
 				result, execErr := forkedRuntime.Executor.Execute(ctx, call)
 				if execErr != nil {
@@ -365,11 +408,19 @@ func RunForked(ctx context.Context, params ForkedAgentParams) (*ForkedAgentResul
 }
 
 // CreateCacheSafeParams extracts the cache-critical parameters from a Runtime
-// and message history for use in forked agent execution.
+// and message history for use in forked agent execution. The returned params
+// contain deep copies of all mutable fields.
 func CreateCacheSafeParams(runtime *Runtime, systemPrompt string, systemContext map[string]string, messages []message.Message) CacheSafeParams {
+	var ctxCopy map[string]string
+	if systemContext != nil {
+		ctxCopy = make(map[string]string, len(systemContext))
+		for k, v := range systemContext {
+			ctxCopy[k] = v
+		}
+	}
 	return CacheSafeParams{
 		SystemPrompt: systemPrompt,
-		SystemContext: systemContext,
+		SystemContext: ctxCopy,
 		Messages:     append([]message.Message(nil), messages...),
 		Runtime:      runtime,
 	}
