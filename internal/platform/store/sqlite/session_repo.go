@@ -39,20 +39,22 @@ func (r *SessionRepository) Save(ctx context.Context, session coresession.Sessio
 
 	_, err = r.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO sessions (id, project_path, custom_title, summary_text, updated_at, messages_json)
-VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO sessions (id, project_path, custom_title, summary_text, updated_at, messages_json, mode)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	project_path = excluded.project_path,
 	custom_title = excluded.custom_title,
 	summary_text = excluded.summary_text,
 	updated_at = excluded.updated_at,
-	messages_json = excluded.messages_json`,
+	messages_json = excluded.messages_json,
+	mode = excluded.mode`,
 		session.ID,
 		session.ProjectPath,
 		session.CustomTitle,
 		summaryText,
 		session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		string(messagesJSON),
+		session.Mode,
 	)
 	if err != nil {
 		return fmt.Errorf("save session %s: %w", session.ID, err)
@@ -75,7 +77,7 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 
 	row := r.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT project_path, custom_title, updated_at, messages_json FROM sessions WHERE id = ?`,
+		`SELECT project_path, custom_title, updated_at, messages_json, mode FROM sessions WHERE id = ?`,
 		id,
 	)
 
@@ -83,7 +85,8 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 	var customTitle string
 	var updatedAtText string
 	var messagesJSON string
-	if err := row.Scan(&projectPath, &customTitle, &updatedAtText, &messagesJSON); err != nil {
+	var mode string
+	if err := row.Scan(&projectPath, &customTitle, &updatedAtText, &messagesJSON, &mode); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return coresession.Session{}, coresession.ErrSessionNotFound
 		}
@@ -111,6 +114,7 @@ func (r *SessionRepository) Load(ctx context.Context, id string) (coresession.Se
 		CustomTitle: customTitle,
 		Messages:    messages,
 		UpdatedAt:   updatedAt,
+		Mode:        mode,
 	}, nil
 }
 
@@ -125,7 +129,7 @@ func (r *SessionRepository) LoadLatest(ctx context.Context, lookup coresession.L
 
 	row := r.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT id, project_path, custom_title, updated_at, messages_json
+		`SELECT id, project_path, custom_title, updated_at, messages_json, mode
 FROM sessions
 WHERE project_path = ?
 ORDER BY updated_at DESC, id DESC
@@ -138,7 +142,8 @@ LIMIT 1`,
 	var customTitle string
 	var updatedAtText string
 	var messagesJSON string
-	if err := row.Scan(&sessionID, &projectPath, &customTitle, &updatedAtText, &messagesJSON); err != nil {
+	var mode string
+	if err := row.Scan(&sessionID, &projectPath, &customTitle, &updatedAtText, &messagesJSON, &mode); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return coresession.Session{}, coresession.ErrSessionNotFound
 		}
@@ -167,6 +172,7 @@ LIMIT 1`,
 		CustomTitle: customTitle,
 		Messages:    messages,
 		UpdatedAt:   updatedAt,
+		Mode:        mode,
 	}, nil
 }
 

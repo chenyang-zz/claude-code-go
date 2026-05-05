@@ -25,4 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 		Name: "create_sessions_project_path_updated_at_index",
 		SQL:  `CREATE INDEX IF NOT EXISTS idx_sessions_project_path_updated_at ON sessions(project_path, updated_at DESC);`,
 	},
+	{
+		Name: "add_sessions_mode_column",
+		SQL:  `ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT '';`,
+	},
 }

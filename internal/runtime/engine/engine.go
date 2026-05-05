@@ -2,9 +2,12 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,6 +28,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
@@ -259,6 +263,8 @@ func (e *Runtime) resolveSystemPrompt(ctx context.Context, sessionID, cwd, expli
 		WorkingDir:       cwd,
 		SessionID:        sessionID,
 		MCPServerNames:   getConnectedMCPServerNames(),
+		ScratchpadDir:    resolveScratchpadDir(cwd, sessionID),
+		SimpleMode:       coordinator.IsSimpleMode(),
 	})
 	built, err := e.PromptBuilder.Build(builtCtx)
 	if err != nil {
@@ -270,6 +276,29 @@ func (e *Runtime) resolveSystemPrompt(ctx context.Context, sessionID, cwd, expli
 	}
 
 	return strings.TrimSpace(built)
+}
+
+// resolveScratchpadDir derives a stable, session-scoped scratchpad directory path.
+func resolveScratchpadDir(workingDir, sessionID string) string {
+	trimmedSessionID := strings.TrimSpace(sessionID)
+	if trimmedSessionID == "" {
+		return ""
+	}
+	cwd := strings.TrimSpace(workingDir)
+	if cwd == "" {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			return ""
+		}
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(cwd)))
+	scope := hex.EncodeToString(sum[:8])
+	dir := filepath.Join(os.TempDir(), "claude-code-go", scope, trimmedSessionID, "scratchpad")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // resolveMainThreadAgentPrompt resolves the selected main-thread agent prompt
