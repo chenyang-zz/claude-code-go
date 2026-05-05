@@ -144,6 +144,9 @@ const (
 	// path into worker context so workers can share durable cross-worker
 	// knowledge without permission prompts. Off by default.
 	FlagCoordinatorScratchpad = "COORDINATOR_SCRATCHPAD"
+	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
+	// (getLastPeerDmSummary and useInboxPoller). Off by default.
+	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
