@@ -88,15 +88,16 @@ func (s *Scheduler) CreateWorker(input AgentInput) (*Worker, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check concurrent worker limit (count only running workers)
+	// Check concurrent worker limit (count created + running workers to prevent
+	// ScheduleAsync from bypassing the limit before Execute() flips state to running)
 	if s.Config.MaxConcurrentWorkers > 0 {
-		runningCount := 0
+		activeCount := 0
 		for _, w := range s.workers {
-			if w.State == WorkerStateRunning {
-				runningCount++
+			if w.State == WorkerStateCreated || w.State == WorkerStateRunning {
+				activeCount++
 			}
 		}
-		if runningCount >= s.Config.MaxConcurrentWorkers {
+		if activeCount >= s.Config.MaxConcurrentWorkers {
 			return nil, fmt.Errorf("max concurrent workers reached: %d", s.Config.MaxConcurrentWorkers)
 		}
 	}
@@ -219,24 +220,27 @@ func CollectResults(ctx context.Context, channels []<-chan WorkerResult) []Worke
 	results := make([]WorkerResult, 0, len(channels))
 	merged := mergeChannels(channels)
 
-	for result := range merged {
+	for {
 		select {
 		case <-ctx.Done():
 			results = append(results, WorkerResult{Error: ctx.Err()})
 			return results
-		default:
+		case result, ok := <-merged:
+			if !ok {
+				return results
+			}
+			results = append(results, result)
 		}
-		results = append(results, result)
 	}
-
-	return results
 }
 
 // mergeChannels combines multiple read-only channels into a single channel.
 // Results are forwarded as they arrive from any input channel.
 // The output channel is closed when all input channels are closed.
+// The merged channel is buffered to len(channels) to prevent goroutine leaks
+// when the consumer stops reading early (e.g., on context cancellation).
 func mergeChannels(channels []<-chan WorkerResult) <-chan WorkerResult {
-	merged := make(chan WorkerResult)
+	merged := make(chan WorkerResult, len(channels))
 	go func() {
 		defer close(merged)
 		var wg sync.WaitGroup
