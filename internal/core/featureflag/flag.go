@@ -157,6 +157,11 @@ const (
 	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
 	// (getLastPeerDmSummary and useInboxPoller). Off by default.
 	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
+	// FlagFeedback gates the feedback submission service.
+	// When enabled, the /feedback command submits structured feedback
+	// to the Anthropic API instead of showing the fallback message.
+	// Off by default.
+	FlagFeedback = "FEEDBACK"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
