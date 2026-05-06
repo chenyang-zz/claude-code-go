@@ -162,6 +162,11 @@ const (
 	// ones via the CCR Sessions API. Off by default; set
 	// CLAUDE_FEATURE_TELEPORT=1 to enable.
 	FlagTeleport = "TELEPORT"
+	// FlagFeedback gates the feedback submission service.
+	// When enabled, the /feedback command submits structured feedback
+	// to the Anthropic API instead of showing the fallback message.
+	// Off by default.
+	FlagFeedback = "FEEDBACK"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
