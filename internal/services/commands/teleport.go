@@ -6,13 +6,16 @@ import (
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
+	"github.com/sheepzhao/claude-code-go/internal/services/teleport"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
-const teleportCommandFallback = "Teleport command is not available in Claude Code Go yet. Remote handoff and teleport session flows remain unmigrated."
-
-// TeleportCommand exposes the minimum hidden /teleport behavior before teleport flows exist in the Go host.
-type TeleportCommand struct{}
+// TeleportCommand exposes the /teleport slash command for remote session management.
+type TeleportCommand struct {
+	// Service is the teleport service instance, injected at bootstrap.
+	Service *teleport.TeleportService
+}
 
 // Metadata returns the canonical slash descriptor for /teleport.
 func (c TeleportCommand) Metadata() command.Metadata {
@@ -24,21 +27,60 @@ func (c TeleportCommand) Metadata() command.Metadata {
 	}
 }
 
-// Execute accepts no arguments and reports the stable hidden /teleport fallback.
+// Execute handles the /teleport command, routing to the appropriate teleport
+// operation based on arguments. When FlagTeleport is disabled, returns the
+// fallback message indicating the feature is not yet available.
 func (c TeleportCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
-	_ = ctx
-
-	raw := strings.TrimSpace(args.RawLine)
-	if raw != "" {
-		return command.Result{}, fmt.Errorf("usage: %s", c.Metadata().Usage)
+	if !featureflag.IsEnabled(featureflag.FlagTeleport) {
+		return command.Result{
+			Output: "Teleport command is not available in Claude Code Go yet. Remote handoff and teleport session flows remain unmigrated.",
+		}, nil
 	}
 
-	logger.DebugCF("commands", "rendered teleport command fallback output", map[string]any{
-		"teleport_available": false,
-		"hidden_command":     true,
+	raw := strings.TrimSpace(args.RawLine)
+
+	// No arguments: create a new remote session
+	if raw == "" {
+		if c.Service == nil {
+			return command.Result{}, fmt.Errorf("teleport service not initialized")
+		}
+
+		logger.DebugCF("commands", "creating new remote session via /teleport", nil)
+
+		result, err := c.Service.TeleportToRemote(ctx, teleport.TeleportToRemoteOptions{
+			Description: "Interactive session",
+		})
+		if err != nil {
+			return command.Result{}, fmt.Errorf("teleport: %w", err)
+		}
+
+		output := fmt.Sprintf("Remote session created: %s\nTitle: %s", result.ID, result.Title)
+		return command.Result{Output: output}, nil
+	}
+
+	// Argument provided: resume a remote session by ID
+	if c.Service == nil {
+		return command.Result{}, fmt.Errorf("teleport service not initialized")
+	}
+
+	sessionID := raw
+	logger.DebugCF("commands", "resuming remote session", map[string]any{
+		"session_id": sessionID,
 	})
 
+	messages, branch, err := c.Service.TeleportResumeCodeSession(ctx, sessionID)
+	if err != nil {
+		return command.Result{}, fmt.Errorf("teleport: %w", err)
+	}
+
+	_ = messages // Messages processed by caller during resume
+	if branch != "" {
+		return command.Result{
+			Output: fmt.Sprintf("Session %s resumed. Branch: %s", sessionID, branch),
+		}, nil
+	}
+
 	return command.Result{
-		Output: teleportCommandFallback,
+		Output: fmt.Sprintf("Session %s resumed.", sessionID),
 	}, nil
 }

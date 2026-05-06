@@ -157,6 +157,11 @@ const (
 	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
 	// (getLastPeerDmSummary and useInboxPoller). Off by default.
 	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
+	// FlagTeleport gates the Teleport service for remote session management.
+	// When enabled, /teleport creates new remote sessions or resumes existing
+	// ones via the CCR Sessions API. Off by default; set
+	// CLAUDE_FEATURE_TELEPORT=1 to enable.
+	FlagTeleport = "TELEPORT"
 	// FlagFeedback gates the feedback submission service.
 	// When enabled, the /feedback command submits structured feedback
 	// to the Anthropic API instead of showing the fallback message.
