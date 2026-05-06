@@ -34,8 +34,9 @@ type apiErrorResponse struct {
 // sensitive information redaction and handles OAuth token refresh before
 // submission.
 func SubmitFeedback(ctx context.Context, data FeedbackData, authHeaders map[string]string, userAgent string) SubmissionResult {
-	// Redact sensitive info from the description before submission.
+	// Redact sensitive info from the description and errors before submission.
 	data.Description = RedactSensitiveInfo(data.Description)
+	data.Errors = SanitizeErrors(data.Errors)
 
 	jsonData, err := json.Marshal(map[string]any{
 		"data": map[string]any{
@@ -163,7 +164,11 @@ func CreateGitHubIssueURL(cfg ServiceConfig, feedbackID, title, description stri
 	// Truncate errors to fit.
 	ellipsis := url.QueryEscape("…")
 	buffer := 50
-	truncatedErrors := encodedErrors[:spaceForErrors-len(ellipsis)-buffer]
+	maxErrorsLen := spaceForErrors - len(ellipsis) - buffer
+	if maxErrorsLen <= 0 {
+		return baseURL + encodedPrefix + ellipsis + encodedSuffix + encodedNote
+	}
+	truncatedErrors := encodedErrors[:maxErrorsLen]
 	if lastPercent := strings.LastIndex(truncatedErrors, "%"); lastPercent >= len(truncatedErrors)-2 {
 		truncatedErrors = truncatedErrors[:lastPercent]
 	}
