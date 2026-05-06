@@ -1889,12 +1889,15 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 			if err != nil || summary == "" {
 				return
 			}
-			out <- event.Event{
+			select {
+			case <-ctx.Done():
+			case out <- event.Event{
 				Type:      event.TypeToolUseSummary,
 				Timestamp: time.Now(),
 				Payload: event.ToolUseSummaryPayload{
 					Summary: summary,
 				},
+			}:
 			}
 		}()
 	}

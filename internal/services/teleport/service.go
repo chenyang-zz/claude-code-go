@@ -216,7 +216,14 @@ func (s *TeleportService) TeleportResumeCodeSession(ctx context.Context, session
 // ValidateSessionRepository validates that the current repository matches the session's repository.
 // Mirrors validateSessionRepository() in src/utils/teleport.tsx.
 func ValidateSessionRepository(session *SessionResource) *RepoValidationResult {
-	for _, src := range session.SessionContext.Sources {
+	sources, err := session.SessionContext.DecodeSources()
+	if err != nil {
+		return &RepoValidationResult{
+			Status:       RepoError,
+			ErrorMessage: fmt.Sprintf("failed to decode session sources: %v", err),
+		}
+	}
+	for _, src := range sources {
 		if gs, ok := src.(GitSource); ok && gs.Type == "git_repository" {
 			if gs.URL == "" {
 				return &RepoValidationResult{Status: RepoNoRepoReq}

@@ -6,6 +6,8 @@
 // session archiving.
 package teleport
 
+import "encoding/json"
+
 // TeleportResult is the outcome of a teleported session resume.
 type TeleportResult struct {
 	Messages   []Message
@@ -128,7 +130,7 @@ type GitRepositoryOutcome struct {
 
 // SessionContext holds the full context for creating or describing a session.
 type SessionContext struct {
-	Sources           []SessionContextSource `json:"sources"`
+	Sources           []json.RawMessage `json:"sources"`
 	CWD               string                 `json:"cwd"`
 	Outcomes          []GitRepositoryOutcome `json:"outcomes,omitempty"`
 	CustomSystemPrompt string                `json:"custom_system_prompt,omitempty"`
@@ -266,3 +268,23 @@ type ContentBlock struct {
 
 // CCRBetaHeader is the anthropic-beta header value for CCR BYOC.
 const CCRBetaHeader = "ccr-byoc-2025-07-29"
+
+// DecodeSources decodes the raw JSON sources into concrete SessionContextSource values.
+func (s *SessionContext) DecodeSources() ([]SessionContextSource, error) {
+	sources := make([]SessionContextSource, 0, len(s.Sources))
+	for _, raw := range s.Sources {
+		// Try GitSource first
+		var gs GitSource
+		if err := json.Unmarshal(raw, &gs); err == nil && gs.Type != "" {
+			sources = append(sources, gs)
+			continue
+		}
+		// Try KnowledgeBaseSource
+		var kbs KnowledgeBaseSource
+		if err := json.Unmarshal(raw, &kbs); err == nil && kbs.Type != "" {
+			sources = append(sources, kbs)
+			continue
+		}
+	}
+	return sources, nil
+}
