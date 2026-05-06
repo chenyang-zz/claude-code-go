@@ -154,6 +154,9 @@ const (
 	// edits and reports new diagnostics introduced by model-generated code
 	// changes. Off by default.
 	FlagLspDiagTracking = "LSP_DIAG_TRACKING"
+	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
+	// (getLastPeerDmSummary and useInboxPoller). Off by default.
+	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
