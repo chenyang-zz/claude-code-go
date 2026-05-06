@@ -167,6 +167,11 @@ const (
 	// to the Anthropic API instead of showing the fallback message.
 	// Off by default.
 	FlagFeedback = "FEEDBACK"
+	// FlagGrowthBook gates the GrowthBook feature flag SDK integration.
+	// When enabled, the GrowthBook client is initialised, fetches remote
+	// feature values, and provides feature flag evaluation through the
+	// growthbook package. Off by default.
+	FlagGrowthBook = "GROWTHBOOK"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.

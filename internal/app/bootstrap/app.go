@@ -14,6 +14,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -48,6 +49,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/datetimeparser"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
+	"github.com/sheepzhao/claude-code-go/internal/services/growthbook"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/microcompact"
@@ -389,6 +391,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	claudeailimits.Init(claudeailimits.InitOptions{
 		Store:              globalSettingsStore,
 		SubscriptionLoader: claudeAILimitsLoader,
+	})
+
+	// Initialize GrowthBook SDK if enabled.
+	growthbookEnabled := featureflag.IsEnabled(featureflag.FlagGrowthBook)
+	growthbook.Init(growthbook.Config{
+		Enabled: growthbookEnabled,
 	})
 
 	// Initialize organizational policy limits system.
