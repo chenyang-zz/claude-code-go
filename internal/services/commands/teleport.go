@@ -28,10 +28,10 @@ func (c TeleportCommand) Metadata() command.Metadata {
 }
 
 // Execute handles the /teleport command, routing to the appropriate teleport
-// operation based on arguments. When FlagTeleport is disabled, returns the
-// fallback message indicating the feature is not yet available.
+// operation based on arguments. When FlagTeleport is disabled or the teleport
+// service is not initialized, returns the fallback message.
 func (c TeleportCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
-	if !featureflag.IsEnabled(featureflag.FlagTeleport) {
+	if !featureflag.IsEnabled(featureflag.FlagTeleport) || c.Service == nil {
 		return command.Result{
 			Output: "Teleport command is not available in Claude Code Go yet. Remote handoff and teleport session flows remain unmigrated.",
 		}, nil
@@ -41,10 +41,6 @@ func (c TeleportCommand) Execute(ctx context.Context, args command.Args) (comman
 
 	// No arguments: create a new remote session
 	if raw == "" {
-		if c.Service == nil {
-			return command.Result{}, fmt.Errorf("teleport service not initialized")
-		}
-
 		logger.DebugCF("commands", "creating new remote session via /teleport", nil)
 
 		result, err := c.Service.TeleportToRemote(ctx, teleport.TeleportToRemoteOptions{
@@ -59,10 +55,6 @@ func (c TeleportCommand) Execute(ctx context.Context, args command.Args) (comman
 	}
 
 	// Argument provided: resume a remote session by ID
-	if c.Service == nil {
-		return command.Result{}, fmt.Errorf("teleport service not initialized")
-	}
-
 	sessionID := raw
 	logger.DebugCF("commands", "resuming remote session", map[string]any{
 		"session_id": sessionID,

@@ -17,7 +17,14 @@ const (
 	TypeModelFallback    Type = "model.fallback"
 	TypeCompactDone      Type = "compact.done"
 	TypeProgress         Type = "tool.progress"
+	TypeToolUseSummary   Type = "tool.use.summary"
 )
+
+// ToolUseSummaryPayload carries a Haiku-generated summary of a completed tool batch.
+type ToolUseSummaryPayload struct {
+	Summary string   `json:"summary"`
+	ToolIDs []string `json:"tool_ids,omitempty"`
+}
 
 type Event struct {
 	Type      Type      `json:"type"`
