@@ -21,8 +21,8 @@ type TeleportCommand struct {
 func (c TeleportCommand) Metadata() command.Metadata {
 	return command.Metadata{
 		Name:        "teleport",
-		Description: "Teleport the current session to remote runtime or resume a remote session",
-		Usage:       "/teleport [session-id]",
+		Description: "Teleport the current session to remote runtime",
+		Usage:       "/teleport",
 		Hidden:      true,
 	}
 }
