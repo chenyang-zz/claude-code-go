@@ -157,6 +157,11 @@ const (
 	// FlagTeammemPhase5 gates the TEAMMEM Phase 5 engine integration
 	// (getLastPeerDmSummary and useInboxPoller). Off by default.
 	FlagTeammemPhase5 = "TEAMMEM_PHASE5"
+	// FlagTeleport gates the Teleport service for remote session management.
+	// When enabled, /teleport creates new remote sessions or resumes existing
+	// ones via the CCR Sessions API. Off by default; set
+	// CLAUDE_FEATURE_TELEPORT=1 to enable.
+	FlagTeleport = "TELEPORT"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
