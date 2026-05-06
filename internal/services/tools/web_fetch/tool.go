@@ -7,6 +7,7 @@ import (
 
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
+	"github.com/sheepzhao/claude-code-go/internal/services/webfetchsummary"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -195,6 +196,13 @@ To complete your request, I need to fetch content from the redirected URL. Pleas
 		"bytes":       output.Bytes,
 		"duration_ms": output.DurationMs,
 	})
+
+	// Fire WebFetch summary generation (non-blocking) when the flag is enabled.
+	if webfetchsummary.IsWebFetchSummaryEnabled() {
+		go func() {
+			_, _ = webfetchsummary.Summarize(ctx, result, input.Prompt, false)
+		}()
+	}
 
 	return coretool.Result{
 		Output: result,

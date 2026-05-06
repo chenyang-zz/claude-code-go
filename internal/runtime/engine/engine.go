@@ -32,6 +32,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
 	runtimehooks "github.com/sheepzhao/claude-code-go/internal/runtime/hooks"
 	"github.com/sheepzhao/claude-code-go/internal/services/prompts"
+	"github.com/sheepzhao/claude-code-go/internal/services/toolusesummary"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -1829,10 +1830,12 @@ func (e *Runtime) consumeModelStream(modelStream model.Stream, streamingExec *St
 // executeToolUses resolves one tool batch sequence and converts the results into one tool_result message.
 func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse, out chan<- event.Event) message.Message {
 	resultMessage := message.Message{Role: message.RoleUser}
+	var allOutcomes []toolExecutionOutcome
 
 	batches := partitionToolUses(toolUses, e.Executor)
 	for _, batch := range batches {
 		outcomes := e.executeToolBatch(ctx, batch, out)
+		allOutcomes = append(allOutcomes, outcomes...)
 		for _, outcome := range outcomes {
 			additionalContext := toolAdditionalContext(outcome.result)
 			if additionalContext != "" {
@@ -1863,6 +1866,37 @@ func (e *Runtime) executeToolUses(ctx context.Context, toolUses []model.ToolUse,
 				},
 			}
 		}
+	}
+
+	// Fire tool use summary generation (non-blocking) when the flag is enabled.
+	if featureflag.IsEnabled(featureflag.FlagToolUseSummary) && len(allOutcomes) > 0 {
+		go func() {
+			tools := make([]toolusesummary.ToolInfo, 0, len(allOutcomes))
+			for _, oc := range allOutcomes {
+				outputStr := ""
+				if content, _ := renderToolResult(oc.result, oc.invokeErr); content != "" {
+					outputStr = content
+				}
+				tools = append(tools, toolusesummary.ToolInfo{
+					Name:   oc.toolUse.Name,
+					Input:  oc.toolUse.Input,
+					Output: outputStr,
+				})
+			}
+			summary, err := toolusesummary.Generate(ctx, toolusesummary.SummaryParams{
+				Tools: tools,
+			})
+			if err != nil || summary == "" {
+				return
+			}
+			out <- event.Event{
+				Type:      event.TypeToolUseSummary,
+				Timestamp: time.Now(),
+				Payload: event.ToolUseSummaryPayload{
+					Summary: summary,
+				},
+			}
+		}()
 	}
 
 	return resultMessage
