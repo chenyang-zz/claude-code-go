@@ -130,7 +130,7 @@ type GitRepositoryOutcome struct {
 
 // SessionContext holds the full context for creating or describing a session.
 type SessionContext struct {
-	Sources           []json.RawMessage `json:"sources"`
+	Sources           []SessionContextSource `json:"sources"`
 	CWD               string                 `json:"cwd"`
 	Outcomes          []GitRepositoryOutcome `json:"outcomes,omitempty"`
 	CustomSystemPrompt string                `json:"custom_system_prompt,omitempty"`
@@ -140,6 +140,53 @@ type SessionContext struct {
 	GitHubPR           *GitHubPRInfo         `json:"github_pr,omitempty"`
 	ReuseOutcomeBranches bool               `json:"reuse_outcome_branches,omitempty"`
 	EnvironmentVariables map[string]string   `json:"environment_variables,omitempty"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler for SessionContext.
+// SessionContextSource is an interface (encoding/json cannot unmarshal into
+// interfaces with methods), so the Sources field must be decoded by inspecting
+// the "type" discriminator on each element.
+func (sc *SessionContext) UnmarshalJSON(data []byte) error {
+	type sessionContextAlias SessionContext
+	aux := &struct {
+		Sources []json.RawMessage `json:"sources"`
+		*sessionContextAlias
+	}{
+		sessionContextAlias: (*sessionContextAlias)(sc),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	for _, raw := range aux.Sources {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var typeHolder struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &typeHolder); err != nil {
+			return err
+		}
+		var source SessionContextSource
+		switch typeHolder.Type {
+		case "git":
+			var g GitSource
+			if err := json.Unmarshal(raw, &g); err != nil {
+				return err
+			}
+			source = g
+		case "knowledge_base":
+			var kb KnowledgeBaseSource
+			if err := json.Unmarshal(raw, &kb); err != nil {
+				return err
+			}
+			source = kb
+		}
+		if source != nil {
+			sc.Sources = append(sc.Sources, source)
+		}
+	}
+	return nil
 }
 
 // GitHubPRInfo holds GitHub PR information attached to a session.
@@ -268,23 +315,3 @@ type ContentBlock struct {
 
 // CCRBetaHeader is the anthropic-beta header value for CCR BYOC.
 const CCRBetaHeader = "ccr-byoc-2025-07-29"
-
-// DecodeSources decodes the raw JSON sources into concrete SessionContextSource values.
-func (s *SessionContext) DecodeSources() ([]SessionContextSource, error) {
-	sources := make([]SessionContextSource, 0, len(s.Sources))
-	for _, raw := range s.Sources {
-		// Try GitSource first
-		var gs GitSource
-		if err := json.Unmarshal(raw, &gs); err == nil && gs.Type != "" {
-			sources = append(sources, gs)
-			continue
-		}
-		// Try KnowledgeBaseSource
-		var kbs KnowledgeBaseSource
-		if err := json.Unmarshal(raw, &kbs); err == nil && kbs.Type != "" {
-			sources = append(sources, kbs)
-			continue
-		}
-	}
-	return sources, nil
-}
