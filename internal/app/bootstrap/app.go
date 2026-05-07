@@ -1789,6 +1789,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	if a.PreventSleepCleanup != nil {
 		defer a.PreventSleepCleanup()
 	}
+	if a.AnalyticsEmitter != nil {
+		defer a.AnalyticsEmitter.Close()
+	}
 	return a.Runner.Run(ctx, args)
 }
 

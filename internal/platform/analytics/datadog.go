@@ -73,7 +73,7 @@ func (s *DatadogSink) Emit(ctx context.Context, event Event) error {
 		return fmt.Errorf("datadog: marshal: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(jsonBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(jsonBytes))
 	if err != nil {
 		s.log.Warn("datadog: failed to create request", "event", event.Name, "error", err)
 		return fmt.Errorf("datadog: request: %w", err)
