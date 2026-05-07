@@ -244,11 +244,11 @@ func processRemoteEvalPayload(features map[string]json.RawMessage) {
 					expData.VariationID = int(vf)
 				}
 			}
-			experimentData.features[key] = expData
+			experimentData.set(key, expData)
 		}
 
 		featuresByKey[key] = state
-		remoteEvalValues.values[key] = defaultVal
+		remoteEvalValues.set(key, defaultVal)
 	}
 }
 

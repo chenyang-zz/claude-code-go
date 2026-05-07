@@ -1,6 +1,8 @@
 package growthbook
 
 import (
+	"context"
+
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -25,6 +27,7 @@ type Config struct {
 // and starts periodic refresh.
 func Init(cfg Config) {
 	if !cfg.Enabled {
+		SetEnabledFn(func() bool { return false })
 		logger.DebugCF("growthbook", "growthbook disabled, skipping init", nil)
 		return
 	}
@@ -63,6 +66,14 @@ func Init(cfg Config) {
 		Enabled:     cfg.Enabled,
 	})
 	SetDefaultClient(client)
+
+	// Initialize the client and start periodic refresh
+	if err := client.Init(context.Background()); err != nil {
+		logger.WarnCF("growthbook", "initial fetch failed, will use cache and retry on refresh", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+	client.startPeriodicRefresh()
 
 	logger.DebugCF("growthbook", "growthbook system initialised", map[string]interface{}{
 		"hasClientKey": clientKey != "",
