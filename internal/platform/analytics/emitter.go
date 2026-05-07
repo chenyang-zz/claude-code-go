@@ -58,12 +58,13 @@ func (e *Emitter) Close() {
 }
 
 // enqueue tries to send evt to the channel without blocking.
-// Returns false if the queue is full.
+// Returns false if the queue is full. Safe under concurrent Close:
+// the lock is held through the send, preventing Close from closing
+// the channel between the closed check and the send.
 func (e *Emitter) enqueue(evt Event) bool {
 	e.closeMu.Lock()
-	closed := e.closed
-	e.closeMu.Unlock()
-	if closed {
+	defer e.closeMu.Unlock()
+	if e.closed {
 		return false
 	}
 	select {
