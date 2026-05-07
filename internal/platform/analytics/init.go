@@ -12,7 +12,12 @@ func InitAnalytics(cfg Config, log *slog.Logger) *Emitter {
 		return newNoopEmitter()
 	}
 
-	sink := NewConsoleSink(log)
+	var sink Sink
+	if cfg.DatadogURL != "" && cfg.DatadogAPIKey != "" {
+		sink = NewDatadogSink(cfg.DatadogURL, cfg.DatadogAPIKey, cfg.UserType, log)
+	} else {
+		sink = NewConsoleSink(log)
+	}
 	return NewEmitter(sink, cfg.QueueSize)
 }
 
