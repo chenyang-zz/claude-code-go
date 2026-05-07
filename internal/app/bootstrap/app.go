@@ -51,6 +51,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/datetimeparser"
 	"github.com/sheepzhao/claude-code-go/internal/services/extractmemories"
 	"github.com/sheepzhao/claude-code-go/internal/services/haiku"
+	"github.com/sheepzhao/claude-code-go/internal/services/growthbook"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
 	"github.com/sheepzhao/claude-code-go/internal/services/microcompact"
@@ -395,6 +396,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	claudeailimits.Init(claudeailimits.InitOptions{
 		Store:              globalSettingsStore,
 		SubscriptionLoader: claudeAILimitsLoader,
+	})
+
+	// Initialize GrowthBook SDK if enabled.
+	growthbookEnabled := featureflag.IsEnabled(featureflag.FlagGrowthBook)
+	growthbook.Init(growthbook.Config{
+		Enabled: growthbookEnabled,
 	})
 
 	// Initialize organizational policy limits system.
