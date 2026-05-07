@@ -80,6 +80,12 @@ const (
 	// fans Notification hook events out to the configured terminal channel
 	// (iTerm2 / Kitty / Ghostty / terminal bell / auto-detect / disabled).
 	FlagNotifier = "NOTIFIER"
+
+	// FlagAnalytics gates the analytics event pipeline.
+	// When enabled, the analytics emitter and sink are initialised during
+	// bootstrap and tool-use / session / command events are emitted.
+	FlagAnalytics = "ANALYTICS"
+
 	// FlagPreventSleep gates the macOS sleep-prevention service. When
 	// enabled, the bootstrap layer initialises the prevent-sleep registry
 	// (caffeinate subprocess + restart loop). The service is a no-op on

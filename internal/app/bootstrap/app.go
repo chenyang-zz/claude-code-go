@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
+	"github.com/sheepzhao/claude-code-go/internal/core/featureflag"
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
@@ -29,6 +31,7 @@ import (
 	mcpclient "github.com/sheepzhao/claude-code-go/internal/platform/mcp/client"
 	mcpregistry "github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/platform/oauth"
+	"github.com/sheepzhao/claude-code-go/internal/platform/analytics"
 	"github.com/sheepzhao/claude-code-go/internal/platform/plugin"
 	platformremote "github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	platformsqlite "github.com/sheepzhao/claude-code-go/internal/platform/store/sqlite"
@@ -113,6 +116,9 @@ type App struct {
 	// Notifier dispatches terminal notifications (iTerm2 / Kitty / Ghostty
 	// / bell / auto-detect). nil when FlagNotifier is disabled.
 	Notifier *notifier.Service
+	// AnalyticsEmitter is the analytics event emitter.
+	// nil when FlagAnalytics is disabled.
+	AnalyticsEmitter *analytics.Emitter
 	// Haiku is the single-prompt Haiku query helper used by downstream
 	// services (e.g. tool use summary). nil when the Anthropic provider
 	// is not selected or FlagHaikuQuery is disabled.
@@ -472,6 +478,14 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		}
 	}
 
+	// Initialize analytics emitter, gated by FlagAnalytics.
+	var analyticsEmitter *analytics.Emitter
+	if featureflag.IsEnabled(featureflag.FlagAnalytics) {
+		analyticsEmitter = analytics.InitAnalytics(analytics.Config{
+			Enabled: true,
+		}, slog.Default())
+	}
+
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
 		ProjectRoot: cfg.ProjectPath,
 	})
@@ -485,6 +499,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		PromptSuggestionCleanup: psCleanup,
 		PreventSleepCleanup:     preventSleepCleanup,
 		Notifier:                notifierService,
+		AnalyticsEmitter:        analyticsEmitter,
 		Haiku:                   haiku.CurrentService(),
 		ToolUseSummary:          toolusesummary.CurrentService(),
 		SessionTitle:            sessiontitle.CurrentService(),
