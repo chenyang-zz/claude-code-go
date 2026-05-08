@@ -26,6 +26,7 @@ import (
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
 	coretool "github.com/sheepzhao/claude-code-go/internal/core/tool"
 	"github.com/sheepzhao/claude-code-go/internal/core/transcript"
+	"github.com/sheepzhao/claude-code-go/internal/platform/analytics"
 	"github.com/sheepzhao/claude-code-go/internal/platform/api/anthropic"
 	"github.com/sheepzhao/claude-code-go/internal/platform/mcp/registry"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
@@ -160,6 +161,10 @@ type Runtime struct {
 	// PromptBuilder generates the system prompt injected into each model request.
 	// When nil, the System field is left empty.
 	PromptBuilder *prompts.PromptBuilder
+
+	// AnalyticsEmitter is the analytics event emitter for tool/session/error events.
+	// When nil, no analytics events are emitted.
+	AnalyticsEmitter *analytics.Emitter
 }
 
 // New builds the minimum single-turn engine.
@@ -209,6 +214,20 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 				},
 			}
 		}
+
+			// Emit analytics error event.
+			if e.AnalyticsEmitter != nil {
+				e.AnalyticsEmitter.EmitErrorEvent(
+					analytics.Metadata{
+						Timestamp: time.Now(),
+						SessionID: req.SessionID,
+					},
+					"api",
+					err.Error(),
+					"",
+					0,
+				)
+			}
 
 		logger.DebugCF("engine", "single-turn run finished", map[string]any{
 			"session_id": req.SessionID,
@@ -1990,7 +2009,29 @@ func (e *Runtime) executeToolBatch(ctx context.Context, batch toolExecutionBatch
 
 // executeToolUse resolves one tool call and branches into the approval flow when the tool is blocked by a permission ask.
 func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out chan<- event.Event) (coretool.Result, error) {
+	startTime := time.Now()
+	var toolExecuted bool
+	var toolSucceeded bool
+	var toolErrorMsg string
+
+	defer func() {
+		if e.AnalyticsEmitter == nil || !toolExecuted {
+			return
+		}
+		e.AnalyticsEmitter.EmitToolUsed(
+			analytics.Metadata{
+				Timestamp: time.Now(),
+				SessionID: e.sessionID,
+			},
+			analytics.SanitizeToolName(call.Name),
+			time.Since(startTime),
+			toolSucceeded,
+			toolErrorMsg,
+		)
+	}()
+
 	var additionalContext string
+
 
 	// PreToolUse hooks: run before tool execution, blocking prevents the call.
 	if e.shouldRunToolHooks(hook.EventPreToolUse) {
@@ -2066,6 +2107,11 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 	// Full agent runtime execution (runAgent, subagent scheduling) is deferred
 	// to a later batch that wires the agent lifecycle into the engine loop.
 	result, invokeErr := e.Executor.Execute(toolCtx, call)
+	toolExecuted = true
+	toolSucceeded = invokeErr == nil && result.Error == ""
+	if !toolSucceeded {
+		toolErrorMsg = renderToolFailure(result, invokeErr)
+	}
 	var permissionErr *corepermission.PermissionError
 	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
 		return e.executeFilesystemApproval(ctx, call, permissionErr, out)

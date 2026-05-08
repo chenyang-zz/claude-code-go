@@ -17,6 +17,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/core/hook"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
 	coresession "github.com/sheepzhao/claude-code-go/internal/core/session"
+	"github.com/sheepzhao/claude-code-go/internal/platform/analytics"
 	"github.com/sheepzhao/claude-code-go/internal/platform/remote"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/internal/runtime/coordinator"
@@ -103,6 +104,9 @@ type Runner struct {
 	// nextSessionStartSource is attached to the next engine request when the
 	// runner has just switched to a new logical session.
 	nextSessionStartSource string
+	// AnalyticsEmitter emits command/session analytics events.
+	// When nil, no events are emitted.
+	AnalyticsEmitter *analytics.Emitter
 }
 
 // NewRunner builds a runner from explicit dependencies.
@@ -187,6 +191,19 @@ func (r *Runner) runSlashCommand(ctx context.Context, parsed ParsedInput) error 
 	if err != nil {
 		return err
 	}
+	// Emit command analytics event.
+	if r.AnalyticsEmitter != nil {
+		r.AnalyticsEmitter.EmitCommandEvent(
+			analytics.Metadata{
+				Timestamp: time.Now(),
+				SessionID: r.SessionID,
+			},
+			parsed.Command,
+			err == nil,
+			strings.Fields(parsed.Body),
+		)
+	}
+
 	if result.NewSessionID != "" {
 		r.endActiveSession(ctx, parsed.Command, result.NewSessionID)
 		r.SessionID = result.NewSessionID
