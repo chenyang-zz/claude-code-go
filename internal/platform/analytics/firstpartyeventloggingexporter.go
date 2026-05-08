@@ -226,7 +226,15 @@ func (e *FirstPartyEventLoggingExporter) sendBatch(ctx context.Context, batch []
 	req.Header.Set("User-Agent", "claude-code")
 	req.Header.Set("x-service-name", "claude-code")
 
-	// Try with auth first, fall back to without auth on 401
+	// Try with auth first when auth is not explicitly skipped.
+	var authToken string
+	if !e.cfg.SkipAuth {
+		authToken = os.Getenv("ANTHROPIC_AUTH_TOKEN")
+		if authToken != "" {
+			req.Header.Set("Authorization", "Bearer "+authToken)
+		}
+	}
+
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("http do: %w", err)
@@ -234,7 +242,7 @@ func (e *FirstPartyEventLoggingExporter) sendBatch(ctx context.Context, batch []
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Retry without auth
+		// Retry without auth (auth may have been rejected or not available)
 		req2, err2 := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint(), bytes.NewReader(body))
 		if err2 != nil {
 			return fmt.Errorf("create retry request: %w", err2)
@@ -242,6 +250,7 @@ func (e *FirstPartyEventLoggingExporter) sendBatch(ctx context.Context, batch []
 		req2.Header.Set("Content-Type", "application/json")
 		req2.Header.Set("User-Agent", "claude-code")
 		req2.Header.Set("x-service-name", "claude-code")
+		// Intentionally no Authorization header on the retry.
 
 		resp2, err2 := e.client.Do(req2)
 		if err2 != nil {

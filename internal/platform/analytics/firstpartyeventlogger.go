@@ -279,9 +279,9 @@ func (l *FirstPartyEventLogger) Shutdown(timeout time.Duration) error {
 	if l == nil {
 		return nil
 	}
-	l.closed.Store(true)
 
-	// Signal the drain loop (safe to call multiple times)
+	// Signal the drain loop first so it can flush the remaining batch
+	// (flushBatch checks closed; setting closed=true first would skip the flush).
 	l.shutdownOnce.Do(func() {
 		close(l.done)
 	})
@@ -301,6 +301,9 @@ func (l *FirstPartyEventLogger) Shutdown(timeout time.Duration) error {
 	} else {
 		<-waitCh
 	}
+
+	// Drain completed; now prevent new events from being enqueued.
+	l.closed.Store(true)
 
 	// Shutdown exporter
 	if l.exporter != nil {
