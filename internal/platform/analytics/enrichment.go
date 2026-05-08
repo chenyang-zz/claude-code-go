@@ -4,6 +4,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -273,10 +274,22 @@ func detectDeployEnv() string {
 
 // processMetrics state for CPU delta calculation.
 var (
-	prevCPUTime  int64
-	prevWallTime int64
+	prevCPUTime  int64 // CPU time in nanoseconds (from getrusage, last sample)
+	prevWallTime int64 // wall clock time in milliseconds (last sample)
 	pmMu         sync.Mutex
 )
+
+// getCPUTimeNanos returns user+system CPU time consumed by the process in nanoseconds.
+// Uses syscall.Getrusage which is available on Unix-like systems (macOS, Linux).
+func getCPUTimeNanos() (userNanos, sysNanos int64) {
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		return 0, 0
+	}
+	userNanos = int64(ru.Utime.Sec)*1e9 + int64(ru.Utime.Usec)*1e3
+	sysNanos = int64(ru.Stime.Sec)*1e9 + int64(ru.Stime.Usec)*1e3
+	return
+}
 
 // buildProcessMetrics collects current process resource metrics.
 // This is the Go equivalent of the TS buildProcessMetrics function.
@@ -287,25 +300,19 @@ func buildProcessMetrics() *ProcessMetrics {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	nowNano := time.Now().UnixNano()
-	nowMs := nowNano / 1_000_000
+	nowMs := time.Now().UnixMilli()
+	cpuUser, cpuSys := getCPUTimeNanos()
+	cpuTotal := cpuUser + cpuSys
 
-	// Approximate CPU time using goroutine metrics.
-	// Go doesn't expose process.cpuUsage() directly; we use wall-time delta
-	// as a proxy. A real implementation would use syscall.Getrusage or
-	// /proc/self/stat on Linux.
 	var cpuPct float64
-	if prevWallTime > 0 {
+	if prevWallTime > 0 && prevCPUTime > 0 {
 		wallDeltaMs := nowMs - prevWallTime
-		if wallDeltaMs > 0 {
-			// Approximate: use the delta as fraction of wall time
-			timeDelta := nowNano - prevCPUTime
-			if timeDelta > 0 {
-				cpuPct = (float64(timeDelta) / float64(wallDeltaMs*1_000_000)) * 100
-			}
+		cpuDeltaNanos := cpuTotal - prevCPUTime
+		if wallDeltaMs > 0 && cpuDeltaNanos > 0 {
+			cpuPct = (float64(cpuDeltaNanos) / float64(wallDeltaMs*1_000_000)) * 100
 		}
 	}
-	prevCPUTime = nowNano
+	prevCPUTime = cpuTotal
 	prevWallTime = nowMs
 
 	return &ProcessMetrics{
@@ -316,8 +323,8 @@ func buildProcessMetrics() *ProcessMetrics {
 		External:       m.HeapReleased,
 		ArrayBuffers:   m.OtherSys,
 		ConstrainedMem: 0, // Go has no direct equivalent of constrainedMemory
-		CPUUser:        int64(m.TotalAlloc), // approximation
-		CPUSystem:      0,
+		CPUUser:        cpuUser,
+		CPUSystem:      cpuSys,
 		CPUPercent:     cpuPct,
 	}
 }

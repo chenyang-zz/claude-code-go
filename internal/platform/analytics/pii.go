@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"encoding/json"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -39,11 +40,16 @@ func AnalyticsToolDetailsLoggingEnabled(mcpServerType, mcpServerBaseURL string) 
 
 // isOfficialMCPURL checks whether the given URL matches the official MCP registry.
 // This is a simplified check; the TS side uses a dedicated official registry module.
-func isOfficialMCPURL(url string) bool {
-	// Official MCP servers are hosted under known domains.
-	// This is a minimal implementation — expand as needed.
-	return strings.Contains(url, "mcp.googleapis.com") ||
-		strings.Contains(url, "api.claude.ai/mcp")
+func isOfficialMCPURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+	// Parse by host + path prefix instead of substring to prevent
+	// attacker-controlled URLs like https://evil.example/?next=api.claude.ai/mcp
+	// from bypassing the gate.
+	return u.Host == "mcp.googleapis.com" ||
+		(u.Host == "api.claude.ai" && strings.HasPrefix(u.Path, "/mcp"))
 }
 
 // MCPToolDetails returns MCP server and tool names for analytics payloads
