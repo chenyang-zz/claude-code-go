@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sheepzhao/claude-code-go/internal/app/wiring"
 	"github.com/sheepzhao/claude-code-go/internal/core/agent"
@@ -491,6 +492,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		analyticsEmitter = analytics.InitAnalytics(analytics.Config{
 			Enabled: true,
 		}, slog.Default())
+	}
+	// Inject analytics emitter into engine and runner for event emission.
+	if analyticsEmitter != nil {
+		if rt, ok := eng.(*engine.Runtime); ok {
+			rt.AnalyticsEmitter = analyticsEmitter
+		}
+		runner.AnalyticsEmitter = analyticsEmitter
 	}
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
@@ -1792,7 +1800,30 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	if a.AnalyticsEmitter != nil {
 		defer a.AnalyticsEmitter.Close()
 	}
-	return a.Runner.Run(ctx, args)
+
+	// Emit session lifecycle events.
+	if a.AnalyticsEmitter != nil && a.Runner != nil {
+		a.AnalyticsEmitter.EmitSessionEvent(
+			analytics.Metadata{
+				Timestamp: time.Now(),
+				SessionID: a.Runner.SessionID,
+			},
+			"started", 0, 0,
+		)
+	}
+
+	err := a.Runner.Run(ctx, args)
+
+	if a.AnalyticsEmitter != nil && a.Runner != nil {
+		a.AnalyticsEmitter.EmitSessionEvent(
+			analytics.Metadata{
+				Timestamp: time.Now(),
+				SessionID: a.Runner.SessionID,
+			},
+			"ended", 0, 0,
+		)
+	}
+	return err
 }
 
 // agentRunnerAdapter wraps an agent.Runner to implement the coordinator.AgentRunner interface.
