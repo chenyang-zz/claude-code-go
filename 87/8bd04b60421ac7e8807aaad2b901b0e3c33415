@@ -1,0 +1,19 @@
+internal/runtime/engine/engine.go
+  s_8fa0d1d5838227::t_04401226331c0c 230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "878bd04b60421ac7e8807aaad2b901b0e3c33415",
+  "prompts": {},
+  "sessions": {
+    "s_8fa0d1d5838227": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "daf47c1a-bf0a-443a-9ef4-11b53acdf548",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
