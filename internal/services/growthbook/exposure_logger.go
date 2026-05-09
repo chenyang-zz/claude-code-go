@@ -37,13 +37,16 @@ func (b *exposureBridge) LogExposure(feature string, data StoredExperimentData, 
 	}
 
 	b.emitter.EmitRaw(meta, "growthbook.exposure", map[string]any{
-		"experiment_id":  data.ExperimentID,
-		"variation_id":   data.VariationID,
-		"in_experiment":  data.InExperiment,
-		"hash_attribute": data.HashAttribute,
-		"hash_value":     data.HashValue,
-		"device_id":      attrs.DeviceID,
-		"session_id":     attrs.SessionID,
-		"platform":       attrs.Platform,
+		"experiment_id":   data.ExperimentID,
+		"variation_id":    data.VariationID,
+		"in_experiment":   data.InExperiment,
+		"hash_attribute":  data.HashAttribute,
+		"hash_value":      data.HashValue,
+		"device_id":       attrs.DeviceID,
+		"session_id":      attrs.SessionID,
+		"platform":        attrs.Platform,
+		"user_id":         attrs.ID,
+		"organization_id": attrs.OrganizationUUID,
+		"account_id":      attrs.AccountUUID,
 	})
 }

@@ -85,4 +85,6 @@ const (
 	EventSession     = "session"
 	EventCommand     = "command"
 	EventError       = "error"
+	EventBashCommand = "bash.command.executed"
+	EventFileEdit    = "file_edit.applied"
 )
