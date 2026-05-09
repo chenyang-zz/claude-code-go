@@ -59,7 +59,11 @@ func (s *ConsoleSink) Emit(_ context.Context, event Event) error {
 			slog.String("cat", p.Category),
 			slog.String("err", p.ErrorType),
 		)
-	}
+		case map[string]any:
+			for k, v := range p {
+				attrs = append(attrs, slog.Any(k, v))
+			}
+		}
 	s.log.LogAttrs(context.Background(), slog.LevelInfo, "analytics", attrs...)
 	return nil
 }
