@@ -1,0 +1,21 @@
+internal/platform/analytics/sink.go
+  s_b8beff810f37be::t_b02c0ba63d2e41 62-66
+internal/platform/analytics/datadog.go
+  s_b8beff810f37be::t_c269edeb3bb016 141-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "03aa67ef939258deab9a05a886b5d63eeb264d93",
+  "prompts": {},
+  "sessions": {
+    "s_b8beff810f37be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "acefb398-1364-4a18-b667-4521b3e4a964",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
