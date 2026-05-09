@@ -19,9 +19,9 @@ const (
 type GrowthBookExperimentData struct {
 	ExperimentID        string
 	VariationID         int
-	deviceID            string
-	accountUUID         string
-	organizationUUID    string
+	DeviceID            string
+	AccountUUID         string
+	OrganizationUUID    string
 	SessionID           string
 	UserAttributes      map[string]any
 	ExperimentMetadata  map[string]any
@@ -252,14 +252,14 @@ func (l *FirstPartyEventLogger) LogGrowthBookExperiment(data GrowthBookExperimen
 		"environment":    "production",
 	}
 
-	if data.deviceID != "" {
-		evtData["device_id"] = data.deviceID
+	if data.DeviceID != "" {
+		evtData["device_id"] = data.DeviceID
 	}
-	if data.accountUUID != "" {
-		evtData["account_uuid"] = data.accountUUID
+	if data.AccountUUID != "" {
+		evtData["account_uuid"] = data.AccountUUID
 	}
-	if data.organizationUUID != "" {
-		evtData["organization_uuid"] = data.organizationUUID
+	if data.OrganizationUUID != "" {
+		evtData["organization_uuid"] = data.OrganizationUUID
 	}
 	if data.SessionID != "" {
 		evtData["session_id"] = data.SessionID

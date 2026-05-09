@@ -121,6 +121,9 @@ type App struct {
 	// AnalyticsEmitter is the analytics event emitter.
 	// nil when FlagAnalytics is disabled.
 	AnalyticsEmitter *analytics.Emitter
+	// GrowthBookRefreshCleanup unsubscribes the OnRefresh listener wired to
+	// the analytics emitter. nil when FlagGrowthBook is disabled.
+	GrowthBookRefreshCleanup func()
 	// Haiku is the single-prompt Haiku query helper used by downstream
 	// services (e.g. tool use summary). nil when the Anthropic provider
 	// is not selected or FlagHaikuQuery is disabled.
@@ -494,11 +497,22 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		}, slog.Default())
 	}
 	// Inject analytics emitter into engine and runner for event emission.
+	var gbRefreshCleanup func()
 	if analyticsEmitter != nil {
 		if rt, ok := eng.(*engine.Runtime); ok {
 			rt.AnalyticsEmitter = analyticsEmitter
 		}
 		runner.AnalyticsEmitter = analyticsEmitter
+
+		// Wire GrowthBook experiment exposure events through the analytics emitter.
+		growthbook.SetExposureLogger(growthbook.NewExposureLogger(analyticsEmitter))
+
+		// Wire GrowthBook refresh signals to the analytics emitter.
+		gbRefreshCleanup = growthbook.OnRefresh(func() {
+			analyticsEmitter.EmitRaw(analytics.Metadata{
+				Timestamp: time.Now(),
+			}, "growthbook.refresh", nil)
+		})
 	}
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{
@@ -526,6 +540,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		Autocompact:            autocompact.CurrentService(),
 		SessionMemoryCompact:    sessionmemorycompact.CurrentService(),
 		CoordinatorScheduler:    coordinatorScheduler,
+			GrowthBookRefreshCleanup: gbRefreshCleanup,
 	}, nil
 }
 
@@ -1799,6 +1814,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	}
 	if a.AnalyticsEmitter != nil {
 		defer a.AnalyticsEmitter.Close()
+	}
+	if a.GrowthBookRefreshCleanup != nil {
+		defer a.GrowthBookRefreshCleanup()
 	}
 
 	// Emit session lifecycle events.

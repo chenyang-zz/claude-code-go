@@ -61,6 +61,23 @@ type ErrorEvent struct {
 	DurationMs int64
 }
 
+// BashCommandEvent is emitted when a BashTool command finishes execution.
+// Provides tool-specific command metadata beyond the generic ToolUsedEvent.
+type BashCommandEvent struct {
+	CommandSnippet string `json:"command_snippet"` // truncated command text
+	ExitCode       int    `json:"exit_code"`
+	Duration       time.Duration
+	OutputSize     int `json:"output_size"`
+}
+
+// FileEditEvent is emitted when a FileEditTool operation completes.
+type FileEditEvent struct {
+	EditType string `json:"edit_type"` // "replace" | "insert" | "delete"
+	FilePath string `json:"file_path"`
+	Success  bool   `json:"success"`
+	Duration time.Duration
+}
+
 // Event name constants used in Event.Name.
 const (
 	EventToolUsed    = "tool.used"
@@ -68,4 +85,6 @@ const (
 	EventSession     = "session"
 	EventCommand     = "command"
 	EventError       = "error"
+	EventBashCommand = "bash.command.executed"
+	EventFileEdit    = "file_edit.applied"
 )
