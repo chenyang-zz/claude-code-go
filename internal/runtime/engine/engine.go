@@ -213,7 +213,6 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 					Message: err.Error(),
 				},
 			}
-		}
 
 			// Emit analytics error event.
 			if e.AnalyticsEmitter != nil {
@@ -228,6 +227,7 @@ func (e *Runtime) Run(ctx context.Context, req conversation.RunRequest) (event.S
 					0,
 				)
 			}
+		}
 
 		logger.DebugCF("engine", "single-turn run finished", map[string]any{
 			"session_id": req.SessionID,
