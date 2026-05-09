@@ -138,6 +138,10 @@ func (s *DatadogSink) buildPayload(event Event) map[string]any {
 		payload["success"] = p.Success
 	case SessionEvent:
 		payload["sessionAction"] = p.Action
+	case map[string]any:
+		for k, v := range p {
+			payload[k] = v
+		}
 	}
 
 	return payload
