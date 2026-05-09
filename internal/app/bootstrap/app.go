@@ -499,6 +499,16 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			rt.AnalyticsEmitter = analyticsEmitter
 		}
 		runner.AnalyticsEmitter = analyticsEmitter
+
+		// Wire GrowthBook experiment exposure events through the analytics emitter.
+		growthbook.SetExposureLogger(growthbook.NewExposureLogger(analyticsEmitter))
+
+		// Wire GrowthBook refresh signals to the analytics emitter.
+		growthbook.OnRefresh(func() {
+			analyticsEmitter.EmitRaw(analytics.Metadata{
+				Timestamp: time.Now(),
+			}, "growthbook.refresh", nil)
+		})
 	}
 
 	scheduler := cron.NewScheduler(cron.SchedulerOptions{

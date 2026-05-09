@@ -154,9 +154,9 @@ func TestLogGrowthBookExperimentWithAllFields(t *testing.T) {
 	data := GrowthBookExperimentData{
 		ExperimentID:        "exp-2",
 		VariationID:         2,
-		deviceID:            "dev-1",
-		accountUUID:         "acct-1",
-		organizationUUID:    "org-1",
+		DeviceID:            "dev-1",
+		AccountUUID:         "acct-1",
+		OrganizationUUID:    "org-1",
 		SessionID:           "sess-gb2",
 		UserAttributes:      map[string]any{"country": "us"},
 		ExperimentMetadata:  map[string]any{"source": "web"},
