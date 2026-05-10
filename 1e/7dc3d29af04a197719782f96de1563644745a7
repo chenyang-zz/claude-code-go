@@ -1,0 +1,40 @@
+internal/services/tools/agent/loader/builder.go
+  s_7745a97e906a36::t_3680a55c409140 156-164
+internal/services/tools/agent/loader/builder_test.go
+  s_7745a97e906a36::t_4f2efcae8c78a6 645-679
+internal/platform/plugin/types.go
+  s_7745a97e906a36::t_b0a8b72d238813 312-315
+internal/services/tools/agent/loader/json_loader_test.go
+  s_7745a97e906a36::t_1c10e30482b7a0 598-636
+internal/services/tools/agent/loader/json_loader.go
+  s_7745a97e906a36::t_48fdc5e220dcfc 207-214
+internal/services/tools/agent/runner.go
+  s_7745a97e906a36::t_098017234db601 291-300
+  s_7745a97e906a36::t_e4aa852430d523 187-191
+  s_7745a97e906a36::t_571dffc7c22bb4 170-171
+  s_7745a97e906a36::t_0d12027c6c12bf 168-169,172-174
+internal/platform/plugin/agent_registrar.go
+  s_7745a97e906a36::t_9b2cfb6ba643f2 96
+internal/services/tools/agent/runner_test.go
+  s_7745a97e906a36::t_ef7698dfde94dd 563-565
+  s_7745a97e906a36::t_ca8955a59dcbb3 119-121,125
+  s_7745a97e906a36::t_52222d30c12e23 112-118,122-124,126-142
+internal/core/agent/definition.go
+  s_7745a97e906a36::t_094324f854ea19 76-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1e7dc3d29af04a197719782f96de1563644745a7",
+  "prompts": {},
+  "sessions": {
+    "s_7745a97e906a36": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a61c2dd3-10d6-41e6-b087-26a20844b84c",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
