@@ -34,6 +34,7 @@ import (
 	listresources "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/list_resources"
 	readresource "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/read_resource"
 	notebookedit "github.com/sheepzhao/claude-code-go/internal/services/tools/notebook_edit"
+		repltool "github.com/sheepzhao/claude-code-go/internal/services/tools/repl"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/remote_trigger"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/schedule_wakeup"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/send_message"
@@ -174,6 +175,7 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		filewrite.NewTool(fs, policy),
 		fileedit.NewTool(fs, policy),
 		notebookedit.NewTool(fs, policy),
+		repltool.NewTool(),
 		task_create.NewTool(taskStore),
 		task_get.NewTool(taskStore),
 		task_list.NewTool(taskStore),
@@ -247,6 +249,7 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		team_delete.NewTool(homeDir),
 		send_message.NewTool(homeDir),
 		sleep.NewTool(),
+		repltool.NewTool(),
 		lsptool.NewTool(),
 	}
 }
