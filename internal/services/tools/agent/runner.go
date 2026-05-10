@@ -172,6 +172,20 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		}
 	}
 
+	// Apply settings overrides from def.Settings for keys not already covered
+	// by dedicated fields. Dedicated top-level fields take precedence.
+	if len(def.Settings) > 0 {
+		if def.Effort == "" {
+			if effortVal, ok := def.Settings["effort"]; ok {
+				if effortStr, ok := effortVal.(string); ok {
+					if effort := resolveReasoningEffort(effortStr); effort != nil {
+						child.DefaultReasoningEffort = effort
+					}
+				}
+			}
+		}
+	}
+
 	// 6. Build and run request
 	msgs := buildAgentMessages(def.InitialPrompt, input.Prompt)
 	if additionalContext != "" {
@@ -188,7 +202,7 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		Messages:        msgs,
 		CWD:             input.Cwd,
 		System:          systemPrompt,
-		PermissionMode:  def.PermissionMode,
+		PermissionMode:  resolvePermissionMode(def),
 	}
 
 	start := time.Now()
@@ -296,6 +310,20 @@ func resolveReasoningEffort(effort string) *string {
 		return &e
 	}
 	return nil
+}
+
+// resolvePermissionMode returns the effective permission mode for an agent run.
+// The dedicated def.PermissionMode field takes precedence over settings["permissionMode"].
+func resolvePermissionMode(def agent.Definition) string {
+	if def.PermissionMode != "" {
+		return def.PermissionMode
+	}
+	if v, ok := def.Settings["permissionMode"]; ok {
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // resolveMaxTurns returns the max tool iterations for the agent.
