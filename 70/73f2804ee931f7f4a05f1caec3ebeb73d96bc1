@@ -1,0 +1,21 @@
+internal/services/tools/agent/runner.go
+  s_7745a97e906a36::t_6ce6ab92a14261 315-328
+  s_7745a97e906a36::t_9ff8d251087b70 175-188
+  s_7745a97e906a36::t_8c86e88394626d 205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "7073f2804ee931f7f4a05f1caec3ebeb73d96bc1",
+  "prompts": {},
+  "sessions": {
+    "s_7745a97e906a36": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a61c2dd3-10d6-41e6-b087-26a20844b84c",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
