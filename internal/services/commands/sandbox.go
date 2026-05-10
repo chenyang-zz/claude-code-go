@@ -174,7 +174,7 @@ func tokenize(raw string) []string {
 		switch {
 		case ch == '\'' && !inDouble:
 			inSingle = !inSingle
-		case ch == '"' && !inDouble:
+		case ch == '"' && !inSingle:
 			inDouble = !inDouble
 		case ch == ' ' && !inSingle && !inDouble:
 			if len(current) > 0 {

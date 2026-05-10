@@ -245,9 +245,13 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	// When a sandbox manager is configured and the command should run inside the
 	// sandbox, delegate to sandbox-execution if available. The sandbox manager's
 	// ShouldUseSandbox handles the dangerouslyDisableSandbox bypass decision.
+	// TODO(batch-277+1): Wire executor-level sandbox wrapping (wrapWithSandbox
+	// equivalent). Currently execution runs unsandboxed with sandbox metadata
+	// recorded for future enforcement.
 	if t.sandboxManager != nil && t.sandboxManager.ShouldUseSandbox(command, input.DangerouslyDisableSandbox) {
 		logger.DebugCF("bash_tool", "sandbox requested for command (executor-level sandbox pending)", map[string]any{
-			"command": command,
+			"command":   command,
+			"sandboxed": false,
 		})
 	}
 
