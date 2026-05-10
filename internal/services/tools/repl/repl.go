@@ -13,15 +13,18 @@ const Name = "REPL"
 // for direct invocation, forcing the model to use the REPL for batch
 // operations. In the Go CLI-first runtime, REPL mode is always on, so
 // this constant documents the concept for downstream consumers.
+//
+// The values use the registered Go tool Name constants (e.g. "Read" not
+// "ReadTool") to match the tool registry's stable identifiers.
 var REPL_ONLY_TOOLS = map[string]struct{}{
-	"FileReadTool":      {},
-	"FileWriteTool":     {},
-	"FileEditTool":      {},
-	"GlobTool":          {},
-	"GrepTool":          {},
-	"BashTool":          {},
-	"NotebookEditTool":  {},
-	"AgentTool":         {},
+	"Read":          {},
+	"Write":         {},
+	"Edit":          {},
+	"Glob":          {},
+	"Grep":          {},
+	"Bash":          {},
+	"NotebookEdit":  {},
+	"Agent":         {},
 }
 
 // IsReplModeEnabled reports whether the current process is running in

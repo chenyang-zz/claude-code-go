@@ -66,14 +66,14 @@ func TestIsReplModeEnabled_CLAUDE_CODE_REPL_FalseLiteral(t *testing.T) {
 
 func TestREPL_ONLY_TOOLS_ContainsExpectedTools(t *testing.T) {
 	expected := []string{
-		"FileReadTool",
-		"FileWriteTool",
-		"FileEditTool",
-		"GlobTool",
-		"GrepTool",
-		"BashTool",
-		"NotebookEditTool",
-		"AgentTool",
+		"Read",
+		"Write",
+		"Edit",
+		"Glob",
+		"Grep",
+		"Bash",
+		"NotebookEdit",
+		"Agent",
 	}
 	for _, name := range expected {
 		if _, ok := REPL_ONLY_TOOLS[name]; !ok {
@@ -148,7 +148,7 @@ func TestToolInvoke_WithShowTools(t *testing.T) {
 		t.Fatalf("Invoke() error = %v", err)
 	}
 
-	for _, name := range []string{"BashTool", "FileReadTool", "AgentTool"} {
+	for _, name := range []string{"Bash", "Read", "Agent"} {
 		if !strings.Contains(result.Output, name) {
 			t.Errorf("Output missing tool name %q when ShowTools=true", name)
 		}
