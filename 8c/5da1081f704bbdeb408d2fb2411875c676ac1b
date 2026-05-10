@@ -1,0 +1,57 @@
+internal/services/sessionmemory/config.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-172
+internal/services/sessionmemory/extract_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-81
+internal/services/sessionmemory/threshold_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-195
+internal/services/sessionmemory/config_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-165
+internal/services/sessionmemory/extract.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-112
+internal/services/sessionmemorycompact/service_test.go
+  s_86bd23979f1e73::t_a6714748b4f861 251
+  s_86bd23979f1e73::t_c9c1de82ee9ec5 4
+  s_86bd23979f1e73::t_b95b585c4effba 264-303
+internal/core/featureflag/flag.go
+  s_86bd23979f1e73::t_8b490eee45ced5 36-39
+internal/services/sessionmemory/file.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-133
+internal/services/sessionmemory/manual_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-75
+internal/services/sessionmemory/prompt.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-271
+internal/services/sessionmemorycompact/service.go
+  s_86bd23979f1e73::t_f5a83aca3c4d5c 4,10
+  s_86bd23979f1e73::t_1c6a8b0ebaed2d 227-230,232-233,238-252,255-307
+internal/services/sessionmemory/prompt_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-155
+internal/services/sessionmemory/threshold.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-230
+internal/app/bootstrap/app.go
+  s_86bd23979f1e73::t_4fec5fa855d160 58
+  s_86bd23979f1e73::t_2dede38a85842e 382-386
+internal/services/sessionmemory/file_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-118
+internal/services/sessionmemory/init.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-40
+internal/services/sessionmemory/manual.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-67
+internal/services/sessionmemory/init_test.go
+  s_86bd23979f1e73::t_428625f7470b6b 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "8c5da1081f704bbdeb408d2fb2411875c676ac1b",
+  "prompts": {},
+  "sessions": {
+    "s_86bd23979f1e73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2981c18-123d-4a94-a8f6-db92f8fa57ac",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
