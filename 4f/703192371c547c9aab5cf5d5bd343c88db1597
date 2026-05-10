@@ -1,0 +1,24 @@
+internal/services/tokenestimation/tokenestimation.go
+  s_aa8af04b52f541::t_3717aa97e9f67e 1-146
+internal/services/tokenestimation/tokenestimation_test.go
+  s_aa8af04b52f541::t_977656cb820d69 1-236
+internal/services/commands/teleport.go
+  s_aa8af04b52f541::t_e8fc94b2de6e9e 40-41
+  s_aa8af04b52f541::t_f3f900b2c120cd 34-35,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4f703192371c547c9aab5cf5d5bd343c88db1597",
+  "prompts": {},
+  "sessions": {
+    "s_aa8af04b52f541": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "26bceeec-bd4f-4c1a-8154-6eb619c0f729",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
