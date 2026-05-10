@@ -31,10 +31,14 @@ func (c TeleportCommand) Metadata() command.Metadata {
 // operation based on arguments. When FlagTeleport is disabled or the teleport
 // service is not initialized, returns the fallback message.
 func (c TeleportCommand) Execute(ctx context.Context, args command.Args) (command.Result, error) {
-	if !featureflag.IsEnabled(featureflag.FlagTeleport) || c.Service == nil {
+	msg := "Teleport command is not available in Claude Code Go yet. Remote handoff and teleport session flows remain unmigrated."
+	if !featureflag.IsEnabled(featureflag.FlagTeleport) {
 		return command.Result{
-			Output: "Teleport command is not available in Claude Code Go yet. Remote handoff and teleport session flows remain unmigrated.",
+			Output: msg,
 		}, nil
+	}
+	if c.Service == nil {
+		return command.Result{}, fmt.Errorf("%s", msg)
 	}
 
 	raw := strings.TrimSpace(args.RawLine)
