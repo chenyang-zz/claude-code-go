@@ -1,6 +1,7 @@
 package sessionmemorycompact
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
@@ -247,7 +248,7 @@ func TestIsSessionMemoryCompactEnabled(t *testing.T) {
 }
 
 func TestTrySessionMemoryCompaction_Disabled(t *testing.T) {
-	result := TrySessionMemoryCompaction(nil)
+	result := TrySessionMemoryCompaction(context.Background(), nil)
 	if result != nil {
 		t.Error("expected nil result when disabled")
 	}
@@ -258,5 +259,45 @@ func TestResetSessionMemoryCompactConfig(t *testing.T) {
 	cfg := GetSessionMemoryCompactConfig()
 	if cfg.MinTokens != 10000 || cfg.MaxTokens != 40000 {
 		t.Errorf("unexpected config after reset: %+v", cfg)
+	}
+}
+
+func TestTrySessionMemoryCompaction_Enabled(t *testing.T) {
+	t.Setenv("CLAUDE_FEATURE_SESSION_MEMORY_COMPACT", "true")
+	result := TrySessionMemoryCompaction(context.Background(), []message.Message{
+		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "hello"}}},
+	})
+	if result != nil {
+		t.Error("expected nil result when no session memory file exists")
+	}
+}
+
+func TestFindLastAssistantMessage(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "hi"}}},
+		{Role: message.RoleAssistant, Content: []message.ContentPart{{Type: "text", Text: "hello"}}},
+		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "again"}}},
+		{Role: message.RoleAssistant, Content: []message.ContentPart{{Type: "tool_use", ToolUseID: "call1"}}},
+	}
+	idx := findLastAssistantMessage(msgs)
+	if idx != 3 {
+		t.Errorf("expected last assistant at index 3, got %d", idx)
+	}
+}
+
+func TestFindLastAssistantMessage_NoAssistant(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: []message.ContentPart{{Type: "text", Text: "hi"}}},
+	}
+	idx := findLastAssistantMessage(msgs)
+	if idx != -1 {
+		t.Errorf("expected -1 for no assistant, got %d", idx)
+	}
+}
+
+func TestFindLastAssistantMessage_Empty(t *testing.T) {
+	idx := findLastAssistantMessage(nil)
+	if idx != -1 {
+		t.Errorf("expected -1 for empty, got %d", idx)
 	}
 }

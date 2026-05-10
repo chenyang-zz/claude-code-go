@@ -55,6 +55,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/growthbook"
 	"github.com/sheepzhao/claude-code-go/internal/services/internallogging"
 	"github.com/sheepzhao/claude-code-go/internal/services/magicdocs"
+	"github.com/sheepzhao/claude-code-go/internal/services/sessionmemory"
 	"github.com/sheepzhao/claude-code-go/internal/services/microcompact"
 	"github.com/sheepzhao/claude-code-go/internal/services/autocompact"
 	"github.com/sheepzhao/claude-code-go/internal/services/sessionmemorycompact"
@@ -377,6 +378,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	autodream.InitAutoDream(nil, func(hook autodream.PostTurnHookFunc) {
 		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
 	}, cfg.ProjectPath)
+
+	// Initialize Session Memory system (threshold-based extraction; subagent execution wired later).
+	sessionmemory.InitSessionMemory(nil, func(hook sessionmemory.PostTurnHookFunc) {
+		engine.RegisterPostTurnHook(engine.PostTurnHook(hook))
+	})
 
 	// Initialize PromptSuggestion system (post-sampling suggestion generation).
 	_, psCleanup := promptsuggestion.Init(nil, func(hook promptsuggestion.PostSamplingHookFunc) {

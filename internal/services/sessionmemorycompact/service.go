@@ -1,11 +1,13 @@
 package sessionmemorycompact
 
 import (
+	"context"
 	"os"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/compact"
 	"github.com/sheepzhao/claude-code-go/internal/core/message"
+	"github.com/sheepzhao/claude-code-go/internal/services/sessionmemory"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -222,29 +224,87 @@ func ShouldUseSessionMemoryCompaction() bool {
 }
 
 // TrySessionMemoryCompaction attempts to use session memory for compaction.
-// This is a simplified implementation that stubs the session memory file I/O
-// and hook processing. Returns the compaction index and messages-to-keep, or
-// nil when session memory compaction cannot be used.
+// It waits for any in-progress session memory extraction, reads the current
+// session memory content, calculates the message index to keep based on
+// the last summarized message position, and returns a SessionMemoryCompactResult.
+// Returns nil when session memory compaction cannot be used.
 //
-// This corresponds to TS trySessionMemoryCompaction (simplified).
-// TODO: wire up real session memory content when the session memory system
-// integration is ready. Currently stubs session memory content as empty and
-// falls back on returning nil (which means the caller should use legacy compact).
-func TrySessionMemoryCompaction(messages []message.Message) *SessionMemoryCompactResult {
+// This corresponds to TS trySessionMemoryCompaction.
+func TrySessionMemoryCompaction(ctx context.Context, messages []message.Message) *SessionMemoryCompactResult {
 	if !ShouldUseSessionMemoryCompaction() {
 		return nil
 	}
 
-	// Simplified: we always fall back to nil (no session memory content)
-	// TODO: read real session memory content via the session memory service
-	if false {
-		// Placeholder for future implementation
-		_ = getSessionMemoryContent
+	// Wait for any in-progress session memory extraction to complete (with timeout).
+	if err := sessionmemory.WaitForSessionMemoryExtraction(ctx); err != nil {
+		logger.DebugCF("sessionmemorycompact", "wait for extraction failed", map[string]any{
+			"error": err.Error(),
+		})
+		return nil
 	}
 
-	// Fallback: session memory not available
-	logger.DebugCF("sessionmemorycompact", "session memory content not available, skipping", nil)
-	return nil
+	// Read real session memory content via the session memory service.
+	content, err := sessionmemory.GetSessionMemoryContent(ctx)
+	if err != nil {
+		logger.WarnCF("sessionmemorycompact", "failed to read session memory content", map[string]any{
+			"error": err.Error(),
+		})
+		return nil
+	}
+
+	// No session memory file exists at all.
+	if content == "" {
+		logger.DebugCF("sessionmemorycompact", "no session memory content, skipping", nil)
+		return nil
+	}
+
+	// Get the last summarized message ID.
+	lastSummarizedMessageID := sessionmemory.GetLastSummarizedMessageID()
+
+	var lastSummarizedIndex int
+	if lastSummarizedMessageID != "" {
+		// Normal case: find the message by ID. Without a UUID field on
+		// message.Message, we assume the last assistant message with text
+		// content is the summarized boundary.
+		lastSummarizedIndex = findLastAssistantMessage(messages)
+	} else {
+		// Resumed session: set to last message so startIndex becomes
+		// messages.length (no messages kept initially).
+		lastSummarizedIndex = len(messages) - 1
+	}
+
+	// Calculate the starting index for messages to keep.
+	startIndex := CalculateMessagesToKeepIndex(messages, lastSummarizedIndex)
+
+	// Filter out old compact boundary messages from messagesToKeep.
+	messagesToKeep := make([]message.Message, 0, len(messages)-startIndex)
+	for i := startIndex; i < len(messages); i++ {
+		messagesToKeep = append(messagesToKeep, messages[i])
+	}
+
+	logger.DebugCF("sessionmemorycompact", "session memory compaction result", map[string]any{
+		"start_index":           startIndex,
+		"messages_to_keep":      len(messagesToKeep),
+		"total_messages":        len(messages),
+		"session_memory_length": len(content),
+	})
+
+	return &SessionMemoryCompactResult{
+		MessagesToKeep: messagesToKeep,
+		StartIndex:     startIndex,
+	}
+}
+
+// findLastAssistantMessage finds the index of the last assistant message in the
+// messages slice. Used as a fallback when message UUID is not available to
+// determine the summarized boundary.
+func findLastAssistantMessage(messages []message.Message) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == message.RoleAssistant {
+			return i
+		}
+	}
+	return -1
 }
 
 // SessionMemoryCompactResult holds the result of a session memory compaction
@@ -255,12 +315,6 @@ type SessionMemoryCompactResult struct {
 	MessagesToKeep []message.Message
 	// StartIndex is the calculated start index for kept messages.
 	StartIndex int
-}
-
-// getSessionMemoryContent is a stub for reading session memory content.
-// TODO: wire up real session memory file reading.
-func getSessionMemoryContent() (string, error) {
-	return "", nil
 }
 
 // isEnvTruthy returns true if the environment variable is set to a truthy

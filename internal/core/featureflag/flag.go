@@ -33,6 +33,10 @@ const (
 	// When enabled, a forked subagent periodically consolidates, deduplicates,
 	// and prunes memory files in the auto-memory directory.
 	FlagAutoDream = "AUTO_DREAM"
+	// FlagSessionMemory gates the session memory extraction system.
+	// When enabled, post-turn hooks extract key information from the
+	// conversation and persist it as structured markdown files.
+	FlagSessionMemory = "SESSION_MEMORY"
 	// FlagPromptSuggestion gates the prompt suggestion feature.
 	// When enabled, a forked subagent generates prompt suggestions during conversation.
 	FlagPromptSuggestion = "PROMPT_SUGGESTION"
