@@ -1,0 +1,25 @@
+internal/services/tools/repl/repl_test.go
+  s_f082bff527a1a3::t_2ca3358619dc4e 1-130,132-145,147-162,164-192
+  s_f082bff527a1a3::t_6f78a4c74af2a0 131,146
+  s_f082bff527a1a3::t_ad4f99b82546af 163
+internal/services/tools/repl/repl.go
+  s_f082bff527a1a3::t_3a35a6837db29a 1-63
+internal/services/tools/repl/tool.go
+  s_f082bff527a1a3::t_bad897b57bc4d1 1-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "3052209c06c921ec613a9c9729e82aaf45fed438",
+  "prompts": {},
+  "sessions": {
+    "s_f082bff527a1a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc2ba03d-5ccb-47bb-8381-7ba85f69c1e3",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
