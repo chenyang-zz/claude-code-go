@@ -204,6 +204,14 @@ func ParseAgentFromJson(name string, definition json.RawMessage, source string) 
 		}
 	}
 
+	// Settings: preserve additional configuration overrides.
+	if raw, ok := rawMap["settings"]; ok {
+		var settingsMap map[string]any
+		if err := json.Unmarshal(raw, &settingsMap); err == nil {
+			def.Settings = settingsMap
+		}
+	}
+
 	return def, nil
 }
 

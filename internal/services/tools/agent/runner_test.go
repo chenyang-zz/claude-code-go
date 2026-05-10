@@ -109,6 +109,37 @@ func TestResolveMaxTurnsDefault(t *testing.T) {
 	}
 }
 
+func TestResolveReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name   string
+		effort string
+		want   *string
+	}{
+		{"empty", "", nil},
+		{"low", "low", stringPtr("low")},
+		{"medium", "medium", stringPtr("medium")},
+		{"high", "high", stringPtr("high")},
+		{"max_not_reasoning", "max", nil},
+		{"auto_not_reasoning", "auto", nil},
+		{"numeric_3", "3", nil},
+		{"case_insensitive", "HIGH", stringPtr("high")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveReasoningEffort(tt.effort)
+			if tt.want == nil {
+				if got != nil {
+					t.Errorf("resolveReasoningEffort(%q) = %v, want nil", tt.effort, got)
+				}
+			} else {
+				if got == nil || *got != *tt.want {
+					t.Errorf("resolveReasoningEffort(%q) = %v, want %v", tt.effort, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildSystemPrompt(t *testing.T) {
 	parent := engine.New(nil, "parent-model", nil)
 	runner := NewRunner(parent, nil)
@@ -529,3 +560,6 @@ func TestResolveAgentTools(t *testing.T) {
 		})
 	}
 }
+
+// stringPtr returns a pointer to the given string value.
+func stringPtr(s string) *string { return &s }

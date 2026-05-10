@@ -595,3 +595,42 @@ func TestParseAgentFromJson_WithRawMessage(t *testing.T) {
 	assert.Equal(t, "My agent", def.WhenToUse)
 	assert.Equal(t, "You are my agent.", def.SystemPrompt)
 }
+
+func TestParseAgentFromJson_Settings(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings string
+		expected map[string]any
+	}{
+		{"nil", ``, nil},
+		{"empty", `"settings": {}`, map[string]any{}},
+		{"single_field", `"settings": {"model": "claude-4"}`, map[string]any{"model": "claude-4"}},
+		{"multi_field", `"settings": {"model": "claude-4", "maxTokens": 4096}`, map[string]any{"model": "claude-4", "maxTokens": 4096.0}},
+		{"nested", `"settings": {"provider": {"region": "us-east-1"}}`, map[string]any{"provider": map[string]any{"region": "us-east-1"}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var jsonData []byte
+			if tc.settings == "" {
+				jsonData = []byte(`{
+					"description": "A test agent",
+					"prompt": "You are a test agent."
+				}`)
+			} else {
+				jsonData = []byte(`{
+					"description": "A test agent",
+					"prompt": "You are a test agent.",
+					` + tc.settings + `
+				}`)
+			}
+			def, err := ParseAgentFromJson("test-agent", jsonData, "flagSettings")
+			require.NoError(t, err)
+			if tc.expected == nil {
+				assert.Nil(t, def.Settings)
+			} else {
+				assert.Equal(t, tc.expected, def.Settings)
+			}
+		})
+	}
+}

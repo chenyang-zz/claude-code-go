@@ -93,6 +93,7 @@ func toCoreAgentDefinition(def *AgentDefinition) agent.Definition {
 		Plugin:          def.PluginName,
 		SystemPrompt:    def.RawContent,
 		Color:           def.Color,
+		Settings:        def.Settings,
 	}
 
 	if def.SourcePath != "" {

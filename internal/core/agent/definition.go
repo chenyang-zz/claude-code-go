@@ -73,6 +73,13 @@ type Definition struct {
 	// Uses the same structure as global hooks configuration.
 	// Only used by custom agents; built-in agents leave this nil.
 	Hooks hook.HooksConfig
+
+	// Settings holds additional agent-level configuration overrides that are not
+	// captured by dedicated fields above. Values are typically parsed from
+	// YAML/JSON frontmatter and are consumed during agent runtime initialization.
+	// Dedicated fields (Model, Effort, PermissionMode, MaxTurns, etc.) take
+	// precedence over equivalent keys in this map.
+	Settings map[string]any
 }
 
 // AgentMCPServerSpec represents an MCP server declaration in an agent definition.

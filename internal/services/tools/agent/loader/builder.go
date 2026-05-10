@@ -153,6 +153,15 @@ func BuildDefinitionFromFrontmatter(
 		}
 	}
 
+	// Settings: preserve unrecognized or generic configuration overrides.
+	// Dedicated fields (model, effort, permissionMode, etc.) are parsed above;
+	// the raw settings block captures any remaining keys for runtime consumption.
+	if v, ok := fm["settings"]; ok {
+		if settingsMap, ok := v.(map[string]any); ok {
+			def.Settings = settingsMap
+		}
+	}
+
 	return def, nil
 }
 
