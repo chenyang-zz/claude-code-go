@@ -178,6 +178,10 @@ const (
 	// feature values, and provides feature flag evaluation through the
 	// growthbook package. Off by default.
 	FlagGrowthBook = "GROWTHBOOK"
+	// FlagTokenEstimation gates the token estimation utility service.
+	// When enabled, token estimation functions are registered for use by
+	// compact, budget tracking, and other consumers. Off by default.
+	FlagTokenEstimation = "TOKEN_ESTIMATION"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
