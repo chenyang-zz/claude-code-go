@@ -757,7 +757,7 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	if err := registry.Register(servicecommands.RateLimitOptionsCommand{}); err != nil {
 		return nil, err
 	}
-	if err := registry.Register(servicecommands.SandboxCommand{}); err != nil {
+	if err := registry.Register(servicecommands.NewSandboxCommand(nil)); err != nil {
 		return nil, err
 	}
 	if err := registry.Register(servicecommands.StickersCommand{}); err != nil {

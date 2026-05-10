@@ -186,6 +186,12 @@ const (
 	// When enabled, token estimation functions are registered for use by
 	// compact, budget tracking, and other consumers. Off by default.
 	FlagTokenEstimation = "TOKEN_ESTIMATION"
+		// FlagSandbox gates the BashTool sandbox execution system.
+		// When enabled, supported commands run inside a sandbox (Docker,
+		// bubblewrap on Linux, sandbox-exec on macOS) with configurable
+		// network and filesystem restrictions. Off by default.
+		FlagSandbox = "SANDBOX"
+
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
