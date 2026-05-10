@@ -1,0 +1,20 @@
+internal/services/sessionmemorycompact/service.go
+  s_86bd23979f1e73::t_e6b161735de80a 261-269,273-278,281-282
+  s_86bd23979f1e73::t_dcf66489ea4106 318-324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "790abfe8ff9c4aa25ab2fdadcd6aac3a5b37be96",
+  "prompts": {},
+  "sessions": {
+    "s_86bd23979f1e73": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2981c18-123d-4a94-a8f6-db92f8fa57ac",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
