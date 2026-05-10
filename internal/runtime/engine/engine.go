@@ -2113,42 +2113,45 @@ func (e *Runtime) executeToolUse(ctx context.Context, call coretool.Call, out ch
 		toolErrorMsg = renderToolFailure(result, invokeErr)
 	}
 	var permissionErr *corepermission.PermissionError
-
-		// Emit tool-specific analytics events for BashTool and FileEditTool.
-		if e.AnalyticsEmitter != nil && toolExecuted {
-			switch call.Name {
-			case "BashTool", "bash", "Bash":
-				cmd, _ := call.Input["command"].(string)
-				if cmd != "" {
-					snippet := cmd
-					if len(snippet) > 200 {
-						snippet = snippet[:200]
-					}
-					e.AnalyticsEmitter.EmitRaw(
-						analytics.Metadata{Timestamp: time.Now(), SessionID: e.sessionID},
-						analytics.EventBashCommand,
-						analytics.BashCommandEvent{
-							CommandSnippet: snippet,
-							Duration:       time.Since(startTime),
-							OutputSize:     len(result.Output),
-						},
-					)
+	// Emit tool-specific analytics events for BashTool and FileEditTool.
+	if e.AnalyticsEmitter != nil && toolExecuted {
+		switch call.Name {
+		case "BashTool", "bash", "Bash":
+			cmd, _ := call.Input["command"].(string)
+			if cmd != "" {
+				snippet := cmd
+				if len(snippet) > 200 {
+					snippet = snippet[:200]
 				}
-			case "FileEditTool", "file_edit", "FileEdit":
-				editType, _ := call.Input["editType"].(string)
-				filePath, _ := call.Input["filePath"].(string)
+				exitCode := 0
+				if !toolSucceeded {
+					exitCode = 1
+				}
 				e.AnalyticsEmitter.EmitRaw(
 					analytics.Metadata{Timestamp: time.Now(), SessionID: e.sessionID},
-					analytics.EventFileEdit,
-					analytics.FileEditEvent{
-						EditType: editType,
-						FilePath: filePath,
-						Success:  toolSucceeded,
-						Duration: time.Since(startTime),
+					analytics.EventBashCommand,
+					analytics.BashCommandEvent{
+						CommandSnippet: snippet,
+						ExitCode:       exitCode,
+						Duration:       time.Since(startTime),
+						OutputSize:     len(result.Output),
 					},
 				)
 			}
+		case "FileEditTool", "file_edit", "FileEdit", "Edit":
+			filePath, _ := call.Input["file_path"].(string)
+			e.AnalyticsEmitter.EmitRaw(
+				analytics.Metadata{Timestamp: time.Now(), SessionID: e.sessionID},
+				analytics.EventFileEdit,
+				analytics.FileEditEvent{
+					EditType: "replace",
+					FilePath: filePath,
+					Success:  toolSucceeded,
+					Duration: time.Since(startTime),
+				},
+				)
 		}
+	}
 	if errors.As(invokeErr, &permissionErr) && permissionErr.Decision == corepermission.DecisionAsk && e.ApprovalService != nil {
 		return e.executeFilesystemApproval(ctx, call, permissionErr, out)
 	}
