@@ -1,0 +1,22 @@
+internal/services/commands/sandbox.go
+  s_0713857e87df3a::t_fbce2ab95350f3 177
+internal/services/tools/bash/tool.go
+  s_0713857e87df3a::t_365b7bf9f87b71 248
+  s_0713857e87df3a::t_6960a7300a2ffc 249-250,253-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "65e2d3dd0ada0f3669ff2e8848f33f7b7bd4706e",
+  "prompts": {},
+  "sessions": {
+    "s_0713857e87df3a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5516436e-c774-45de-a5a5-f508f788e1d6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
