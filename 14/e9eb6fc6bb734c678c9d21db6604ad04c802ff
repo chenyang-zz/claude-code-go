@@ -1,0 +1,58 @@
+internal/app/bootstrap/app.go
+  s_0713857e87df3a::t_ac48f484b23bc7 760
+internal/platform/sandbox/platform.go
+  s_0713857e87df3a::t_84225c5f885bbf 1-86
+internal/platform/sandbox/restricted.go
+  s_0713857e87df3a::t_31be7320681b3e 1-48,50-54,56-120,122-148
+  s_0713857e87df3a::t_27105a1ef183c6 49,55,121
+internal/platform/sandbox/manager.go
+  s_0713857e87df3a::t_0405c83e318d43 7
+  s_0713857e87df3a::t_3fedf2820ee80e 132,134-135,137-143
+  s_0713857e87df3a::t_b76004ff56fbde 1-6,8-131,133,136,144-155
+internal/services/commands/sandbox_test.go
+  s_0713857e87df3a::t_b2a675b040db91 12-13,15-19,23-26,30-31,35-38,42-43,47-50,56-59
+internal/platform/sandbox/docker.go
+  s_0713857e87df3a::t_d80ad3eb39c3b8 14-18,49,65,68-71,83-91
+  s_0713857e87df3a::t_045c16242f68c7 1-13,19-48,50-64,66-67,72-82,92-104
+internal/platform/sandbox/sandbox_test.go
+  s_0713857e87df3a::t_c23eb2ced283a8 80-81
+  s_0713857e87df3a::t_68e424979ef356 1-79,82-209,212-218
+  s_0713857e87df3a::t_236a73b8bcf354 210-211
+internal/core/featureflag/flag.go
+  s_0713857e87df3a::t_d79ae70707e93b 189-193
+  s_0713857e87df3a::t_4b27d8e7f7ee3b 194
+internal/services/commands/sandbox.go
+  s_0713857e87df3a::t_83bba395d1e5e1 7,13-19,21-22,28,31,34,39-41,43,45,47-54,60-100,102-107,111-159,162-203
+  s_0713857e87df3a::t_bb62651857324c 55-59
+  s_0713857e87df3a::t_87f9f8f67805cc 20,23,25-27
+internal/platform/sandbox/config.go
+  s_0713857e87df3a::t_4137d49e47bd1d 1-68
+internal/services/tools/bash/tool.go
+  s_0713857e87df3a::t_0521cdc8ebe84a 56-62
+  s_0713857e87df3a::t_975e49cacc3439 166-172
+  s_0713857e87df3a::t_47091bf737e916 244-251
+  s_0713857e87df3a::t_171599d8b33ba4 691
+  s_0713857e87df3a::t_e46690a2c7cc18 79-80
+internal/app/bootstrap/app_test.go
+  s_0713857e87df3a::t_0216a0a560fdd2 1036
+internal/platform/sandbox/exclude.go
+  s_0713857e87df3a::t_4bc52b8cef4a21 31,35
+  s_0713857e87df3a::t_86a5256ab022e9 1-30,32-34,36-87,89,97-310
+  s_0713857e87df3a::t_ef3f50bba32e6b 88,90-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "14e9eb6fc6bb734c678c9d21db6604ad04c802ff",
+  "prompts": {},
+  "sessions": {
+    "s_0713857e87df3a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5516436e-c774-45de-a5a5-f508f788e1d6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
