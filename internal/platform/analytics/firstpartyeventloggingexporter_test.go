@@ -536,7 +536,11 @@ func TestExportFilePersistence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	storageDir := t.TempDir()
+	storageDir, err := os.MkdirTemp("", "1p-exporter-test-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	defer os.RemoveAll(storageDir)
 	e := NewFirstPartyEventLoggingExporter(FirstPartyEventLoggingExporterConfig{
 		BaseURL:    server.URL,
 		StorageDir: storageDir,
