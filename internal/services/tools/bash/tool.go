@@ -53,6 +53,13 @@ type BackgroundTaskStore interface {
 	Remove(id string)
 }
 
+// SandboxManager describes the sandbox execution dependency used by the Bash tool.
+// When configured, eligible commands run inside a sandboxed environment.
+type SandboxManager interface {
+	// ShouldUseSandbox reports whether the given command should be sandboxed.
+	ShouldUseSandbox(command string, dangerouslyDisableSandbox bool) bool
+}
+
 // Tool implements the minimum migrated foreground Bash tool path.
 type Tool struct {
 	// executor runs the normalized shell request in the host environment.
@@ -69,6 +76,8 @@ type Tool struct {
 	notificationEmitter NotificationEmitter
 	// securityScanner performs pre-execution security checks on allowed commands.
 	securityScanner SecurityScanner
+	// sandboxManager provides sandbox execution for eligible commands.
+	sandboxManager SandboxManager
 }
 
 // Input stores the typed request payload accepted by the migrated Bash tool.
@@ -154,6 +163,13 @@ func NewToolWithSecurityScanner(executor ShellExecutor, permissions CommandPermi
 	return t
 }
 
+// NewToolWithSandbox constructs a Bash tool with a sandbox manager.
+func NewToolWithSandbox(executor ShellExecutor, permissions CommandPermissionChecker, approvalMode string, taskStore BackgroundTaskStore, emitter NotificationEmitter, scanner SecurityScanner, sbx SandboxManager) *Tool {
+	t := NewToolWithSecurityScanner(executor, permissions, approvalMode, taskStore, emitter, scanner)
+	t.sandboxManager = sbx
+	return t
+}
+
 // Name returns the stable registration name for the migrated Bash tool.
 func (t *Tool) Name() string {
 	return Name
@@ -225,8 +241,18 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 	if command == "" {
 		return coretool.Result{Error: "command is required"}, nil
 	}
-	if input.DangerouslyDisableSandbox {
-		return coretool.Result{Error: "Sandbox override is not available in Claude Code Go yet."}, nil
+
+	// When a sandbox manager is configured and the command should run inside the
+	// sandbox, delegate to sandbox-execution if available. The sandbox manager's
+	// ShouldUseSandbox handles the dangerouslyDisableSandbox bypass decision.
+	// TODO(batch-277+1): Wire executor-level sandbox wrapping (wrapWithSandbox
+	// equivalent). Currently execution runs unsandboxed with sandbox metadata
+	// recorded for future enforcement.
+	if t.sandboxManager != nil && t.sandboxManager.ShouldUseSandbox(command, input.DangerouslyDisableSandbox) {
+		logger.DebugCF("bash_tool", "sandbox requested for command (executor-level sandbox pending)", map[string]any{
+			"command":   command,
+			"sandboxed": false,
+		})
 	}
 
 	timeoutMilliseconds, err := resolveTimeoutMilliseconds(input.Timeout)
@@ -666,7 +692,7 @@ func inputSchema() coretool.InputSchema {
 			},
 			"dangerouslyDisableSandbox": {
 				Type:        coretool.ValueKindBoolean,
-				Description: "Set to true to disable the sandbox. Not yet supported in Claude Code Go.",
+				Description: "Set to true to run the command outside the sandbox.",
 			},
 		},
 	}

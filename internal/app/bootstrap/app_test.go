@@ -1033,7 +1033,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 	if got := cmds[40].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "sandbox",
-		Description: "Configure sandbox settings",
+		Description: "View and configure sandbox settings",
 		Usage:       "/sandbox [exclude <command-pattern>]",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-first metadata = %#v, want sandbox metadata", got)
