@@ -1,0 +1,21 @@
+internal/platform/analytics/firstpartyeventloggingexporter.go
+  s_f082bff527a1a3::t_d1e51a1bae3f7e 469-473
+internal/platform/analytics/firstpartyeventloggingexporter_test.go
+  ai_agent 539-543
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "ffac896d142994cb7e75a68e995a9ef0aa8920da",
+  "prompts": {},
+  "sessions": {
+    "s_f082bff527a1a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc2ba03d-5ccb-47bb-8381-7ba85f69c1e3",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
