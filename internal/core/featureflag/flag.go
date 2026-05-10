@@ -192,6 +192,11 @@ const (
 		// network and filesystem restrictions. Off by default.
 		FlagSandbox = "SANDBOX"
 
+	// FlagQueryEngine gates the programmatic query engine service.
+	// When enabled, the QueryEngine service is initialized during bootstrap
+	// and provides a programmatic/SDK-mode query API for headless usage.
+	// Off by default.
+	FlagQueryEngine = "QUERY_ENGINE"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
