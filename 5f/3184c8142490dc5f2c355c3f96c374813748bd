@@ -1,0 +1,22 @@
+internal/services/tools/repl/repl.go
+  s_f082bff527a1a3::t_940ca9a1c82b45 16-18,20-27
+internal/services/tools/repl/repl_test.go
+  s_f082bff527a1a3::t_56600536519694 69-76
+  s_f082bff527a1a3::t_1669281e276b7b 151
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "5f3184c8142490dc5f2c355c3f96c374813748bd",
+  "prompts": {},
+  "sessions": {
+    "s_f082bff527a1a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc2ba03d-5ccb-47bb-8381-7ba85f69c1e3",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
