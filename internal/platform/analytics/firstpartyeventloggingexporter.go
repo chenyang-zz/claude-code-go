@@ -466,6 +466,11 @@ func (e *FirstPartyEventLoggingExporter) resetBackoff() {
 // Shutdown gracefully stops the exporter, flushing pending exports.
 func (e *FirstPartyEventLoggingExporter) Shutdown(ctx context.Context) error {
 	e.shutdown.Store(true)
+	e.mu.Lock()
+	if e.cancelFn != nil {
+		e.cancelFn()
+	}
+	e.mu.Unlock()
 	e.resetBackoff()
 	return nil
 }
