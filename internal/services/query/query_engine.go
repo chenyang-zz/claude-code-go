@@ -49,9 +49,19 @@ func (qe *QueryEngine) SessionID() string {
 // SubmitMessage submits a user message and runs one query turn.
 // The conversation state (messages) is maintained across calls.
 func (qe *QueryEngine) SubmitMessage(ctx context.Context, input string, opts ...SubmitOption) *QueryResult {
+	// Append the user's new input as a message to the conversation history,
+	// then pass the full history as Messages (not Input) so that
+	// buildInitialHistory uses the complete history including the new turn.
+	userMsg := message.Message{
+		Role: message.RoleUser,
+		Content: []message.ContentPart{
+			message.TextPart(input),
+		},
+	}
+	qe.messages = append(qe.messages, userMsg)
+
 	req := conversation.RunRequest{
 		SessionID: qe.config.Config.SessionID,
-		Input:     input,
 		Messages:  qe.messages,
 		CWD:       ".",
 	}
