@@ -258,20 +258,28 @@ func TrySessionMemoryCompaction(ctx context.Context, messages []message.Message)
 		return nil
 	}
 
+	// Reject template-only content: if session memory only contains the default
+	// template boilerplate, no actual extraction has occurred. Compacting against
+	// boilerplate notes would discard real context without providing useful
+	// summary content. Mirrors TS isSessionMemoryEmpty check.
+	if isSessionMemoryEmpty(content) {
+		logger.DebugCF("sessionmemorycompact", "session memory is empty template, skipping", nil)
+		return nil
+	}
+
 	// Get the last summarized message ID.
 	lastSummarizedMessageID := sessionmemory.GetLastSummarizedMessageID()
 
-	var lastSummarizedIndex int
-	if lastSummarizedMessageID != "" {
-		// Normal case: find the message by ID. Without a UUID field on
-		// message.Message, we assume the last assistant message with text
-		// content is the summarized boundary.
-		lastSummarizedIndex = findLastAssistantMessage(messages)
-	} else {
-		// Resumed session: set to last message so startIndex becomes
-		// messages.length (no messages kept initially).
-		lastSummarizedIndex = len(messages) - 1
+	// Without a recorded summarized message ID, we cannot determine the boundary
+	// between summarized and unsummarized content. Return nil to fall back to
+	// legacy compact rather than potentially dropping recent context.
+	if lastSummarizedMessageID == "" {
+		logger.DebugCF("sessionmemorycompact", "no summarized message ID, falling back to legacy compact", nil)
+		return nil
 	}
+
+	// Normal case: find the last assistant message as the summarized boundary.
+	lastSummarizedIndex := findLastAssistantMessage(messages)
 
 	// Calculate the starting index for messages to keep.
 	startIndex := CalculateMessagesToKeepIndex(messages, lastSummarizedIndex)
@@ -305,6 +313,13 @@ func findLastAssistantMessage(messages []message.Message) int {
 		}
 	}
 	return -1
+}
+
+// isSessionMemoryEmpty checks whether the session memory content is essentially
+// empty (matches the default template). This mirrors the TS isSessionMemoryEmpty
+// check in prompts.ts which compares trimmed content against the loaded template.
+func isSessionMemoryEmpty(content string) bool {
+	return strings.TrimSpace(content) == strings.TrimSpace(sessionmemory.DefaultSessionMemoryTemplate)
 }
 
 // SessionMemoryCompactResult holds the result of a session memory compaction
