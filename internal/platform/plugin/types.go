@@ -309,6 +309,10 @@ type AgentDefinition struct {
 	DisallowedTools string `json:"disallowedTools,omitempty"`
 	// RawContent is the markdown body (system prompt content).
 	RawContent string `json:"rawContent"`
+	// Settings holds additional agent-level configuration overrides parsed from
+	// the frontmatter `settings` key. Dedicated fields (Model, Effort, MaxTurns,
+	// etc.) take precedence over equivalent keys in this map.
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 // McpServerConfig represents an MCP server configuration extracted from a

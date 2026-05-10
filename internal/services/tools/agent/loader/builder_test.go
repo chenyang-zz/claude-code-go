@@ -642,3 +642,38 @@ func TestParseAgentHooks(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildDefinitionFromFrontmatter_Settings(t *testing.T) {
+	cases := []struct {
+		name     string
+		settings any
+		expected map[string]any
+	}{
+		{"nil", nil, nil},
+		{"empty_map", map[string]any{}, map[string]any{}},
+		{"single_field", map[string]any{"model": "claude-4"}, map[string]any{"model": "claude-4"}},
+		{"multi_field", map[string]any{"model": "claude-4", "maxTokens": 4096}, map[string]any{"model": "claude-4", "maxTokens": 4096}},
+		{"nested", map[string]any{"provider": map[string]any{"region": "us-east-1"}}, map[string]any{"provider": map[string]any{"region": "us-east-1"}}},
+		{"non_map_string", "just-a-string", nil},
+		{"non_map_int", 42, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fm := map[string]any{
+				"name":        "agent",
+				"description": "test",
+			}
+			if tc.settings != nil {
+				fm["settings"] = tc.settings
+			}
+			def, err := BuildDefinitionFromFrontmatter("test.md", "/agents", fm, "", "projectSettings")
+			require.NoError(t, err)
+			if tc.expected == nil {
+				assert.Nil(t, def.Settings)
+			} else {
+				assert.Equal(t, tc.expected, def.Settings)
+			}
+		})
+	}
+}

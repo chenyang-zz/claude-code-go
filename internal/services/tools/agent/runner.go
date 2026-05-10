@@ -165,6 +165,13 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 	child.Hooks = r.mergeAgentHooks(def)
 	child.HookRunner = r.ParentRuntime.HookRunner
 
+	// Apply agent-level Effort override to child runtime reasoning effort.
+	if def.Effort != "" {
+		if effort := resolveReasoningEffort(def.Effort); effort != nil {
+			child.DefaultReasoningEffort = effort
+		}
+	}
+
 	// 6. Build and run request
 	msgs := buildAgentMessages(def.InitialPrompt, input.Prompt)
 	if additionalContext != "" {
@@ -177,10 +184,11 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 		msgs = append([]message.Message{hookMsg}, msgs...)
 	}
 	req := conversation.RunRequest{
-		SessionID: agentID,
-		Messages:  msgs,
-		CWD:       input.Cwd,
-		System:    systemPrompt,
+		SessionID:       agentID,
+		Messages:        msgs,
+		CWD:             input.Cwd,
+		System:          systemPrompt,
+		PermissionMode:  def.PermissionMode,
 	}
 
 	start := time.Now()
@@ -278,6 +286,16 @@ func (r *Runner) selectModel(def agent.Definition) string {
 		return r.ParentRuntime.DefaultModel
 	}
 	return ""
+}
+
+// resolveReasoningEffort translates the agent's effort level to a reasoning
+// effort pointer. Returns nil for empty or invalid values.
+func resolveReasoningEffort(effort string) *string {
+	e := strings.ToLower(strings.TrimSpace(effort))
+	if e == "low" || e == "medium" || e == "high" {
+		return &e
+	}
+	return nil
 }
 
 // resolveMaxTurns returns the max tool iterations for the agent.
