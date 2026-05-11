@@ -197,6 +197,16 @@ const (
 	// and provides a programmatic/SDK-mode query API for headless usage.
 	// Off by default.
 	FlagQueryEngine = "QUERY_ENGINE"
+
+	// FlagEmbeddedHTTPServer gates the embedded HTTP direct-connect server.
+	// When enabled, the embedded HTTP server listens for direct-connect
+	// session requests and manages WebSocket connections. Off by default.
+	FlagEmbeddedHTTPServer = "EMBEDDED_HTTP_SERVER"
+
+	// FlagRemoteSessionManager gates the remote session manager enhancements.
+	// When enabled, the remote session manager supports WebSocket
+	// reconnection with backoff and ping/pong keepalive. Off by default.
+	FlagRemoteSessionManager = "REMOTE_SESSION_MANAGER"
 )
 
 // envPrefix is the environment variable prefix used for all feature flags.
