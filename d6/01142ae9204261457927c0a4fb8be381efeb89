@@ -1,0 +1,19 @@
+internal/platform/server/manager.go
+  s_175d1e09a11b34::t_42e92ea47c479b 38-39,84,89-91,94-95,99-101,111,121,211-212,214-216,218-220,243-246,257,285-288,293,314-317,322,341-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d601142ae9204261457927c0a4fb8be381efeb89",
+  "prompts": {},
+  "sessions": {
+    "s_175d1e09a11b34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ccb1633-0652-4413-8003-c37ad17d836d",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
