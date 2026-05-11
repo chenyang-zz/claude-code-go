@@ -35,7 +35,8 @@ type DirectConnectSessionManager struct {
 	cancel    chan struct{}
 	closeOnce sync.Once
 	closed    atomic.Bool
-	mu        sync.Mutex
+	mu        sync.Mutex // guards conn read/write
+	writeMu   sync.Mutex // serialises gorilla/websocket writes (not safe for concurrent use)
 }
 
 // NewDirectConnectSessionManager creates a new session manager.
@@ -80,19 +81,24 @@ func (m *DirectConnectSessionManager) Connect() error {
 		m.callbacks.OnConnected()
 	}
 
-	go m.readLoop()
+	go m.readLoop(conn)
 	return nil
 }
 
 // readLoop reads messages from the WebSocket and dispatches them.
-func (m *DirectConnectSessionManager) readLoop() {
+// conn is captured at start to avoid racing Disconnect, which sets m.conn = nil.
+func (m *DirectConnectSessionManager) readLoop(conn *websocket.Conn) {
+	disconnected := false
 	defer func() {
 		m.mu.Lock()
-		if m.conn != nil {
-			_ = m.conn.Close()
+		_ = conn.Close()
+		if m.conn == conn {
 			m.conn = nil
 		}
 		m.mu.Unlock()
+		if disconnected && m.callbacks.OnDisconnected != nil {
+			m.callbacks.OnDisconnected()
+		}
 	}()
 
 	for {
@@ -102,7 +108,7 @@ func (m *DirectConnectSessionManager) readLoop() {
 		default:
 		}
 
-		_, payload, err := m.conn.ReadMessage()
+		_, payload, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				return
@@ -112,6 +118,7 @@ func (m *DirectConnectSessionManager) readLoop() {
 				return
 			default:
 			}
+			disconnected = true
 			if m.callbacks.OnError != nil {
 				m.callbacks.OnError(fmt.Errorf("read websocket message: %w", err))
 			}
@@ -201,12 +208,16 @@ func (m *DirectConnectSessionManager) handleControlRequest(data []byte) {
 	}
 }
 
+// connForWrite returns the current connection, or nil if disconnected.
+func (m *DirectConnectSessionManager) connForWrite() *websocket.Conn {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.conn
+}
+
 // SendMessage sends a user message over the WebSocket connection.
 func (m *DirectConnectSessionManager) SendMessage(content json.RawMessage) bool {
-	m.mu.Lock()
-	conn := m.conn
-	m.mu.Unlock()
-
+	conn := m.connForWrite()
 	if conn == nil {
 		return false
 	}
@@ -229,7 +240,10 @@ func (m *DirectConnectSessionManager) SendMessage(content json.RawMessage) bool 
 		return false
 	}
 
-	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+	m.writeMu.Lock()
+	err = conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Unlock()
+	if err != nil {
 		logger.WarnCF("server_manager", "failed to send message", map[string]any{
 			"error": err.Error(),
 		})
@@ -240,10 +254,7 @@ func (m *DirectConnectSessionManager) SendMessage(content json.RawMessage) bool 
 
 // RespondToPermissionRequest sends a control response for a pending permission request.
 func (m *DirectConnectSessionManager) RespondToPermissionRequest(requestID string, result sdk.PermissionResponse) error {
-	m.mu.Lock()
-	conn := m.conn
-	m.mu.Unlock()
-
+	conn := m.connForWrite()
 	if conn == nil {
 		return fmt.Errorf("not connected")
 	}
@@ -271,15 +282,15 @@ func (m *DirectConnectSessionManager) RespondToPermissionRequest(requestID strin
 		return fmt.Errorf("marshal control response: %w", err)
 	}
 
-	return conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Lock()
+	err = conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Unlock()
+	return err
 }
 
 // SendInterrupt sends an interrupt control request to cancel the current request.
 func (m *DirectConnectSessionManager) SendInterrupt() error {
-	m.mu.Lock()
-	conn := m.conn
-	m.mu.Unlock()
-
+	conn := m.connForWrite()
 	if conn == nil {
 		return fmt.Errorf("not connected")
 	}
@@ -300,15 +311,15 @@ func (m *DirectConnectSessionManager) SendInterrupt() error {
 		return fmt.Errorf("marshal interrupt request: %w", err)
 	}
 
-	return conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Lock()
+	err = conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Unlock()
+	return err
 }
 
 // sendErrorResponse sends an error response for an unknown control request.
 func (m *DirectConnectSessionManager) sendErrorResponse(requestID, errMsg string) error {
-	m.mu.Lock()
-	conn := m.conn
-	m.mu.Unlock()
-
+	conn := m.connForWrite()
 	if conn == nil {
 		return fmt.Errorf("not connected")
 	}
@@ -327,7 +338,10 @@ func (m *DirectConnectSessionManager) sendErrorResponse(requestID, errMsg string
 		return fmt.Errorf("marshal error response: %w", err)
 	}
 
-	return conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Lock()
+	err = conn.WriteMessage(websocket.TextMessage, payload)
+	m.writeMu.Unlock()
+	return err
 }
 
 // Disconnect closes the WebSocket connection and stops the read loop.
