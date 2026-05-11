@@ -24,9 +24,50 @@ func ExtractLspServers(plugin *LoadedPlugin) ([]*LspServerConfig, error) {
 		return nil, fmt.Errorf("failed to load LSP servers for plugin %s: %w", plugin.Name, err)
 	}
 
-	// TODO: overlay settings from plugin.Manifest.LspServers once
-	// PluginManifest gains the field.
-	// for _, override := range plugin.Manifest.LspServers { ... }
+	// Overlay LSP server configurations from the plugin manifest.
+	// Manifest-declared servers override same-named entries from the .lsp.json file.
+	if plugin.Manifest.LspServers != nil {
+		existingByName := make(map[string]int, len(configs))
+		for i, cfg := range configs {
+			existingByName[cfg.Name] = i
+		}
+		for name, manifestCfg := range plugin.Manifest.LspServers {
+			if manifestCfg == nil {
+				continue
+			}
+			entry := *manifestCfg
+			entry.Name = name
+			if idx, ok := existingByName[name]; ok {
+				c := &configs[idx]
+				if entry.Command != "" {
+					(*c).Command = entry.Command
+				}
+				if len(entry.Args) > 0 {
+					(*c).Args = entry.Args
+				}
+				if entry.Transport != "" {
+					(*c).Transport = entry.Transport
+				}
+				if entry.Env != nil {
+					if (*c).Env == nil {
+						(*c).Env = make(map[string]string)
+					}
+					for k, v := range entry.Env {
+						(*c).Env[k] = v
+					}
+				}
+				if entry.InitializationOptions != nil {
+					(*c).InitializationOptions = entry.InitializationOptions
+				}
+			} else {
+				entry.PluginName = plugin.Name
+				entry.PluginPath = plugin.Path
+				entry.PluginSource = plugin.Name
+				entry.Scope = "dynamic"
+				configs = append(configs, &entry)
+			}
+		}
+	}
 
 	for _, cfg := range configs {
 		cfg.PluginName = plugin.Name

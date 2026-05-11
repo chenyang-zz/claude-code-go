@@ -84,6 +84,14 @@ type PluginManifest struct {
 	// commands. Sensitive values are filtered when substituted into skill/agent
 	// content that goes to the model prompt.
 	UserConfig map[string]PluginConfigOption `json:"userConfig,omitempty"`
+	// McpServers declares MCP server configurations that the plugin provides.
+	// These are appended to (and override same-named entries from) the .mcp.json
+	// file when ExtractMcpServers is called.
+	McpServers map[string]*McpServerConfig `json:"mcpServers,omitempty"`
+	// LspServers declares LSP server configurations that the plugin provides.
+	// These are appended to (and override same-named entries from) the .lsp.json
+	// file when ExtractLspServers is called.
+	LspServers map[string]*LspServerConfig `json:"lspServers,omitempty"`
 }
 
 // LoadedPlugin represents a plugin that has been discovered and loaded into

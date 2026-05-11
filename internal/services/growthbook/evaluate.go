@@ -61,9 +61,9 @@ func logExposureForFeature(feature string) {
 		return
 	}
 
-	// TODO: Wire to 1P event logging pipeline when available.
-	// For now, the exposure is logged via the ExposureLogger interface
-	// which defaults to a no-op implementation.
+	// Exposure events are bridged to the analytics Emitter via SetExposureLogger
+	// in bootstrap (internal/app/bootstrap/app.go:514). When the 1P event
+	// logging pipeline is used directly, switch to NewFPExposureLogger.
 	attrs := getUserAttributes()
 	exposureLogger.LogExposure(feature, data, attrs)
 
