@@ -1,0 +1,32 @@
+internal/runtime/engine/provider_pool_test.go
+  s_865e849b6b0c41::t_cb32ba6f3d3d73 1-236
+CLAUDE.md
+  s_865e849b6b0c41::t_83bb1b5889d049 102-135
+AGENTS.md
+  s_865e849b6b0c41::t_87183e3e388926 103-135
+internal/runtime/engine/provider_pool.go
+  s_865e849b6b0c41::t_ff9fe552c06ba6 112
+  s_865e849b6b0c41::t_da5570b6d4f9de 1-111,113-120
+internal/app/bootstrap/app_test.go
+  s_865e849b6b0c41::t_5675e6b0286ded 713-718,737-742
+  s_865e849b6b0c41::t_8e437e25576193 684,686,688-693
+internal/app/bootstrap/app.go
+  s_865e849b6b0c41::t_4c4b7971fbe994 1412-1470
+  s_865e849b6b0c41::t_0b4dec09a9effc 1239-1245,1348-1351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a7e105d3c3059fdaf67dd2e3f9551039efe7d0ba",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
