@@ -681,11 +681,16 @@ func TestDefaultEngineFactoryMarksAnthropicClientFirstParty(t *testing.T) {
 	if !ok {
 		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
-	client, ok := runtime.Client.(*anthropic.Client)
+	client, ok := runtime.Client.(*engine.CircuitBreakerClient)
 	if !ok {
-		t.Fatalf("DefaultEngineFactory() client = %T, want *anthropic.Client", runtime.Client)
+		t.Fatalf("DefaultEngineFactory() client = %T, want *engine.CircuitBreakerClient[*anthropic.Client]", runtime.Client)
 	}
-	if !reflect.ValueOf(client).Elem().FieldByName("isFirstParty").Bool() {
+	inner := client.Unwrap()
+	ac, ok := inner.(*anthropic.Client)
+	if !ok {
+		t.Fatalf("DefaultEngineFactory() wrapped client = %T, want *anthropic.Client", inner)
+	}
+	if !reflect.ValueOf(ac).Elem().FieldByName("isFirstParty").Bool() {
 		t.Fatal("DefaultEngineFactory() anthropic client isFirstParty = false, want true")
 	}
 }
@@ -705,8 +710,12 @@ func TestDefaultEngineFactoryBuildsOpenAICompatibleRuntime(t *testing.T) {
 	if !ok {
 		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
-	if _, ok := runtime.Client.(*openai.Client); !ok {
-		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)
+	if _, ok := runtime.Client.(*engine.CircuitBreakerClient); !ok {
+		t.Fatalf("DefaultEngineFactory() client = %T, want *engine.CircuitBreakerClient", runtime.Client)
+	}
+	inner := runtime.Client.(*engine.CircuitBreakerClient).Unwrap()
+	if _, ok := inner.(*openai.Client); !ok {
+		t.Fatalf("DefaultEngineFactory() wrapped client = %T, want *openai.Client", inner)
 	}
 }
 
@@ -725,8 +734,12 @@ func TestDefaultEngineFactoryBuildsGLMRuntime(t *testing.T) {
 	if !ok {
 		t.Fatalf("DefaultEngineFactory() engine = %T, want *engine.Runtime", assembly.Engine)
 	}
-	if _, ok := runtime.Client.(*openai.Client); !ok {
-		t.Fatalf("DefaultEngineFactory() client = %T, want *openai.Client", runtime.Client)
+	if _, ok := runtime.Client.(*engine.CircuitBreakerClient); !ok {
+		t.Fatalf("DefaultEngineFactory() client = %T, want *engine.CircuitBreakerClient", runtime.Client)
+	}
+	inner := runtime.Client.(*engine.CircuitBreakerClient).Unwrap()
+	if _, ok := inner.(*openai.Client); !ok {
+		t.Fatalf("DefaultEngineFactory() wrapped client = %T, want *openai.Client", inner)
 	}
 }
 

@@ -100,3 +100,36 @@ func TestMyFeature(t *testing.T) {
 ### Fixture files
 
 Fixtures are stored at `{CLAUDE_CODE_TEST_FIXTURES_ROOT}/fixtures/{name}-stream-{sha1}.json` and should be committed to the repository. On replay, existing fixtures are returned immediately; missing fixtures produce an error asking to re-record.
+
+## Provider Resilience
+
+All provider clients are automatically wrapped with circuit breaker protection and can be configured with a fallback provider for automatic failover and load balancing.
+
+### Circuit breaker (always active)
+
+Every provider client is wrapped in a `CircuitBreakerClient` (3-state: closed → open → half-open) that prevents cascading failures. After 5 consecutive failures the breaker opens and rejects requests immediately for 30 seconds, then allows a trial request to test recovery.
+
+### Fallback provider (optional)
+
+Set these environment variables to configure a secondary provider that the `ProviderPool` will fail over to when the primary provider fails:
+
+| Variable | Purpose |
+|----------|---------|
+| `FALLBACK_PROVIDER` | Secondary provider type (`anthropic`, `openai-compatible`, `glm`) |
+| `FALLBACK_API_KEY` | API key for the fallback provider |
+| `FALLBACK_API_BASE_URL` | Base URL for the fallback provider |
+| `FALLBACK_MODEL` | Fallback model name (sets `Runtime.FallbackModel`) |
+
+When the primary provider returns an error and a fallback is configured, the `ProviderPool` automatically retries the request on the fallback provider. Circuit-broken providers are skipped immediately. The engine's retry loop (3 attempts with exponential backoff) operates on top of the pool, so each retry cycles through all available providers.
+
+### Architecture
+
+```
+Runtime.streamAndConsume()
+  └─ ProviderPool.Stream()           ← primary client (failover)
+       ├─ CircuitBreakerClient(A)
+       └─ CircuitBreakerClient(B)    ← FALLBACK_PROVIDER
+  └─ tryFallback()                   ← after retries exhausted
+       ├─ FallbackModel on pool      ← FALLBACK_MODEL
+       └─ FallbackClients            ← emergency fallback (not yet wired)
+```
