@@ -256,7 +256,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 			"sandboxed": true,
 		})
 		if dockerAvailable := checkDockerAvailable(); dockerAvailable {
-			wrapped, werr := wrapWithSandbox(command, timeoutMilliseconds)
+			wrapped, werr := wrapWithSandbox(command, timeoutMilliseconds, call.Context.WorkingDir)
 			if werr == nil {
 				command = wrapped
 			}
@@ -853,9 +853,15 @@ func checkDockerAvailable() bool {
 	return cmd.Run() == nil
 }
 
-func wrapWithSandbox(command string, timeoutMilliseconds int) (string, error) {
+func wrapWithSandbox(command string, timeoutMilliseconds int, workDir string) (string, error) {
 	image := "ubuntu:22.04"
 	args := []string{"run", "--rm", "-i", "--memory", "512m", "--cpus", "2", "--network", "none"}
+
+	// Mount current working directory into the container and set it as the working directory.
+	if workDir != "" {
+		args = append(args, "-v", workDir+":"+workDir)
+		args = append(args, "-w", workDir)
+	}
 
 	if timeoutMilliseconds > 0 {
 		seconds := timeoutMilliseconds / 1000
