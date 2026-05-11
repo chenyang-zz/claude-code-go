@@ -166,7 +166,7 @@ func (r *Recorder) replay(hash string) (*http.Response, error) {
 	if cached.Response.StatusCode == 0 {
 		resp.StatusCode = 200
 	}
-	resp.Status = http.StatusText(resp.StatusCode)
+	resp.Status = fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 
 	return resp, nil
 }
@@ -183,7 +183,7 @@ func recordedRequest(req *http.Request, body []byte) RecordedRequest {
 		}
 	}
 	if len(body) > 0 {
-		rr.Body = string(body)
+		rr.Body = string(SanitizeRequestBody(body))
 	}
 	return rr
 }

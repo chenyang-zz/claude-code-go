@@ -2,6 +2,7 @@ package vcr
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -25,7 +26,7 @@ func claudeConfigHome() string {
 	if err != nil {
 		return "/tmp/.claude"
 	}
-	return home + "/.claude"
+	return filepath.Join(home, ".claude")
 }
 
 // cwd returns the current working directory.

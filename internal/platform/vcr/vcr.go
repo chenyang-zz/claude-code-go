@@ -54,7 +54,7 @@ import (
 	"strconv"
 )
 
-// Enabled returns true when VCR replay mode is active.
+// Enabled returns true when VCR is active (either recording or replaying).
 func Enabled() bool {
 	return IsEnabled() || Recording()
 }
