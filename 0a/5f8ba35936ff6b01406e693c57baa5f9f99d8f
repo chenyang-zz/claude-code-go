@@ -1,0 +1,29 @@
+internal/core/featureflag/flag.go
+  s_175d1e09a11b34::t_b757a54ccfed64 200-209
+internal/platform/server/manager.go
+  s_175d1e09a11b34::t_8577638b2e994b 10,144-146,199-200,287,294
+  s_175d1e09a11b34::t_8566fcf257479a 1-9,11-143,147-198,201-286,288-293,295-370
+internal/platform/remote/ws.go
+  s_175d1e09a11b34::t_3b4782451faaef 102
+  s_175d1e09a11b34::t_31b5f57d5674c9 10,16-18,31-49,58,96-101,103-114,116,120-121,127-147,176-180,203-209,256
+internal/platform/server/session.go
+  s_175d1e09a11b34::t_3974ba7c295745 1-108
+internal/platform/server/types.go
+  s_175d1e09a11b34::t_b8532e456fab9b 1-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "0a5f8ba35936ff6b01406e693c57baa5f9f99d8f",
+  "prompts": {},
+  "sessions": {
+    "s_175d1e09a11b34": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6ccb1633-0652-4413-8003-c37ad17d836d",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
