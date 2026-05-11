@@ -25,8 +25,53 @@ func ExtractMcpServers(plugin *LoadedPlugin) ([]*McpServerConfig, error) {
 		return nil, fmt.Errorf("failed to load MCP servers for plugin %s: %w", plugin.Name, err)
 	}
 
-	// TODO: overlay settings from plugin.Manifest.McpServers once
-	// PluginManifest gains the field.
+	// Overlay MCP server configurations from the plugin manifest.
+	// Manifest-declared servers override same-named entries from the .mcp.json file.
+	if plugin.Manifest.McpServers != nil {
+		existingByName := make(map[string]int, len(configs))
+		for i, cfg := range configs {
+			existingByName[cfg.Name] = i
+		}
+		for name, manifestCfg := range plugin.Manifest.McpServers {
+			if manifestCfg == nil {
+				continue
+			}
+			entry := *manifestCfg
+			entry.Name = name
+			if idx, ok := existingByName[name]; ok {
+				c := &configs[idx]
+				if entry.Transport != "" {
+					(*c).Transport = entry.Transport
+				}
+				if entry.Command != "" {
+					(*c).Command = entry.Command
+				}
+				if len(entry.Args) > 0 {
+					(*c).Args = entry.Args
+				}
+				if entry.URL != "" {
+					(*c).URL = entry.URL
+				}
+				if len(entry.Headers) > 0 {
+					(*c).Headers = entry.Headers
+				}
+				if entry.Env != nil {
+					if (*c).Env == nil {
+						(*c).Env = make(map[string]string)
+					}
+					for k, v := range entry.Env {
+						(*c).Env[k] = v
+					}
+				}
+			} else {
+				entry.PluginName = plugin.Name
+				entry.PluginPath = plugin.Path
+				entry.PluginSource = plugin.Name
+				entry.Scope = "dynamic"
+				configs = append(configs, &entry)
+			}
+		}
+	}
 
 	for _, cfg := range configs {
 		cfg.PluginName = plugin.Name

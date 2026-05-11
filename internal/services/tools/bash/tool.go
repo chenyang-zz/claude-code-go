@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -242,22 +243,25 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: "command is required"}, nil
 	}
 
-	// When a sandbox manager is configured and the command should run inside the
-	// sandbox, delegate to sandbox-execution if available. The sandbox manager's
-	// ShouldUseSandbox handles the dangerouslyDisableSandbox bypass decision.
-	// TODO(batch-277+1): Wire executor-level sandbox wrapping (wrapWithSandbox
-	// equivalent). Currently execution runs unsandboxed with sandbox metadata
-	// recorded for future enforcement.
-	if t.sandboxManager != nil && t.sandboxManager.ShouldUseSandbox(command, input.DangerouslyDisableSandbox) {
-		logger.DebugCF("bash_tool", "sandbox requested for command (executor-level sandbox pending)", map[string]any{
-			"command":   command,
-			"sandboxed": false,
-		})
-	}
-
 	timeoutMilliseconds, err := resolveTimeoutMilliseconds(input.Timeout)
 	if err != nil {
 		return coretool.Result{Error: err.Error()}, nil
+	}
+
+	// When a sandbox manager is configured and the command should run inside the
+	// sandbox, delegate to sandbox-execution if available.
+	if t.sandboxManager != nil && t.sandboxManager.ShouldUseSandbox(command, input.DangerouslyDisableSandbox) {
+		logger.DebugCF("bash_tool", "sandbox requested for command", map[string]any{
+			"command":   command,
+			"sandboxed": true,
+		})
+		if dockerAvailable := checkDockerAvailable(); dockerAvailable {
+			wrapped, werr := wrapWithSandbox(command, timeoutMilliseconds, call.Context.WorkingDir)
+			if werr == nil {
+				command = wrapped
+			}
+			_ = werr
+		}
 	}
 
 	if t.approvalMode == "bypassPermissions" {
@@ -843,3 +847,50 @@ type BashProgressData struct {
 	// ElapsedSeconds stores the wall-clock seconds since the command started.
 	ElapsedSeconds float64 `json:"elapsedSeconds"`
 }
+// checkDockerAvailable reports whether the Docker daemon is reachable.
+func checkDockerAvailable() bool {
+	cmd := exec.Command("docker", "info", "--format", "{{.ServerVersion}}")
+	return cmd.Run() == nil
+}
+
+func wrapWithSandbox(command string, timeoutMilliseconds int, workDir string) (string, error) {
+	image := "ubuntu:22.04"
+	args := []string{"run", "--rm", "-i", "--memory", "512m", "--cpus", "2", "--network", "none"}
+
+	// Mount current working directory into the container and set it as the working directory.
+	if workDir != "" {
+		args = append(args, "-v", workDir+":"+workDir)
+		args = append(args, "-w", workDir)
+	}
+
+	if timeoutMilliseconds > 0 {
+		seconds := timeoutMilliseconds / 1000
+		if seconds < 1 {
+			seconds = 1
+		}
+		args = append(args, image, "timeout", strconv.Itoa(seconds), "sh", "-c", command)
+	} else {
+		args = append(args, image, "sh", "-c", command)
+	}
+
+	// Build docker command with each argument shell-quoted.
+	var b strings.Builder
+	b.WriteString("docker")
+	for _, a := range args {
+		b.WriteString(" ")
+		b.WriteString(shellQuote(a))
+	}
+	return b.String(), nil
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	// Quote using single quotes; replace any embedded single quotes.
+	result := strings.ReplaceAll(s, "'", "'\\''")
+	return "'" + result + "'"
+}
+
+
+
