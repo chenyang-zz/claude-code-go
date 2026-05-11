@@ -630,6 +630,9 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	})); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(repl.NewProviderCommandAdapter(runner)); err != nil {
+		return nil, err
+	}
 	loginRunner, loginRunnerErr := servicecommands.NewLoginRunner(servicecommands.LoginRunnerDeps{
 		HomeDir:    dereferenceConfig(cfg).HomeDir,
 		ProjectDir: dereferenceConfig(cfg).ProjectPath,
@@ -1236,8 +1239,13 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 			})
 		}
 
-		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
-		runtime.StatsCollector = sharedRuntimeStats
+		// Wrap primary client with circuit breaker and optional provider pool for
+		// automatic failover and load balancing across fallback providers.
+		wrappedClient, fbModel := wrapClientWithResilience(client, "primary")
+		runtime := engine.New(wrappedClient, cfg.Model, toolExecutor, toolCatalog...)
+		if fbModel != "" {
+			runtime.FallbackModel = fbModel
+		}
 		runtime.StatsCollector = sharedRuntimeStats
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
@@ -1340,7 +1348,11 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 				HTTPClient: nil,
 			})
 		}
-		runtime := engine.New(client, cfg.Model, toolExecutor, toolCatalog...)
+		wrappedClient, fbModel := wrapClientWithResilience(client, "primary")
+		runtime := engine.New(wrappedClient, cfg.Model, toolExecutor, toolCatalog...)
+		if fbModel != "" {
+			runtime.FallbackModel = fbModel
+		}
 		runtime.StatsCollector = sharedRuntimeStats
 		runtime.Hooks = cfg.Hooks
 		runtime.DisableAllHooks = cfg.DisableAllHooks
@@ -1398,6 +1410,65 @@ func DefaultEngineFactory(cfg coreconfig.Config, backgroundTaskStore *runtimeses
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
+}
+
+// wrapClientWithResilience wraps a model.Client with circuit breaker protection
+// and optionally creates a ProviderPool with a fallback provider configured via
+// environment variables (FALLBACK_PROVIDER, FALLBACK_API_KEY, FALLBACK_API_BASE_URL,
+// FALLBACK_MODEL). Returns the wrapped client and an optional fallback model name.
+func wrapClientWithResilience(client model.Client, name string) (model.Client, string) {
+	cbClient := engine.NewCircuitBreakerClient(client, name, model.NewCircuitBreaker(model.DefaultCircuitBreakerSettings()))
+
+	fbProvider := os.Getenv("FALLBACK_PROVIDER")
+	if strings.TrimSpace(fbProvider) == "" {
+		return cbClient, ""
+	}
+
+	fbAPIKey := os.Getenv("FALLBACK_API_KEY")
+	fbBaseURL := os.Getenv("FALLBACK_API_BASE_URL")
+	fbModel := os.Getenv("FALLBACK_MODEL")
+
+	var fbClient model.Client
+	switch coreconfig.NormalizeProvider(fbProvider) {
+	case coreconfig.ProviderAnthropic:
+		fbClient = anthropic.NewClient(anthropic.Config{
+			APIKey:  fbAPIKey,
+			BaseURL: fbBaseURL,
+		})
+	case coreconfig.ProviderOpenAICompatible, coreconfig.ProviderGLM:
+		fbClient = openai.NewClient(openai.Config{
+			Provider: fbProvider,
+			APIKey:   fbAPIKey,
+			BaseURL:  fbBaseURL,
+		})
+	default:
+		logger.WarnCF("bootstrap", "unsupported fallback provider", map[string]any{
+			"provider": fbProvider,
+		})
+		return cbClient, fbModel
+	}
+
+	if fbClient == nil {
+		logger.WarnCF("bootstrap", "failed to create fallback client", map[string]any{
+			"provider": fbProvider,
+		})
+		return cbClient, fbModel
+	}
+
+	fbWrapped := engine.NewCircuitBreakerClient(fbClient, "fallback-"+fbProvider, model.NewCircuitBreaker(model.DefaultCircuitBreakerSettings()))
+	pool := engine.NewProviderPool(
+		[]model.Client{cbClient, fbWrapped},
+		[]string{name, "fallback"},
+		engine.LoadBalancePrimaryWithFailover,
+	)
+
+	logger.DebugCF("bootstrap", "created provider pool with fallback", map[string]any{
+		"primary":        name,
+		"fallback":       fbProvider,
+		"strategy":       "primary_with_failover",
+		"fallback_model": fbModel,
+	})
+	return pool, fbModel
 }
 
 // buildSessionConfigSnapshot assembles the current session configuration visible to guide agents.
