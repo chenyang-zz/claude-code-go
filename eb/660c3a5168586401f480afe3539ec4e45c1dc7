@@ -1,0 +1,31 @@
+internal/services/tools/bash/tool.go
+  s_2b07e44294a6bf::t_8cec370e7c8e2f 254,256,258,261-262,264
+  s_2b07e44294a6bf::t_d5c38336ac2c59 850-857,890
+  s_2b07e44294a6bf::t_bf70381ee63e6f 246-250,252,259-260,263
+  s_2b07e44294a6bf::t_a928efe9a5e627 858-889
+  s_2b07e44294a6bf::t_e7d86ac2f9e762 7
+internal/platform/plugin/types.go
+  s_2b07e44294a6bf::t_45555e37184cba 87-94
+internal/platform/plugin/lsp_servers.go
+  s_2b07e44294a6bf::t_0740fb9878fe38 27-70
+internal/services/growthbook/evaluate.go
+  s_2b07e44294a6bf::t_5f654af87977f2 64-66
+internal/platform/plugin/mcp_servers.go
+  s_2b07e44294a6bf::t_af734aecf5260e 28-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "eb660c3a5168586401f480afe3539ec4e45c1dc7",
+  "prompts": {},
+  "sessions": {
+    "s_2b07e44294a6bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "950db636-f238-4932-9ce7-e680ae4063b3",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
