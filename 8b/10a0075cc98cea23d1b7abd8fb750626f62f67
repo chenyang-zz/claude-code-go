@@ -1,0 +1,20 @@
+internal/services/tools/bash/tool.go
+  s_2b07e44294a6bf::t_57d268b5744ea8 856,860-864
+  s_2b07e44294a6bf::t_239613f3a046f4 259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "8b10a0075cc98cea23d1b7abd8fb750626f62f67",
+  "prompts": {},
+  "sessions": {
+    "s_2b07e44294a6bf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "950db636-f238-4932-9ce7-e680ae4063b3",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
