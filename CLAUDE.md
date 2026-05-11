@@ -41,3 +41,62 @@ This project is indexed by GitNexus as **claude-code-go** (23418 symbols, 59864 
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Testing with VCR
+
+API integration tests support a VCR (Video Cassette Recording) mode: record real API responses once, then replay them deterministically in CI without real API calls.
+
+### Quick start
+
+```bash
+# 1. Record (requires API key)
+VCR_RECORD=true ANTHROPIC_API_KEY=sk-... ANTHROPIC_MODEL=deepseek-v4-pro \
+  go test ./internal/platform/api/anthropic/ -run TestVCR -v
+
+# 2. Replay (no API key needed, zero network)
+VCR_ENABLED=true ANTHROPIC_MODEL=deepseek-v4-pro \
+  go test ./internal/platform/api/anthropic/ -run TestVCR -v
+```
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `VCR_ENABLED=true` | Enable replay mode — read fixtures, no network calls |
+| `VCR_RECORD=true` | Enable record mode — call real API, save fixtures |
+| `CLAUDE_CODE_TEST_FIXTURES_ROOT` | Fixture directory; set to project root for stable paths |
+| `ANTHROPIC_BASE_URL` | API gateway URL override (for proxies / relays) |
+| `ANTHROPIC_MODEL` | Model name (default: `claude-sonnet-4-5-20250514`) |
+
+### Writing a new VCR test
+
+```go
+import "github.com/sheepzhao/claude-code-go/internal/platform/vcr"
+
+func TestMyFeature(t *testing.T) {
+    if !vcr.Enabled() && !vcr.Recording() {
+        t.Skip("set VCR_ENABLED=true or VCR_RECORD=true")
+    }
+
+    inner := anthropic.NewClient(anthropic.Config{
+        APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+        BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
+    })
+
+    wrapped := vcr.WrapModelClient("my-fixture-name", inner)
+    stream, _ := wrapped.Stream(ctx, model.Request{
+        Model: os.Getenv("ANTHROPIC_MODEL"),
+        Messages: []message.Message{
+            {Role: message.RoleUser, Content: []message.ContentPart{message.TextPart("hi")}},
+        },
+    })
+
+    for evt := range stream {
+        // Verify events
+    }
+}
+```
+
+### Fixture files
+
+Fixtures are stored at `{CLAUDE_CODE_TEST_FIXTURES_ROOT}/fixtures/{name}-stream-{sha1}.json` and should be committed to the repository. On replay, existing fixtures are returned immediately; missing fixtures produce an error asking to re-record.

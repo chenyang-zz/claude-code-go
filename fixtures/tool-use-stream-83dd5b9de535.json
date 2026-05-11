@@ -1,0 +1,86 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "What is 2+2? Use the calculator tool."
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "Name": "calculator",
+        "Description": "Evaluate a mathematical expression",
+        "InputSchema": {
+          "properties": {
+            "expression": {
+              "description": "The math expression to evaluate",
+              "type": "string"
+            }
+          },
+          "required": [
+            "expression"
+          ],
+          "type": "object"
+        }
+      }
+    ]
+  },
+  "events": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Thinking": "The user asks: \"What is 2+2? Use the calculator tool.\" I should use the calculator tool to evaluate 2+2.",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "tool_use",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": {
+        "ID": "call_00_ivaOvvphV3rL8eiwc9ni8200",
+        "Name": "calculator",
+        "Input": {
+          "expression": "2+2"
+        }
+      },
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "done",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "tool_use",
+      "Usage": {
+        "input_tokens": 0,
+        "output_tokens": 75,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "ResponseID": ""
+    }
+  ]
+}

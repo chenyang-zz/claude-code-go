@@ -1,0 +1,62 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Reply with exactly one word: hello"
+          }
+        ]
+      }
+    ]
+  },
+  "events": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Thinking": "We are asked to reply with exactly one word: hello. So the response should be \"hello\". The instruction says \"Reply with exactly one word: hello\", so we output just that word.",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "hello",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "done",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "end_turn",
+      "Usage": {
+        "input_tokens": 0,
+        "output_tokens": 41,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "ResponseID": ""
+    }
+  ]
+}
