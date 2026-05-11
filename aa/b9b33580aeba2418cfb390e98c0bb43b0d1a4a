@@ -1,0 +1,27 @@
+internal/platform/vcr/vcr.go
+  s_865e849b6b0c41::t_6ae530afb98556 57
+internal/platform/vcr/recorder.go
+  s_865e849b6b0c41::t_9fabf8ab1a4194 169
+  s_865e849b6b0c41::t_df8fc40eac927a 186
+internal/platform/vcr/model_client_wrapper.go
+  s_865e849b6b0c41::t_b798cbd2e559f8 122-127
+internal/platform/vcr/dehydrate.go
+  s_865e849b6b0c41::t_7ebc443ccceaef 29
+  s_865e849b6b0c41::t_9ac65350a6895a 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "aab9b33580aeba2418cfb390e98c0bb43b0d1a4a",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
