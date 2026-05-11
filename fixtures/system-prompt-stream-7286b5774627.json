@@ -1,0 +1,128 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "What is the capital of France?"
+          }
+        ]
+      }
+    ],
+    "system": "You are a helpful assistant. Always respond in JSON format with a single 'answer' field."
+  },
+  "events": [
+    {
+      "Type": "thinking",
+      "Text": "",
+      "Thinking": "We are asked: \"What is the capital of France?\" The answer is Paris. We need to respond in JSON format with a single 'answer' field. So the response should be {\"answer\": \"Paris\"}.",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "{\"",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "answer",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "\":",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": " \"",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "Paris",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "text_delta",
+      "Text": "\"}",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "",
+      "Usage": null,
+      "ResponseID": ""
+    },
+    {
+      "Type": "done",
+      "Text": "",
+      "Thinking": "",
+      "Signature": "",
+      "Error": "",
+      "ToolUse": null,
+      "ServerToolUse": null,
+      "WebSearchResult": null,
+      "StopReason": "end_turn",
+      "Usage": {
+        "input_tokens": 0,
+        "output_tokens": 51,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "ResponseID": ""
+    }
+  ]
+}
