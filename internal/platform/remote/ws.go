@@ -7,10 +7,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
+
+// DefaultPingInterval is the interval between WebSocket keepalive pings.
+const DefaultPingInterval = 30 * time.Second
 
 // WebSocketClient implements one bidirectional WebSocket event stream.
 type WebSocketClient struct {
@@ -24,6 +28,25 @@ type WebSocketClient struct {
 	closeOnce sync.Once
 	// closed is set to true after Close() is called.
 	closed atomic.Bool
+	// pingInterval is the duration between keepalive pings. 0 means disabled.
+	pingInterval time.Duration
+	// pingTicker fires at pingInterval to send keepalive pings.
+	pingTicker *time.Ticker
+	// stopPing signals the ping goroutine to stop.
+	stopPing chan struct{}
+}
+
+// WebSocketOption configures a WebSocketClient.
+type WebSocketOption func(*WebSocketClient)
+
+// WithPingInterval sets the WebSocket keepalive ping interval.
+// When set, the client sends periodic pings and expects pong responses.
+// A read deadline is set to 3x the interval so stale connections are
+// detected and the read loop exits, allowing the caller to reconnect.
+func WithPingInterval(interval time.Duration) WebSocketOption {
+	return func(c *WebSocketClient) {
+		c.pingInterval = interval
+	}
 }
 
 // DialWebSocket opens one ws/wss connection and starts a background message reader.
@@ -32,6 +55,7 @@ func DialWebSocket(
 	endpoint string,
 	headers map[string]string,
 	dialer *websocket.Dialer,
+	opts ...WebSocketOption,
 ) (*WebSocketClient, error) {
 	trimmedEndpoint := strings.TrimSpace(endpoint)
 	if trimmedEndpoint == "" {
@@ -69,14 +93,56 @@ func DialWebSocket(
 		conn:     conn,
 		cancel:   cancel,
 		streamCh: make(chan streamResult, 16),
+		stopPing: make(chan struct{}),
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	// Configure ping/pong keepalive if enabled.
+	if c.pingInterval > 0 {
+		readDeadline := 3 * c.pingInterval
+		if err := conn.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+			cancel()
+			_ = conn.Close()
+			return nil, fmt.Errorf("set read deadline: %w", err)
+		}
+		conn.SetPongHandler(func(string) error {
+			return conn.SetReadDeadline(time.Now().Add(readDeadline))
+		})
+		c.pingTicker = time.NewTicker(c.pingInterval)
+		go c.pingLoop(readDeadline)
+	}
+
 	go c.readLoop(streamCtx)
 
 	logger.DebugCF("remote_ws", "websocket stream connected", map[string]any{
-		"endpoint": trimmedEndpoint,
+		"endpoint":     trimmedEndpoint,
+		"ping_seconds": c.pingInterval.Seconds(),
 	})
 
 	return c, nil
+}
+
+// pingLoop sends periodic ping frames to keep the connection alive.
+func (c *WebSocketClient) pingLoop(readDeadline time.Duration) {
+	defer c.pingTicker.Stop()
+	for {
+		select {
+		case <-c.stopPing:
+			return
+		case <-c.pingTicker.C:
+			if c.closed.Load() {
+				return
+			}
+			if err := c.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(readDeadline/3)); err != nil {
+				logger.DebugCF("remote_ws", "ping write failed", map[string]any{
+					"error": err.Error(),
+				})
+				return
+			}
+		}
+	}
 }
 
 // Recv returns one WebSocket message converted into one normalized remote event.
@@ -107,6 +173,11 @@ func (c *WebSocketClient) Close() error {
 
 	c.closeOnce.Do(func() {
 		c.closed.Store(true)
+		// Stop ping loop.
+		select {
+		case c.stopPing <- struct{}{}:
+		default:
+		}
 		c.cancel()
 		if c.conn != nil {
 			_ = c.conn.Close()
@@ -127,6 +198,13 @@ func (c *WebSocketClient) Send(data []byte) error {
 		return fmt.Errorf("write websocket message: %w", err)
 	}
 	return nil
+}
+
+// GetLastSequenceNum returns 0 as the base WebSocket client does not track
+// sequence numbers. Implemented for the SeqNumProvider interface used by
+// ResilientEventStream.
+func (c *WebSocketClient) GetLastSequenceNum() int64 {
+	return 0
 }
 
 func (c *WebSocketClient) readLoop(ctx context.Context) {
@@ -175,7 +253,7 @@ func (c *WebSocketClient) readLoop(ctx context.Context) {
 	}
 }
 
-// websocketMessageTypeName normalizes gorilla message types into stable string labels.
+// websocketMessageTypeName normalises gorilla message types into stable string labels.
 func websocketMessageTypeName(messageType int) string {
 	switch messageType {
 	case websocket.TextMessage:
