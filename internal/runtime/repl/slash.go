@@ -2,9 +2,11 @@ package repl
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/command"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/engine"
 	servicecommands "github.com/sheepzhao/claude-code-go/internal/services/commands"
 )
 
@@ -81,4 +83,110 @@ func (c addDirCommandAdapter) Metadata() command.Metadata {
 // Execute forwards `/add-dir` handling back into the runner text interaction flow.
 func (c addDirCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
 	return command.Result{}, c.runner.runAddDirCommand(ctx, c.cmd, args.RawLine)
+}
+
+// providerCommandAdapter exposes the /provider command through the shared command registry.
+// It implements servicecommands.ProviderSwitcher by extracting state from the engine Runtime.
+type providerCommandAdapter struct {
+	cmd servicecommands.ProviderCommand
+}
+
+// NewProviderCommandAdapter creates a /provider command wired to the given runner's runtime.
+func NewProviderCommandAdapter(runner *Runner) command.Command {
+	return providerCommandAdapter{
+		cmd: servicecommands.ProviderCommand{
+			Switcher: &runtimeProviderSwitcher{runner: runner},
+		},
+	}
+}
+
+// Metadata exposes the underlying command's slash descriptor.
+func (c providerCommandAdapter) Metadata() command.Metadata {
+	return c.cmd.Metadata()
+}
+
+// Execute forwards to the underlying command's handler.
+func (c providerCommandAdapter) Execute(ctx context.Context, args command.Args) (command.Result, error) {
+	return c.cmd.Execute(ctx, args)
+}
+
+// runtimeProviderSwitcher implements servicecommands.ProviderSwitcher by reading
+// the engine Runtime attached to the runner.
+type runtimeProviderSwitcher struct {
+	runner *Runner
+}
+
+func (s *runtimeProviderSwitcher) getRuntime() *engine.Runtime {
+	if s.runner == nil {
+		return nil
+	}
+	rt, _ := s.runner.Engine.(*engine.Runtime)
+	return rt
+}
+
+func (s *runtimeProviderSwitcher) getPool() *engine.ProviderPool {
+	rt := s.getRuntime()
+	if rt == nil {
+		return nil
+	}
+	pool, _ := rt.Client.(*engine.ProviderPool)
+	return pool
+}
+
+func (s *runtimeProviderSwitcher) Strategy() string {
+	pool := s.getPool()
+	if pool == nil {
+		return "single"
+	}
+	return pool.StrategyName()
+}
+
+func (s *runtimeProviderSwitcher) NumProviders() int {
+	pool := s.getPool()
+	if pool == nil {
+		return 1
+	}
+	return pool.NumProviders()
+}
+
+func (s *runtimeProviderSwitcher) Providers() []servicecommands.ProviderStatus {
+	pool := s.getPool()
+	if pool == nil {
+		return nil
+	}
+	poolInfo := pool.Providers()
+	result := make([]servicecommands.ProviderStatus, len(poolInfo))
+	for i, pi := range poolInfo {
+		result[i] = servicecommands.ProviderStatus{
+			Name:                pi.Name,
+			Position:            pi.Position,
+			CircuitBreakerState: pi.CircuitBreakerState,
+			FailureCount:        pi.FailureCount,
+			TripCount:           pi.TripCount,
+		}
+	}
+	return result
+}
+
+func (s *runtimeProviderSwitcher) SetActiveProvider(name string) error {
+	pool := s.getPool()
+	if pool == nil {
+		return fmt.Errorf("provider pool not configured, cannot switch")
+	}
+	return pool.SetActiveProvider(name)
+}
+
+func (s *runtimeProviderSwitcher) FallbackModel() string {
+	rt := s.getRuntime()
+	if rt == nil {
+		return ""
+	}
+	return rt.FallbackModel
+}
+
+func (s *runtimeProviderSwitcher) SetFallbackModel(model string) {
+	rt := s.getRuntime()
+	if rt != nil {
+		rt.FallbackModel = model
+	}
 }

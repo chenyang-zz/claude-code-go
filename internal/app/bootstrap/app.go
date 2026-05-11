@@ -630,6 +630,9 @@ func newCommandRegistry(cfg *coreconfig.Config, runner *repl.Runner, globalSetti
 	})); err != nil {
 		return nil, err
 	}
+	if err := registry.Register(repl.NewProviderCommandAdapter(runner)); err != nil {
+		return nil, err
+	}
 	loginRunner, loginRunnerErr := servicecommands.NewLoginRunner(servicecommands.LoginRunnerDeps{
 		HomeDir:    dereferenceConfig(cfg).HomeDir,
 		ProjectDir: dereferenceConfig(cfg).ProjectPath,

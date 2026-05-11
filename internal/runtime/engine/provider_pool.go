@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
@@ -38,6 +39,7 @@ type providerClient struct {
 // Individual Stream failures are returned to the engine's retry loop, which
 // naturally rotates through providers on each retry attempt.
 type ProviderPool struct {
+	mu       sync.Mutex
 	clients  []providerClient
 	strategy LoadBalanceStrategy
 	counter  atomic.Uint64
@@ -66,18 +68,24 @@ func NewProviderPool(clients []model.Client, names []string, strategy LoadBalanc
 // Stream implements model.Client by selecting a provider based on the pool's
 // load-balance strategy.
 func (p *ProviderPool) Stream(ctx context.Context, req model.Request) (model.Stream, error) {
-	if len(p.clients) == 0 {
+	p.mu.Lock()
+	clients := p.clients
+	strategy := p.strategy
+	numProviders := len(clients)
+	p.mu.Unlock()
+
+	if numProviders == 0 {
 		return nil, fmt.Errorf("provider pool: no providers configured")
 	}
-	if len(p.clients) == 1 {
-		return p.clients[0].client.Stream(ctx, req)
+	if numProviders == 1 {
+		return clients[0].client.Stream(ctx, req)
 	}
 
-	switch p.strategy {
+	switch strategy {
 	case LoadBalanceRoundRobin:
-		return p.roundRobinStream(ctx, req)
+		return p.roundRobinStream(ctx, req, clients)
 	default:
-		return p.failoverStream(ctx, req)
+		return p.failoverStream(ctx, req, clients)
 	}
 }
 
@@ -85,9 +93,9 @@ func (p *ProviderPool) Stream(ctx context.Context, req model.Request) (model.Str
 // CircuitBreakerOpenError it is skipped immediately. For other errors the
 // next provider is also tried, since different providers may accept the
 // same request (different credentials, models, or availability).
-func (p *ProviderPool) failoverStream(ctx context.Context, req model.Request) (model.Stream, error) {
+func (p *ProviderPool) failoverStream(ctx context.Context, req model.Request, clients []providerClient) (model.Stream, error) {
 	var lastErr error
-	for _, pc := range p.clients {
+	for _, pc := range clients {
 		stream, err := pc.client.Stream(ctx, req)
 		if err == nil {
 			return stream, nil
@@ -108,13 +116,75 @@ func (p *ProviderPool) failoverStream(ctx context.Context, req model.Request) (m
 }
 
 // roundRobinStream picks the next provider in round-robin order.
-func (p *ProviderPool) roundRobinStream(ctx context.Context, req model.Request) (model.Stream, error) {
+func (p *ProviderPool) roundRobinStream(ctx context.Context, req model.Request, clients []providerClient) (model.Stream, error) {
 	n := p.counter.Add(1)
-	idx := int(n % uint64(len(p.clients)))
-	return p.clients[idx].client.Stream(ctx, req)
+	idx := int(n % uint64(len(clients)))
+	return clients[idx].client.Stream(ctx, req)
 }
 
 // NumProviders returns the number of configured providers.
 func (p *ProviderPool) NumProviders() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return len(p.clients)
+}
+
+// ProviderInfo carries diagnostic state for one provider in the pool.
+type ProviderInfo struct {
+	Name                string
+	Position            int
+	CircuitBreakerState string
+	FailureCount        int
+	TripCount           int
+	Strategy            string
+}
+
+// Providers returns diagnostic information about all providers in the pool.
+func (p *ProviderPool) Providers() []ProviderInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	info := make([]ProviderInfo, 0, len(p.clients))
+	for i, pc := range p.clients {
+		pi := ProviderInfo{
+			Name:     pc.name,
+			Position: i,
+		}
+		if cbc, ok := pc.client.(*CircuitBreakerClient); ok {
+			pi.CircuitBreakerState = string(cbc.Breaker().State())
+			pi.FailureCount = cbc.Breaker().FailureCount()
+			pi.TripCount = cbc.Breaker().TripCount()
+		}
+		info = append(info, pi)
+	}
+	return info
+}
+
+// SetActiveProvider moves the named provider to the front of the pool,
+// making it the primary target for future Stream calls under
+// PrimaryWithFailover strategy. Returns an error if the name is not found.
+func (p *ProviderPool) SetActiveProvider(name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for i, pc := range p.clients {
+		if pc.name == name {
+			// Move to front by creating a new slice
+			p.clients = append([]providerClient{pc}, append(p.clients[:i:i], p.clients[i+1:]...)...)
+			// Reset round-robin counter so the first call hits the new primary
+			p.counter.Store(0)
+			return nil
+		}
+	}
+	return fmt.Errorf("provider %q not found in pool", name)
+}
+
+// StrategyName returns the human-readable name of the active strategy.
+func (p *ProviderPool) StrategyName() string {
+	switch p.strategy {
+	case LoadBalanceRoundRobin:
+		return "round-robin"
+	default:
+		return "primary-with-failover"
+	}
 }

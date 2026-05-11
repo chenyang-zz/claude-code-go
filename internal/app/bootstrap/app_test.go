@@ -751,7 +751,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}
 
 	cmds := registry.List()
-	if len(cmds) != 115 {
+	if len(cmds) != 116 {
 		t.Fatalf("newCommandRegistry() list len = %d, want 115", len(cmds))
 	}
 	if got := cmds[0].Metadata(); !reflect.DeepEqual(got, command.Metadata{
@@ -856,48 +856,55 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 		t.Fatalf("newCommandRegistry() fourteenth metadata = %#v, want add-dir metadata", got)
 	}
 	if got := cmds[14].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+		Name:        "provider",
+		Description: "Show or switch the active provider for load balancing and failover",
+		Usage:       "/provider [/provider switch <name> | /provider fallback <model>]",
+	}) {
+		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want provider metadata", got)
+	}
+	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "login",
 		Description: "Sign in with your Anthropic account",
 		Usage:       "/login",
 	}) {
-		t.Fatalf("newCommandRegistry() fifteenth metadata = %#v, want login metadata", got)
+		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want login metadata", got)
 	}
-	if got := cmds[15].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "logout",
 		Description: "Sign out from your Anthropic account",
 		Usage:       "/logout",
 	}) {
-		t.Fatalf("newCommandRegistry() sixteenth metadata = %#v, want logout metadata", got)
+		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want logout metadata", got)
 	}
-	if got := cmds[16].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[17].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "cost",
 		Description: "Show the total cost and duration of the current session",
 		Usage:       "/cost",
 	}) {
-		t.Fatalf("newCommandRegistry() seventeenth metadata = %#v, want cost metadata", got)
+		t.Fatalf("newCommandRegistry() eighteenth metadata = %#v, want cost metadata", got)
 	}
-	if got := cmds[17].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "status",
 		Description: "Show Claude Code status including version, model, account, API connectivity, and tool statuses",
 		Usage:       "/status",
 	}) {
-		t.Fatalf("newCommandRegistry() eighteenth metadata = %#v, want status metadata", got)
+		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want status metadata", got)
 	}
-	if got := cmds[18].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[19].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mcp",
 		Description: "Manage MCP servers",
 		Usage:       "/mcp [enable|disable <server-name>] | /mcp detail <server-name> | /mcp authenticate <server-name>",
 	}) {
 		t.Fatalf("newCommandRegistry() nineteenth metadata = %#v, want mcp metadata", got)
 	}
-	if got := cmds[19].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[20].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "session",
 		Description: "Show remote session URL and QR code",
 		Usage:       "/session",
 	}) {
 		t.Fatalf("newCommandRegistry() twentieth metadata = %#v, want session metadata", got)
 	}
-	if got := cmds[20].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[21].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "branch",
 		Aliases:     []string{"fork"},
 		Description: "Create a branch of the current conversation at this point",
@@ -905,49 +912,49 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-first metadata = %#v, want branch metadata", got)
 	}
-	if got := cmds[21].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[22].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "voice",
 		Description: "Toggle voice mode",
 		Usage:       "/voice",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-second metadata = %#v, want voice metadata", got)
 	}
-	if got := cmds[22].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[23].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "ide",
 		Description: "Manage IDE integrations and show status",
 		Usage:       "/ide [open]",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-third metadata = %#v, want ide metadata", got)
 	}
-	if got := cmds[23].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[24].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "init",
 		Description: "Initialize a new CLAUDE.md file with codebase documentation",
 		Usage:       "/init",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-fourth metadata = %#v, want init metadata", got)
 	}
-	if got := cmds[24].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[25].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "install-github-app",
 		Description: "Set up Claude GitHub Actions for a repository",
 		Usage:       "/install-github-app",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-fifth metadata = %#v, want install-github-app metadata", got)
 	}
-	if got := cmds[25].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[26].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "install-slack-app",
 		Description: "Install the Claude Slack app",
 		Usage:       "/install-slack-app",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-sixth metadata = %#v, want install-slack-app metadata", got)
 	}
-	if got := cmds[26].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[27].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "remote-env",
 		Description: "Configure the default remote environment for teleport sessions",
 		Usage:       "/remote-env",
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-seventh metadata = %#v, want remote-env metadata", got)
 	}
-	if got := cmds[27].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[28].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "desktop",
 		Aliases:     []string{"app"},
 		Description: "Continue the current session in Claude Desktop",
@@ -955,7 +962,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-eighth metadata = %#v, want desktop metadata", got)
 	}
-	if got := cmds[28].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[29].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mobile",
 		Aliases:     []string{"ios", "android"},
 		Description: "Show QR code to download the Claude mobile app",
@@ -963,7 +970,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() twenty-ninth metadata = %#v, want mobile metadata", got)
 	}
-	if got := cmds[29].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[30].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "feedback",
 		Aliases:     []string{"bug"},
 		Description: "Submit feedback about Claude Code",
@@ -971,7 +978,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() thirtieth metadata = %#v, want feedback metadata", got)
 	}
-	if got := cmds[30].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[31].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "exit",
 		Aliases:     []string{"quit"},
 		Description: "Exit the REPL",
@@ -979,28 +986,28 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-first metadata = %#v, want exit metadata", got)
 	}
-	if got := cmds[31].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "install",
 		Description: "Install Claude Code native build",
 		Usage:       "/install [options]",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-second metadata = %#v, want install metadata", got)
 	}
-	if got := cmds[32].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "context",
 		Description: "Show current context usage",
 		Usage:       "/context",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-third metadata = %#v, want context metadata", got)
 	}
-	if got := cmds[33].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[34].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "review",
 		Description: "Review a pull request",
 		Usage:       "/review [pr-number]",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-fourth metadata = %#v, want review metadata", got)
 	}
-	if got := cmds[34].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[35].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "rewind",
 		Aliases:     []string{"checkpoint"},
 		Description: "Restore the code and/or conversation to a previous point",
@@ -1008,35 +1015,35 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-fifth metadata = %#v, want rewind metadata", got)
 	}
-	if got := cmds[35].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[36].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "skills",
 		Description: "List available skills",
 		Usage:       "/skills",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-sixth metadata = %#v, want skills metadata", got)
 	}
-	if got := cmds[36].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[37].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "tag",
 		Description: "Toggle a searchable tag on the current session",
 		Usage:       "/tag <tag-name>",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-seventh metadata = %#v, want tag metadata", got)
 	}
-	if got := cmds[37].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[38].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "color",
 		Description: "Set the prompt bar color for this session",
 		Usage:       "/color <color|default>",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-eighth metadata = %#v, want color metadata", got)
 	}
-	if got := cmds[38].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[39].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "passes",
 		Description: "Share a free week of Claude Code with friends",
 		Usage:       "/passes",
 	}) {
 		t.Fatalf("newCommandRegistry() thirty-ninth metadata = %#v, want passes metadata", got)
 	}
-	if got := cmds[39].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[40].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "rate-limit-options",
 		Description: "Show options when rate limit is reached",
 		Usage:       "/rate-limit-options",
@@ -1044,35 +1051,35 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() fortieth metadata = %#v, want rate-limit-options metadata", got)
 	}
-	if got := cmds[40].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[41].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "sandbox",
 		Description: "View and configure sandbox settings",
 		Usage:       "/sandbox [exclude <command-pattern>]",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-first metadata = %#v, want sandbox metadata", got)
 	}
-	if got := cmds[41].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[42].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "stickers",
 		Description: "Order Claude Code stickers",
 		Usage:       "/stickers",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-second metadata = %#v, want stickers metadata", got)
 	}
-	if got := cmds[42].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[43].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "privacy-settings",
 		Description: "View and update your privacy settings",
 		Usage:       "/privacy-settings",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-third metadata = %#v, want privacy-settings metadata", got)
 	}
-	if got := cmds[43].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[44].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "plan",
 		Description: "Enable plan mode or view the current session plan",
 		Usage:       "/plan [open|<description>]",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-fourth metadata = %#v, want plan metadata", got)
 	}
-	if got := cmds[44].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[45].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "tasks",
 		Aliases:     []string{"bashes"},
 		Description: "List and manage background tasks",
@@ -1080,126 +1087,126 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() forty-fifth metadata = %#v, want tasks metadata", got)
 	}
-	if got := cmds[45].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[46].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "diff",
 		Description: "View uncommitted changes and per-turn diffs",
 		Usage:       "/diff",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-sixth metadata = %#v, want diff metadata", got)
 	}
-	if got := cmds[46].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[47].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "files",
 		Description: "List all files currently in context",
 		Usage:       "/files",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-seventh metadata = %#v, want files metadata", got)
 	}
-	if got := cmds[47].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[48].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "copy",
 		Description: "Copy Claude's last response to clipboard (or /copy N for the Nth-latest)",
 		Usage:       "/copy [N]",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-eighth metadata = %#v, want copy metadata", got)
 	}
-	if got := cmds[48].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[49].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "export",
 		Description: "Export the current conversation to a file or clipboard",
 		Usage:       "/export [filename]",
 	}) {
 		t.Fatalf("newCommandRegistry() forty-ninth metadata = %#v, want export metadata", got)
 	}
-	if got := cmds[49].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[50].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "version",
 		Description: "Print the version this session is running (not what autoupdate downloaded)",
 		Usage:       "/version",
 	}) {
 		t.Fatalf("newCommandRegistry() fiftieth metadata = %#v, want version metadata", got)
 	}
-	if got := cmds[50].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[51].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "release-notes",
 		Description: "View release notes",
 		Usage:       "/release-notes",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-first metadata = %#v, want release-notes metadata", got)
 	}
-	if got := cmds[51].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[52].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "upgrade",
 		Description: "Upgrade to Max for higher rate limits and more Opus",
 		Usage:       "/upgrade",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-second metadata = %#v, want upgrade metadata", got)
 	}
-	if got := cmds[52].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[53].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "usage",
 		Description: "Show plan usage limits",
 		Usage:       "/usage",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-third metadata = %#v, want usage metadata", got)
 	}
-	if got := cmds[53].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[54].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "stats",
 		Description: "Show your Claude Code usage statistics and activity",
 		Usage:       "/stats",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-fourth metadata = %#v, want stats metadata", got)
 	}
-	if got := cmds[54].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[55].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "extra-usage",
 		Description: "Configure extra usage to keep working when limits are hit",
 		Usage:       "/extra-usage",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-fifth metadata = %#v, want extra-usage metadata", got)
 	}
-	if got := cmds[55].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[56].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "theme",
 		Description: "Change the theme",
 		Usage:       "/theme <auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi>",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-sixth metadata = %#v, want theme metadata", got)
 	}
-	if got := cmds[56].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[57].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "vim",
 		Description: "Toggle between Vim and Normal editing modes",
 		Usage:       "/vim",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-seventh metadata = %#v, want vim metadata", got)
 	}
-	if got := cmds[57].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[58].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "terminal-setup",
 		Description: "Install Shift+Enter key binding for newlines",
 		Usage:       "/terminal-setup",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-eighth metadata = %#v, want terminal-setup metadata", got)
 	}
-	if got := cmds[58].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[59].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "keybindings",
 		Description: "Open or create your keybindings configuration file",
 		Usage:       "/keybindings",
 	}) {
 		t.Fatalf("newCommandRegistry() fifty-ninth metadata = %#v, want keybindings metadata", got)
 	}
-	if got := cmds[59].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[60].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "pr-comments",
 		Description: "Get comments from a GitHub pull request",
 		Usage:       "/pr-comments",
 	}) {
 		t.Fatalf("newCommandRegistry() sixtieth metadata = %#v, want pr-comments metadata", got)
 	}
-	if got := cmds[60].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[61].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "security-review",
 		Description: "Complete a security review of the pending changes on the current branch",
 		Usage:       "/security-review",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-first metadata = %#v, want security-review metadata", got)
 	}
-	if got := cmds[61].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[62].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "agents",
 		Description: "Manage agent configurations",
 		Usage:       "/agents",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-second metadata = %#v, want agents metadata", got)
 	}
-	if got := cmds[62].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[63].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "plugin",
 		Aliases:     []string{"plugins", "marketplace"},
 		Description: "Manage Claude Code plugins",
@@ -1207,35 +1214,35 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-third metadata = %#v, want plugin metadata", got)
 	}
-	if got := cmds[63].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[64].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "hooks",
 		Description: "View hook configurations for tool events",
 		Usage:       "/hooks",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-fourth metadata = %#v, want hooks metadata", got)
 	}
-	if got := cmds[64].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[65].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "btw",
 		Description: "Ask a quick side question without interrupting the main conversation",
 		Usage:       "/btw <question>",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-fifth metadata = %#v, want btw metadata", got)
 	}
-	if got := cmds[65].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[66].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "chrome",
 		Description: "Claude in Chrome (Beta) settings",
 		Usage:       "/chrome",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-sixth metadata = %#v, want chrome metadata", got)
 	}
-	if got := cmds[66].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[67].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "think-back",
 		Description: "Your 2025 Claude Code Year in Review",
 		Usage:       "/think-back",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-seventh metadata = %#v, want think-back metadata", got)
 	}
-	if got := cmds[67].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[68].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "thinkback-play",
 		Description: "Play the thinkback animation",
 		Usage:       "/thinkback-play",
@@ -1243,42 +1250,42 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-eighth metadata = %#v, want thinkback-play metadata", got)
 	}
-	if got := cmds[68].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[69].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "reload-plugins",
 		Description: "Activate pending plugin changes in the current session",
 		Usage:       "/reload-plugins",
 	}) {
 		t.Fatalf("newCommandRegistry() sixty-ninth metadata = %#v, want reload-plugins metadata", got)
 	}
-	if got := cmds[69].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[70].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "advisor",
 		Description: "Configure the advisor model",
 		Usage:       "/advisor [<model>|off]",
 	}) {
 		t.Fatalf("newCommandRegistry() seventieth metadata = %#v, want advisor metadata", got)
 	}
-	if got := cmds[70].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[71].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "statusline",
 		Description: "Set up Claude Code's status line UI",
 		Usage:       "/statusline [prompt]",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-first metadata = %#v, want statusline metadata", got)
 	}
-	if got := cmds[71].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[72].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "ultrareview",
 		Description: "Find and verify bugs in your branch using Claude Code on the web",
 		Usage:       "/ultrareview [pr-number]",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-second metadata = %#v, want ultrareview metadata", got)
 	}
-	if got := cmds[72].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[73].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "insights",
 		Description: "Generate a report analyzing your Claude Code sessions",
 		Usage:       "/insights [--homespaces]",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-third metadata = %#v, want insights metadata", got)
 	}
-	if got := cmds[73].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[74].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "remote-control",
 		Aliases:     []string{"rc"},
 		Description: "Connect this terminal for remote-control sessions",
@@ -1286,7 +1293,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-fourth metadata = %#v, want remote-control metadata", got)
 	}
-	if got := cmds[74].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[75].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "bridge-kick",
 		Description: "Inject bridge failure states for manual recovery testing",
 		Usage:       "/bridge-kick <subcommand>",
@@ -1294,21 +1301,21 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-fifth metadata = %#v, want bridge-kick metadata", got)
 	}
-	if got := cmds[75].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[76].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "commit",
 		Description: "Create a git commit",
 		Usage:       "/commit",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-sixth metadata = %#v, want commit metadata", got)
 	}
-	if got := cmds[76].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[77].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "commit-push-pr",
 		Description: "Commit, push, and open a PR",
 		Usage:       "/commit-push-pr [instructions]",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-seventh metadata = %#v, want commit-push-pr metadata", got)
 	}
-	if got := cmds[77].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[78].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "heapdump",
 		Description: "Dump the JS heap to ~/Desktop",
 		Usage:       "/heapdump",
@@ -1316,21 +1323,21 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-eighth metadata = %#v, want heapdump metadata", got)
 	}
-	if got := cmds[78].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[79].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "web-setup",
 		Description: "Setup Claude Code on the web (requires connecting your GitHub account)",
 		Usage:       "/web-setup",
 	}) {
 		t.Fatalf("newCommandRegistry() seventy-ninth metadata = %#v, want web-setup metadata", got)
 	}
-	if got := cmds[79].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[80].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "brief",
 		Description: "Toggle brief-only mode",
 		Usage:       "/brief",
 	}) {
 		t.Fatalf("newCommandRegistry() eightieth metadata = %#v, want brief metadata", got)
 	}
-	if got := cmds[80].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[81].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "ultraplan",
 		Description: "Draft an advanced plan in Claude Code on the web",
 		Usage:       "/ultraplan <prompt>",
@@ -1338,7 +1345,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-first metadata = %#v, want ultraplan metadata", got)
 	}
-	if got := cmds[81].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[82].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "share",
 		Description: "Share the current session",
 		Usage:       "/share",
@@ -1346,7 +1353,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-second metadata = %#v, want share metadata", got)
 	}
-	if got := cmds[82].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[83].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "summary",
 		Description: "Show internal summary diagnostics",
 		Usage:       "/summary",
@@ -1354,7 +1361,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-third metadata = %#v, want summary metadata", got)
 	}
-	if got := cmds[83].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[84].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "env",
 		Description: "Inspect internal environment state",
 		Usage:       "/env",
@@ -1362,7 +1369,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-fourth metadata = %#v, want env metadata", got)
 	}
-	if got := cmds[84].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[85].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "teleport",
 		Description: "Teleport the current session to remote runtime",
 		Usage:       "/teleport",
@@ -1370,7 +1377,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-fifth metadata = %#v, want teleport metadata", got)
 	}
-	if got := cmds[85].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[86].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "onboarding",
 		Description: "Run internal onboarding flow",
 		Usage:       "/onboarding",
@@ -1378,7 +1385,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-sixth metadata = %#v, want onboarding metadata", got)
 	}
-	if got := cmds[86].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[87].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "oauth-refresh",
 		Description: "Refresh OAuth credentials",
 		Usage:       "/oauth-refresh",
@@ -1386,7 +1393,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-seventh metadata = %#v, want oauth-refresh metadata", got)
 	}
-	if got := cmds[87].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[88].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "issue",
 		Description: "Run internal issue workflow",
 		Usage:       "/issue",
@@ -1394,7 +1401,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-eighth metadata = %#v, want issue metadata", got)
 	}
-	if got := cmds[88].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[89].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "good-claude",
 		Description: "Run internal good-claude workflow",
 		Usage:       "/good-claude",
@@ -1402,7 +1409,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() eighty-ninth metadata = %#v, want good-claude metadata", got)
 	}
-	if got := cmds[89].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[90].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "bughunter",
 		Description: "Run internal bughunter workflow",
 		Usage:       "/bughunter",
@@ -1410,7 +1417,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninetieth metadata = %#v, want bughunter metadata", got)
 	}
-	if got := cmds[90].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[91].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "break-cache",
 		Description: "Run internal cache-break workflow",
 		Usage:       "/break-cache",
@@ -1418,7 +1425,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-first metadata = %#v, want break-cache metadata", got)
 	}
-	if got := cmds[91].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[92].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "ctx_viz",
 		Description: "Run internal context visualization workflow",
 		Usage:       "/ctx_viz",
@@ -1426,7 +1433,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-second metadata = %#v, want ctx_viz metadata", got)
 	}
-	if got := cmds[92].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[93].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "backfill-sessions",
 		Description: "Backfill internal session fixtures",
 		Usage:       "/backfill-sessions",
@@ -1434,7 +1441,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-third metadata = %#v, want backfill-sessions metadata", got)
 	}
-	if got := cmds[93].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[94].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "init-verifiers",
 		Description: "Create verifier skill(s) for automated verification of code changes",
 		Usage:       "/init-verifiers",
@@ -1442,7 +1449,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-fourth metadata = %#v, want init-verifiers metadata", got)
 	}
-	if got := cmds[94].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[95].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "mock-limits",
 		Description: "Mock internal usage limits",
 		Usage:       "/mock-limits",
@@ -1450,7 +1457,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-fifth metadata = %#v, want mock-limits metadata", got)
 	}
-	if got := cmds[95].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[96].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "reset-limits",
 		Aliases:     []string{"reset-limits-non-interactive"},
 		Description: "Reset internal usage limits",
@@ -1459,7 +1466,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-sixth metadata = %#v, want reset-limits metadata", got)
 	}
-	if got := cmds[96].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[97].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "ant-trace",
 		Description: "Run internal ANT trace workflow",
 		Usage:       "/ant-trace",
@@ -1467,7 +1474,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-seventh metadata = %#v, want ant-trace metadata", got)
 	}
-	if got := cmds[97].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[98].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "perf-issue",
 		Description: "Run internal performance issue workflow",
 		Usage:       "/perf-issue",
@@ -1475,7 +1482,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-eighth metadata = %#v, want perf-issue metadata", got)
 	}
-	if got := cmds[98].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[99].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "debug-tool-call",
 		Description: "Run internal tool-call debug workflow",
 		Usage:       "/debug-tool-call",
@@ -1483,7 +1490,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() ninety-ninth metadata = %#v, want debug-tool-call metadata", got)
 	}
-	if got := cmds[99].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[100].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "agents-platform",
 		Description: "Run internal agents-platform workflow",
 		Usage:       "/agents-platform",
@@ -1491,7 +1498,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() one-hundredth metadata = %#v, want agents-platform metadata", got)
 	}
-	if got := cmds[100].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[101].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "autofix-pr",
 		Description: "Run internal autofix PR workflow",
 		Usage:       "/autofix-pr",
@@ -1499,7 +1506,7 @@ func TestNewCommandRegistryRegistersResume(t *testing.T) {
 	}) {
 		t.Fatalf("newCommandRegistry() one-hundred-and-first metadata = %#v, want autofix-pr metadata", got)
 	}
-	if got := cmds[101].Metadata(); !reflect.DeepEqual(got, command.Metadata{
+	if got := cmds[102].Metadata(); !reflect.DeepEqual(got, command.Metadata{
 		Name:        "seed-sessions",
 		Description: "Insert demo persisted sessions for /resume testing",
 		Usage:       "/seed-sessions",
