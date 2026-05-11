@@ -119,6 +119,12 @@ loop:
 			}
 			events = append(events, evt)
 			if evt.Type == model.EventTypeError {
+				// Drain remaining events asynchronously so the producer goroutine
+				// does not block when the provider closes the stream after an error.
+				go func() {
+					for range innerStream {
+					}
+				}()
 				break loop
 			}
 		case <-ctx.Done():
