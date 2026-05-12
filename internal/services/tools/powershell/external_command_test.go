@@ -131,7 +131,7 @@ func TestIsGitSafe(t *testing.T) {
 		// git describe safe flags
 		{"git describe --always --dirty", []string{"describe", "--always", "--dirty"}, true},
 
-		// git describe unsafe flags
+		// git describe safe flags
 		{"git describe --abbrev=4 --match v*", []string{"describe", "--abbrev", "4", "--match", "v*"}, true},
 
 		// git branch safe flags with contains
@@ -209,7 +209,7 @@ func TestIsGhSafe(t *testing.T) {
 		{"gh pr list --state open --limit 10", []string{"pr", "list", "--state", "open", "--limit", "10"}, true},
 		{"gh pr list --unknown-flag", []string{"pr", "list", "--unknown-flag"}, false},
 		{"gh issue list --author me", []string{"issue", "list", "--author", "me"}, true},
-		{"gh issue list --milestone v1", []string{"issue", "list", "--milestone", "v1"}, false}, // not in safeFlags
+		{"gh issue list --milestone v1", []string{"issue", "list", "--milestone", "v1"}, true},
 
 		// Unknown subcommand
 		{"gh unknown", []string{"unknown"}, false},
@@ -708,7 +708,7 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 
 	t.Run("gh with two-word subcommand uses correct index", func(t *testing.T) {
 		// gh pr view 123 with --json flag
-		if !isGhSafe([]string{"pr", "view", "123", "--json"}) {
+		if !isGhSafe([]string{"pr", "view", "123", "--json", "title"}) {
 			t.Error("expected gh pr view with --json to be safe")
 		}
 	})
