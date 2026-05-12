@@ -1,0 +1,36 @@
+internal/services/tools/powershell/permissions.go
+  s_865e849b6b0c41::t_c5d0599069af07 262-528
+  s_865e849b6b0c41::t_f9839cafbcdc3b 666,668-670,685-713,774-775,783-814,818-823
+  s_865e849b6b0c41::t_2fb8159fc4dac6 827,839
+internal/services/tools/powershell/allowlist.go
+  s_865e849b6b0c41::t_8e4c4ccd4f58d2 699-768
+  s_865e849b6b0c41::t_1b83527cf86d36 171-175,178
+  s_865e849b6b0c41::t_9a22fbb4e7a95d 418-425,447-451
+internal/services/tools/powershell/allowlist_test.go
+  s_865e849b6b0c41::t_b3020e971cc66a 45-50
+internal/services/tools/powershell/path_config.go
+  s_865e849b6b0c41::t_86c9e959d31c9c 332-338,359-361,370-371,383-386,404-409,420
+  s_865e849b6b0c41::t_a263317f88cbb3 300
+  s_865e849b6b0c41::t_7c0d8bf49a5670 26-36
+internal/services/tools/powershell/parser.go
+  s_865e849b6b0c41::t_d8fcf38a410c22 735-798
+  s_865e849b6b0c41::t_fd59b7b31ccbb6 106-109,111-119,124-142
+  s_865e849b6b0c41::t_946205840bd302 632-649
+  s_865e849b6b0c41::t_7e6bf94b6d41e2 655-659
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e266458d7532465d31322fbd389a9264649caf62",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
