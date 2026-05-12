@@ -384,7 +384,7 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		// All sub-commands passed - fall through
 	}
 
-	// 3. Security scan: dangerous commands always require approval	// 3. Security scan: dangerous commands always require approval
+	// 3. Security scan: dangerous commands always require approval
 	if scanResult.Level >= RiskLevelDangerous {
 		return PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
@@ -393,6 +393,22 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 				Message:           scanResult.Message,
 			},
 			Reason: "security: " + scanResult.Message,
+		}
+	}
+
+	// 3a. Path constraints: parse command and validate file paths
+	parsed := ParsePowerShellCommand(command)
+	if parsed.Valid {
+		pathResult := checkPathConstraints(command, &parsed)
+		if pathResult.ShouldAsk {
+			return PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: normalized,
+					Message:           pathResult.Message,
+				},
+				Reason: "path constraint: " + pathResult.Message,
+			}
 		}
 	}
 

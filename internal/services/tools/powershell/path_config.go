@@ -266,3 +266,65 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 		HasUnvalidatablePathArg: hasUnvalidatable,
 	}
 }
+
+// checkPathConstraintsResult holds the outcome of path constraint validation.
+type checkPathConstraintsResult struct {
+	ShouldAsk    bool
+	Message      string
+	ExtractedPaths []string
+}
+
+// checkPathConstraints validates file paths in a command using the AST parser
+// and CMDLET_PATH_CONFIG. Returns ask when:
+// - Expression pipeline sources are detected (variable piped to cmdlet)
+// - Path arguments have unvalidatable element types (Variable, ScriptBlock)
+// - Dangerous removal paths are targeted
+// Ported from TS pathValidation.ts checkPathConstraints.
+func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) checkPathConstraintsResult {
+	if parsed == nil || !parsed.Valid {
+		return checkPathConstraintsResult{}
+	}
+
+	var allPaths []string
+	var hasExpressionSource bool
+	var hasUnvalidatable bool
+
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			// Check for non-CommandAst pipeline elements (expression sources)
+			if cmd.ElementType != "CommandAst" {
+				hasExpressionSource = true
+				continue
+			}
+
+			// Extract paths using CMDLET_PATH_CONFIG
+			result := extractPathsFromCommand(cmd)
+			allPaths = append(allPaths, result.Paths...)
+			if result.HasUnvalidatablePathArg {
+				hasUnvalidatable = true
+			}
+		}
+	}
+
+	// Expression pipeline source + a path-operating cmdlet = unvalidatable path
+	if hasExpressionSource && len(allPaths) > 0 {
+		return checkPathConstraintsResult{
+			ShouldAsk:       true,
+			Message:         "Command pipes data through the pipeline to a path-operating cmdlet — the piped path cannot be validated",
+			ExtractedPaths:  allPaths,
+		}
+	}
+
+	// Unvalidatable path args (Variable, ScriptBlock instead of StringConstant)
+	if hasUnvalidatable {
+		return checkPathConstraintsResult{
+			ShouldAsk:       true,
+			Message:         "Command uses variable or expression-based paths which cannot be statically validated",
+			ExtractedPaths:  allPaths,
+		}
+	}
+
+	return checkPathConstraintsResult{
+		ExtractedPaths: allPaths,
+	}
+}
