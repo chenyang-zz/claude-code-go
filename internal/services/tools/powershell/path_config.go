@@ -300,6 +300,12 @@ type extractPathsResult struct {
 	OptionalWrite           bool
 }
 
+// ExtractedPath pairs a file path with its operation type from the cmdlet config.
+type ExtractedPath struct {
+	Path          string
+	OperationType operationType
+}
+
 // extractPathsFromCommand extracts file paths from a parsed command element
 // using CMDLET_PATH_CONFIG to identify path parameters.
 func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
@@ -423,9 +429,9 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 
 // checkPathConstraintsResult holds the outcome of path constraint validation.
 type checkPathConstraintsResult struct {
-	ShouldAsk    bool
-	Message      string
-	ExtractedPaths []string
+	ShouldAsk       bool
+	Message         string
+	ExtractedPaths  []ExtractedPath
 }
 
 // checkPathConstraints validates file paths in a command using the AST parser
@@ -439,7 +445,7 @@ func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) check
 		return checkPathConstraintsResult{}
 	}
 
-	var allPaths []string
+	var allPaths []ExtractedPath
 	var hasExpressionSource bool
 	var hasUnvalidatable bool
 
@@ -453,7 +459,9 @@ func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) check
 
 			// Extract paths using CMDLET_PATH_CONFIG
 			result := extractPathsFromCommand(cmd)
-			allPaths = append(allPaths, result.Paths...)
+			for _, p := range result.Paths {
+				allPaths = append(allPaths, ExtractedPath{Path: p, OperationType: result.OperationType})
+			}
 			if result.HasUnvalidatablePathArg {
 				hasUnvalidatable = true
 			}

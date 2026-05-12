@@ -1,6 +1,7 @@
 package powershell
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -16,20 +17,24 @@ var psRulePattern = regexp.MustCompile(`(?i)^\s*PowerShell\((.*)\)\s*$`)
 
 // PermissionChecker evaluates PowerShell(...) allow/deny/ask permission rules,
 // with PowerShell-specific normalization (case-insensitive cmdlet matching,
-// alias resolution to canonical names).
+// alias resolution to canonical names). When fsPolicy is set, extracted file
+// paths are also validated against the filesystem deny/allow rules.
 type PermissionChecker struct {
-	allow []psPermissionRule
-	deny  []psPermissionRule
-	ask   []psPermissionRule
+	allow    []psPermissionRule
+	deny     []psPermissionRule
+	ask      []psPermissionRule
+	fsPolicy *corepermission.FilesystemPolicy
 }
 
 // NewPermissionChecker builds a PowerShell permission evaluator from the
 // resolved config snapshot, filtering for PowerShell(...) rules.
-func NewPermissionChecker(cfg coreconfig.PermissionConfig) *PermissionChecker {
+// The fsPolicy parameter is optional (nil means no filesystem policy checks).
+func NewPermissionChecker(cfg coreconfig.PermissionConfig, fsPolicy *corepermission.FilesystemPolicy) *PermissionChecker {
 	return &PermissionChecker{
-		allow: parsePSPermissionRules(cfg.Allow),
-		deny:  parsePSPermissionRules(cfg.Deny),
-		ask:   parsePSPermissionRules(cfg.Ask),
+		allow:    parsePSPermissionRules(cfg.Allow),
+		deny:     parsePSPermissionRules(cfg.Deny),
+		ask:      parsePSPermissionRules(cfg.Ask),
+		fsPolicy: fsPolicy,
 	}
 }
 
@@ -538,9 +543,9 @@ type CommandPermissionChecker interface {
 
 // checkPermission performs the enhanced permission check with type-safe access
 // to the PermissionChecker's CheckEnhanced method.
-func checkPermission(cmdChecker CommandPermissionChecker, command string, scanResult ScanResult, approvalMode string) PermissionDecision {
+func checkPermission(cmdChecker CommandPermissionChecker, command string, scanResult ScanResult, approvalMode string, ctx context.Context, workingDir string) PermissionDecision {
 	if pc, ok := cmdChecker.(*PermissionChecker); ok {
-		return pc.CheckEnhanced(command, scanResult, approvalMode)
+		return pc.CheckEnhanced(command, scanResult, approvalMode, ctx, workingDir)
 	}
 	// Fallback to basic Check for non-PermissionChecker implementations
 	eval := cmdChecker.Check(command)
@@ -564,7 +569,8 @@ type PermissionDecision struct {
 // - Provider path detection
 // - Approval mode integration
 // - Security scan results
-func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult, approvalMode string) PermissionDecision {
+// - Filesystem policy (deny/allow rules for extracted file paths)
+func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult, approvalMode string, ctx context.Context, workingDir string) PermissionDecision {
 	normalized := normalizePSCommandForPermission(command)
 	if normalized == "" {
 		return PermissionDecision{
@@ -679,6 +685,44 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 					Message:           pathResult.Message,
 				},
 				Reason: "path constraint: " + pathResult.Message,
+			}
+		}
+
+		// 3b-ii. Filesystem policy: validate extracted paths against
+		// filesystem deny/allow rules. Each extracted path is checked with
+		// the appropriate access type (read/write) from CMDLET_PATH_CONFIG.
+		if c.fsPolicy != nil && len(pathResult.ExtractedPaths) > 0 {
+			for _, ep := range pathResult.ExtractedPaths {
+				access := corepermission.AccessWrite
+				if ep.OperationType == opRead {
+					access = corepermission.AccessRead
+				}
+				fsEval := c.fsPolicy.EvaluateFilesystem(ctx, corepermission.FilesystemRequest{
+					ToolName:   Name,
+					Path:       ep.Path,
+					WorkingDir: workingDir,
+					Access:     access,
+				})
+				if fsEval.Decision == corepermission.DecisionDeny {
+					return PermissionDecision{
+						Evaluation: platformshell.PermissionEvaluation{
+							Decision:          corepermission.DecisionDeny,
+							NormalizedCommand: normalized,
+							Message:           fsEval.Message,
+						},
+						Reason: "filesystem policy deny: " + ep.Path,
+					}
+				}
+				if fsEval.Decision == corepermission.DecisionAsk {
+					return PermissionDecision{
+						Evaluation: platformshell.PermissionEvaluation{
+							Decision:          corepermission.DecisionAsk,
+							NormalizedCommand: normalized,
+							Message:           fsEval.Message,
+						},
+						Reason: "filesystem policy ask: " + ep.Path,
+					}
+				}
 			}
 		}
 	}

@@ -179,7 +179,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 
 	// Enhanced permission check: rules + sub-commands + allowlist + provider paths + mode
 	scanResult := t.securityScanner.Scan(command)
-	permDecision := checkPermission(t.permissions, command, scanResult, t.approvalMode)
+	permDecision := checkPermission(t.permissions, command, scanResult, t.approvalMode, ctx, call.Context.WorkingDir)
 
 	normalizedCommand := strings.TrimSpace(permDecision.Evaluation.NormalizedCommand)
 	if normalizedCommand == "" {
