@@ -1,0 +1,28 @@
+internal/services/tools/powershell/path_config.go
+  s_865e849b6b0c41::t_76d968a0ecd3b7 350-355,379-384,388-392,457
+  s_865e849b6b0c41::t_576d1d45d9076c 24
+  s_865e849b6b0c41::t_27d451d63329dd 98,105,221,230,240,246
+  s_865e849b6b0c41::t_6deb7962c16238 419-424,451
+  s_865e849b6b0c41::t_8bce98a2750242 495-500
+  s_865e849b6b0c41::t_f864c3452308d3 306
+internal/services/tools/powershell/permissions_test.go
+  s_865e849b6b0c41::t_c4d535e5e38892 434-444
+  s_865e849b6b0c41::t_3bc63b4155fa46 300-333,335-361,363-372,374-433,445-473
+  s_865e849b6b0c41::t_feb48998734990 334,362,373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "9245251cbb6af352edfa2c34ed906b8469feeed2",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
