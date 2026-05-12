@@ -1068,7 +1068,9 @@ func tokenizeCommand(command string) []string {
 				i++
 			}
 			if quotedEmpty {
-				tokens = append(tokens, "")
+				if cur.Len() == 0 {
+					tokens = append(tokens, "")
+				}
 			}
 			continue
 		}
@@ -1095,7 +1097,9 @@ func tokenizeCommand(command string) []string {
 				i++
 			}
 			if quotedEmpty {
-				tokens = append(tokens, "")
+				if cur.Len() == 0 {
+					tokens = append(tokens, "")
+				}
 			}
 			continue
 		}

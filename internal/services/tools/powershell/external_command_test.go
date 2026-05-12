@@ -791,6 +791,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
 	t.Run("tokenizeCommand handles single quotes inside double quotes", func(t *testing.T) {
@@ -798,6 +803,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		expected := []string{"Write-Output", "it's fine"}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
@@ -807,6 +817,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
 	t.Run("tokenizeCommand handles backtick escape outside quotes", func(t *testing.T) {
@@ -814,6 +829,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		expected := []string{"echo", "$env:VAR"}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
@@ -823,6 +843,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
 	t.Run("tokenizeCommand handles empty single quotes", func(t *testing.T) {
@@ -830,6 +855,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		expected := []string{"Write-Output", ""}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
@@ -839,6 +869,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
 	t.Run("tokenizeCommand handles flag with quoted value", func(t *testing.T) {
@@ -846,6 +881,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		expected := []string{"gh", "pr", "list", "--search", "is:open label:bug"}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
@@ -855,6 +895,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
 	t.Run("tokenizeCommand handles tab and newline whitespace", func(t *testing.T) {
@@ -862,6 +907,11 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		expected := []string{"git", "status", "-v"}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
@@ -885,13 +935,75 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
 	})
 
-	t.Run("tokenizeCommand handles unmatched double quote", func(t *testing.T) {
-		tokens := tokenizeCommand("echo \"hello world")
-		expected := []string{"echo", "hello world"}
+	t.Run("tokenizeCommand handles empty quotes as flag value", func(t *testing.T) {
+		tokens := tokenizeCommand("--search \"\"")
+		expected := []string{"--search", ""}
 		if len(tokens) != len(expected) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty quotes as flag inline value", func(t *testing.T) {
+		tokens := tokenizeCommand("--format=\"\"")
+		expected := []string{"--format="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty quotes concatenated with text", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output abc''def")
+		expected := []string{"Write-Output", "abcdef"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles quoted flag with empty value in real command", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --author=\"\"")
+		expected := []string{"git", "log", "--author="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles single-quoted empty flag value in command", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --author=''")
+		expected := []string{"git", "log", "--author="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
 		}
 	})
 
