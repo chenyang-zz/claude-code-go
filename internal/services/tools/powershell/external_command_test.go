@@ -751,7 +751,7 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("tokenizeCommand returns correct tokens", func(t *testing.T) {
+	t.Run("tokenizeCommand handles basic splitting", func(t *testing.T) {
 		tokens := tokenizeCommand("git log --oneline -5")
 		expected := []string{"git", "log", "--oneline", "-5"}
 		if len(tokens) != len(expected) {
@@ -771,6 +771,243 @@ func TestExternalCommandEdgeCases(t *testing.T) {
 			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
 		}
 	})
+
+	t.Run("tokenizeCommand handles double-quoted string", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --format=\"%H %s\"")
+		expected := []string{"git", "log", "--format=%H %s"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles single-quoted string", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output 'Hello World'")
+		expected := []string{"Write-Output", "Hello World"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles single quotes inside double quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output \"it's fine\"")
+		expected := []string{"Write-Output", "it's fine"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles backtick escape inside double quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output \"hello`\"world\"")
+		expected := []string{"Write-Output", "hello\"world"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles backtick escape outside quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("echo `$env:VAR")
+		expected := []string{"echo", "$env:VAR"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty double quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output \"\"")
+		expected := []string{"Write-Output", ""}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty single quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output ''")
+		expected := []string{"Write-Output", ""}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles escaped single quote inside single quotes", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output 'it''s cool'")
+		expected := []string{"Write-Output", "it's cool"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles flag with quoted value", func(t *testing.T) {
+		tokens := tokenizeCommand("gh pr list --search \"is:open label:bug\"")
+		expected := []string{"gh", "pr", "list", "--search", "is:open label:bug"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles mixed quoting in git command", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --author=\"John Doe\" --grep='fix bug' -5")
+		expected := []string{"git", "log", "--author=John Doe", "--grep=fix bug", "-5"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles tab and newline whitespace", func(t *testing.T) {
+		tokens := tokenizeCommand("git\tstatus\n-v")
+		expected := []string{"git", "status", "-v"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty command", func(t *testing.T) {
+		tokens := tokenizeCommand("")
+		if len(tokens) != 0 {
+			t.Errorf("expected 0 tokens, got %d: %v", len(tokens), tokens)
+		}
+	})
+
+	t.Run("tokenizeCommand handles whitespace-only command", func(t *testing.T) {
+		tokens := tokenizeCommand("   \t  \n  ")
+		if len(tokens) != 0 {
+			t.Errorf("expected 0 tokens, got %d: %v", len(tokens), tokens)
+		}
+	})
+
+	t.Run("tokenizeCommand handles trailing backtick", func(t *testing.T) {
+		tokens := tokenizeCommand("echo hi`")
+		expected := []string{"echo", "hi"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty quotes as flag value", func(t *testing.T) {
+		tokens := tokenizeCommand("--search \"\"")
+		expected := []string{"--search", ""}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty quotes as flag inline value", func(t *testing.T) {
+		tokens := tokenizeCommand("--format=\"\"")
+		expected := []string{"--format="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles empty quotes concatenated with text", func(t *testing.T) {
+		tokens := tokenizeCommand("Write-Output abc''def")
+		expected := []string{"Write-Output", "abcdef"}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles quoted flag with empty value in real command", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --author=\"\"")
+		expected := []string{"git", "log", "--author="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+	t.Run("tokenizeCommand handles single-quoted empty flag value in command", func(t *testing.T) {
+		tokens := tokenizeCommand("git log --author=''")
+		expected := []string{"git", "log", "--author="}
+		if len(tokens) != len(expected) {
+			t.Fatalf("expected %d tokens, got %d: %v", len(expected), len(tokens), tokens)
+		}
+		for i := range tokens {
+			if tokens[i] != expected[i] {
+				t.Errorf("token[%d] = %q, want %q", i, tokens[i], expected[i])
+			}
+		}
+	})
+
+
 }
 
 // =============================================================================
