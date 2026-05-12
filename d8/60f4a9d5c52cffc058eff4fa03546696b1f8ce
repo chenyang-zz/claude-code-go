@@ -1,0 +1,19 @@
+internal/services/tools/powershell/external_command.go
+  s_865e849b6b0c41::t_3d6a71620df86d 510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d860f4a9d5c52cffc058eff4fa03546696b1f8ce",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
