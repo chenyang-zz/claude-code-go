@@ -40,11 +40,14 @@ func TestIsAcceptEditsCmdlet(t *testing.T) {
 		command string
 		accept  bool
 	}{
-		{"New-Item -Path dir -ItemType Directory", true},
 		{"Set-Content file.txt 'hello'", true},
 		{"Remove-Item file.txt", true},
-		{"Copy-Item src dst", true},
-		{"Move-Item src dst", true},
+		{"Add-Content file.txt 'hello'", true},
+		{"Clear-Content file.txt", true},
+		// Tier 3 write cmdlets (complex param binding) — NOT acceptEdits auto-allowed
+		{"New-Item -Path dir -ItemType Directory", false},
+		{"Copy-Item src dst", false},
+		{"Move-Item src dst", false},
 		// Read-only cmdlets
 		{"Get-ChildItem C:\\", false},
 		{"Write-Output hello", false},

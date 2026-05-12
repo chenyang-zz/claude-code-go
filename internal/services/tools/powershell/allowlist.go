@@ -168,11 +168,14 @@ func buildReadOnlySet() map[string]bool {
 }
 
 // psAcceptEditsCmdlets lists cmdlets safe to auto-allow in acceptEdits mode.
+// Ported from TS modeValidation.ts ACCEPT_EDITS_ALLOWED_CMDLETS.
+// Only simple write cmdlets whose first positional is -Path are auto-allowed.
+// Tier 3 cmdlets with complex parameter binding (new-item, copy-item, move-item,
+// rename-item, set-item, out-file, set-itemproperty, etc.) are intentionally
+// excluded — they require 'ask' for security review.
 var psAcceptEditsCmdlets = map[string]bool{
-	"new-item": true, "set-item": true, "set-itemproperty": true,
 	"set-content": true, "add-content": true, "clear-content": true,
-	"copy-item": true, "move-item": true, "rename-item": true,
-	"remove-item": true, "out-file": true,
+	"remove-item": true,
 }
 
 // psSafeOutputCmdlets lists cmdlets that transform output without side effects.
@@ -412,6 +415,14 @@ func splitSubCommands(command string) []string {
 // isReadOnlyPSCmdlet returns true when the command resolves to a known
 // read-only PowerShell cmdlet, including flag validation.
 func isReadOnlyPSCmdlet(command string) bool {
+	return isReadOnlyPSCmdletChecked(command, ParsedCommandElement{})
+}
+
+// isReadOnlyPSCmdletChecked returns true when the command resolves to a known
+// read-only PowerShell cmdlet, with optional AST element type validation.
+// When cmd contains valid ElementTypes, they are checked against the whitelist
+// (rejecting Variable, ScriptBlock, SubExpression, MemberInvocation, etc.).
+func isReadOnlyPSCmdletChecked(command string, cmd ParsedCommandElement) bool {
 	first := firstCmdlet(command)
 	if first == "" {
 		return false
@@ -431,6 +442,13 @@ func isReadOnlyPSCmdlet(command string) bool {
 	// Check additional dangerous callbacks (ipconfig/hostname/route with positional args)
 	if checkAdditionalDangerous(command) {
 		return false
+	}
+
+	// Check element types whitelist (AST-based arg validation)
+	if cmd.ElementTypes != nil && len(cmd.ElementTypes) > 0 {
+		if checkArgElementTypes(cmd) {
+			return false
+		}
 	}
 
 	return true
@@ -677,4 +695,74 @@ func hasSyncSecurityConcerns(command string) bool {
         }
     }
     return false
+}
+
+
+// =============================================================================
+// Element Types Whitelist — AST-level arg validation
+// =============================================================================
+
+// isSafeArgElementType returns true when the element type represents a
+// statically-verifiable string value. Only StringConstant and Parameter
+// are safe — everything else (Variable, Other, ScriptBlock, SubExpression,
+// ExpandableString, MemberInvocation) evaluates at runtime.
+func isSafeArgElementType(elementType string) bool {
+	return elementType == "StringConstant" || elementType == "Parameter"
+}
+
+// argLeaksMetaCharRe detects variable references ($), subexpressions ($(, @(),
+// arrays (@{), paren expressions ((), type literals ([), script blocks ({).
+var argLeaksMetaCharRe = regexp.MustCompile(`[\$\@\[\(]`)
+
+// checkArgElementTypes verifies all argument element types in a parsed command
+// element. Returns true if any arg has an unsafe element type (Variable, Other,
+// ScriptBlock, etc.) — meaning the command should NOT be auto-allowed.
+//
+// Ported from TS readOnlyValidation.ts isAllowlistedCommand elementTypes whitelist.
+// Also checks colon-bound parameters for expression metacharacters.
+func checkArgElementTypes(cmd ParsedCommandElement) bool {
+	if cmd.ElementTypes == nil {
+		// No element types available — fail-closed for untrusted elements
+		return true
+	}
+	// elementTypes[0] is the command name; args start at elementTypes[1]
+	for i := 1; i < len(cmd.ElementTypes); i++ {
+		t := cmd.ElementTypes[i]
+		if !isSafeArgElementType(t) {
+			// For 'Other' type, do a text check for metacharacters.
+			// ArrayLiteralAst (Get-Process Name, Id) maps to 'Other' but is safe
+			// if the text has no metacharacters ($, @, {, (, [).
+			if t == "Other" {
+				argIdx := i - 1
+				if argIdx < len(cmd.Args) {
+					arg := cmd.Args[argIdx]
+					if !argLeaksMetaCharRe.MatchString(arg) {
+						continue
+					}
+				}
+			}
+			return true
+		}
+		// Colon-bound parameter check: -Flag:$env:SECRET creates a single
+		// CommandParameterAst; the VariableExpressionAst is its .Argument child.
+		// The outer 'Parameter' element type masks the inner expression type.
+		if t == "Parameter" {
+			argIdx := i - 1
+			if argIdx < len(cmd.Args) {
+				arg := cmd.Args[argIdx]
+				colonIdx := strings.Index(arg, ":")
+				if colonIdx > 0 && argLeaksMetaCharRe.MatchString(arg[colonIdx+1:]) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// checkArgLeaksForElement checks whether a parsed command element's arguments
+// could leak sensitive data. Used as additionalCommandIsDangerousCallback for
+// cmdlets like Write-Output, Write-Host, Start-Sleep, Format-*.
+func checkArgLeaksForElement(cmd ParsedCommandElement) bool {
+	return checkArgElementTypes(cmd)
 }

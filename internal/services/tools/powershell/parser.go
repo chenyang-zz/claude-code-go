@@ -103,22 +103,43 @@ type ParsedRedirection struct {
 
 // ParsedStatement is a parsed statement from PowerShell.
 type ParsedStatement struct {
-	StatementType string                `json:"statementType"`
-	Commands      []ParsedCommandElement `json:"commands"`
-	Redirections  []ParsedRedirection   `json:"redirections"`
-	Text          string                `json:"text"`
+	StatementType  string                `json:"statementType"`
+	Commands       []ParsedCommandElement `json:"commands"`
+	Redirections   []ParsedRedirection   `json:"redirections"`
+	Text           string                `json:"text"`
 	NestedCommands []ParsedCommandElement `json:"nestedCommands,omitempty"`
+	SecurityPatterns *SecurityPatterns   `json:"securityPatterns,omitempty"`
+}
+
+// SecurityPatterns holds security-relevant patterns found by the PS1 parse script.
+type SecurityPatterns struct {
+	HasMemberInvocations  bool `json:"hasMemberInvocations,omitempty"`
+	HasSubExpressions     bool `json:"hasSubExpressions,omitempty"`
+	HasExpandableStrings  bool `json:"hasExpandableStrings,omitempty"`
+	HasScriptBlocks       bool `json:"hasScriptBlocks,omitempty"`
 }
 
 // ParsedPowerShellCommand is the complete parsed result.
 type ParsedPowerShellCommand struct {
-	Valid          bool              `json:"valid"`
-	Errors         []parseError      `json:"errors"`
-	Statements     []ParsedStatement `json:"statements"`
-	Variables      []rawVariable     `json:"variables"`
-	HasStopParsing bool              `json:"hasStopParsing"`
-	OriginalCommand string           `json:"originalCommand"`
-	TypeLiterals   []string          `json:"typeLiterals,omitempty"`
+	Valid              bool              `json:"valid"`
+	Errors             []parseError      `json:"errors"`
+	Statements         []ParsedStatement `json:"statements"`
+	Variables          []rawVariable     `json:"variables"`
+	HasStopParsing     bool              `json:"hasStopParsing"`
+	OriginalCommand    string            `json:"originalCommand"`
+	TypeLiterals       []string          `json:"typeLiterals,omitempty"`
+	HasUsingStatements bool              `json:"hasUsingStatements,omitempty"`
+}
+
+// SecurityFlags holds security-relevant flags derived from the parsed command.
+type SecurityFlags struct {
+	HasSubExpressions    bool
+	HasScriptBlocks      bool
+	HasSplatting         bool
+	HasExpandableStrings bool
+	HasMemberInvocations bool
+	HasAssignments       bool
+	HasStopParsing       bool
 }
 
 type parseError struct {
@@ -608,15 +629,34 @@ func transformStatement(raw rawStatement) ParsedStatement {
 		stmt.Redirections = transformRedirections(raw.Redirections)
 	}
 
+	// Transform security patterns
+	if raw.SecurityPatterns != nil {
+		s := &SecurityPatterns{}
+		if raw.SecurityPatterns.HasMemberInvocations != nil && *raw.SecurityPatterns.HasMemberInvocations {
+			s.HasMemberInvocations = true
+		}
+		if raw.SecurityPatterns.HasSubExpressions != nil && *raw.SecurityPatterns.HasSubExpressions {
+			s.HasSubExpressions = true
+		}
+		if raw.SecurityPatterns.HasExpandableStrings != nil && *raw.SecurityPatterns.HasExpandableStrings {
+			s.HasExpandableStrings = true
+		}
+		if raw.SecurityPatterns.HasScriptBlocks != nil && *raw.SecurityPatterns.HasScriptBlocks {
+			s.HasScriptBlocks = true
+		}
+		stmt.SecurityPatterns = s
+	}
+
 	return stmt
 }
 
 func transformRawOutput(raw rawParsedOutput) ParsedPowerShellCommand {
 	result := ParsedPowerShellCommand{
-		Valid:           raw.Valid,
-		OriginalCommand: raw.OriginalCommand,
-		HasStopParsing:  raw.HasStopParsing,
-		TypeLiterals:    raw.TypeLiterals,
+		Valid:              raw.Valid,
+		OriginalCommand:    raw.OriginalCommand,
+		HasStopParsing:     raw.HasStopParsing,
+		TypeLiterals:       raw.TypeLiterals,
+		HasUsingStatements: raw.HasUsingStatements,
 	}
 
 	// Transform errors
@@ -691,4 +731,68 @@ func ParsePowerShellCommand(command string) ParsedPowerShellCommand {
 	}
 
 	return transformRawOutput(raw)
+}
+
+// DeriveSecurityFlags derives security-relevant flags from the parsed command structure.
+// Ported from TS parser.ts deriveSecurityFlags.
+func DeriveSecurityFlags(parsed ParsedPowerShellCommand) SecurityFlags {
+	flags := SecurityFlags{
+		HasStopParsing: parsed.HasStopParsing,
+	}
+
+	checkElements := func(cmd ParsedCommandElement) {
+		if cmd.ElementTypes == nil {
+			return
+		}
+		for _, et := range cmd.ElementTypes {
+			switch et {
+			case "ScriptBlock":
+				flags.HasScriptBlocks = true
+			case "SubExpression":
+				flags.HasSubExpressions = true
+			case "ExpandableString":
+				flags.HasExpandableStrings = true
+			case "MemberInvocation":
+				flags.HasMemberInvocations = true
+			}
+		}
+	}
+
+	for _, stmt := range parsed.Statements {
+		if stmt.StatementType == "AssignmentStatementAst" {
+			flags.HasAssignments = true
+		}
+		for _, cmd := range stmt.Commands {
+			checkElements(cmd)
+		}
+		if stmt.NestedCommands != nil {
+			for _, cmd := range stmt.NestedCommands {
+				checkElements(cmd)
+			}
+		}
+		// securityPatterns provides a belt-and-suspenders check
+		if stmt.SecurityPatterns != nil {
+			if stmt.SecurityPatterns.HasMemberInvocations {
+				flags.HasMemberInvocations = true
+			}
+			if stmt.SecurityPatterns.HasSubExpressions {
+				flags.HasSubExpressions = true
+			}
+			if stmt.SecurityPatterns.HasExpandableStrings {
+				flags.HasExpandableStrings = true
+			}
+			if stmt.SecurityPatterns.HasScriptBlocks {
+				flags.HasScriptBlocks = true
+			}
+		}
+	}
+
+	for _, v := range parsed.Variables {
+		if v.IsSplatted {
+			flags.HasSplatting = true
+			break
+		}
+	}
+
+	return flags
 }
