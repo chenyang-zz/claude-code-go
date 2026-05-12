@@ -634,3 +634,46 @@ func containsVulnerableUncPath(command string) bool {
 	}
 	return false
 }
+
+
+// isCwdChangingCmdlet returns true when the command starts with a cmdlet that
+// changes the working directory (Set-Location, Push-Location, Pop-Location).
+func isCwdChangingCmdlet(command string) bool {
+    first := firstCmdlet(command)
+    if first == "" {
+        return false
+    }
+    canonical := resolvePSCommand(first)
+    switch canonical {
+    case "set-location", "push-location", "pop-location":
+        return true
+    }
+    return false
+}
+
+// hasSyncSecurityConcerns returns true when a command contains security-relevant
+// patterns that should prevent read-only auto-allow. Quick sync check without AST.
+func hasSyncSecurityConcerns(command string) bool {
+    // Subexpressions: $(
+    if strings.Contains(command, "$(") {
+        return true
+    }
+    // Splatting: @variable
+    if strings.Contains(command, "@") {
+        splatRe := regexp.MustCompile(`@[\w]+`)
+        if splatRe.MatchString(strings.TrimSpace(command)) {
+            return true
+        }
+    }
+    // Member invocations: ::
+    if strings.Contains(command, "::") {
+        return true
+    }
+    // Script blocks with member invocations or subexpressions
+    if strings.Contains(command, "{") && strings.Contains(command, "}") {
+        if strings.Contains(command, "::") || strings.Contains(command, "$(") {
+            return true
+        }
+    }
+    return false
+}

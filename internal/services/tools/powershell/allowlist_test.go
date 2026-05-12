@@ -384,3 +384,49 @@ func TestCheckBareRepoCompound(t *testing.T) {
         })
     }
 }
+
+
+func TestIsCwdChangingCmdlet(t *testing.T) {
+    tests := []struct {
+        command string
+        changes bool
+    }{
+        {"Set-Location /tmp", true},
+        {"cd /tmp", true},
+        {"pushd /tmp", true},
+        {"popd", true},
+        {"Push-Location /tmp", true},
+        {"Get-ChildItem C:\\", false},
+        {"Get-Process", false},
+    }
+    for _, tt := range tests {
+        t.Run(tt.command, func(t *testing.T) {
+            got := isCwdChangingCmdlet(tt.command)
+            if got != tt.changes {
+                t.Errorf("isCwdChangingCmdlet(%q) = %v, want %v", tt.command, got, tt.changes)
+            }
+        })
+    }
+}
+
+func TestHasSyncSecurityConcerns(t *testing.T) {
+    tests := []struct {
+        command  string
+        unsafe   bool
+    }{
+        {"Get-Content $(env:PATH)", true},
+        {"Remove-Item @params", true},
+        {"[System.IO.File]::ReadAllText('file')", true},
+        {"Get-ChildItem C:\\", false},
+        {"Write-Output hello", false},
+        {"git status", false},
+    }
+    for _, tt := range tests {
+        t.Run(tt.command, func(t *testing.T) {
+            got := hasSyncSecurityConcerns(tt.command)
+            if got != tt.unsafe {
+                t.Errorf("hasSyncSecurityConcerns(%q) = %v, want %v", tt.command, got, tt.unsafe)
+            }
+        })
+    }
+}
