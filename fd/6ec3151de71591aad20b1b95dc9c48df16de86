@@ -1,0 +1,33 @@
+internal/services/tools/powershell/path_config.go
+  s_865e849b6b0c41::t_67f2aa1192c25e 303-308
+  s_865e849b6b0c41::t_c5950fc492f010 432-434
+  s_865e849b6b0c41::t_a007dd5321ffd0 448,462-464
+internal/services/tools/powershell/permissions.go
+  s_865e849b6b0c41::t_75bf128c89e81b 572-573
+  s_865e849b6b0c41::t_7fafc0b2b38868 4
+  s_865e849b6b0c41::t_2d895bc164f5c9 20-21,23-26,31-32,34-37
+  ai_agent 690-727
+  s_865e849b6b0c41::t_9ccefd19940dcd 546,548
+internal/services/tools/powershell/permissions_test.go
+  s_865e849b6b0c41::t_50131cf43210a3 146
+  s_865e849b6b0c41::t_84a950ae392130 154
+  s_865e849b6b0c41::t_b9f52fd4b8cb63 1-10,12-46,55,185-189,191-201,208-227,234-239,241-251,256,259-277,280-293,295-299
+  s_865e849b6b0c41::t_d60c931db2b68a 11,47-54,56-145,147-153,155-168,171-184,190,202-207,228-233,240,252-255,257-258,278-279,294
+  s_865e849b6b0c41::t_26f427665f9b79 169-170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "fd6ec3151de71591aad20b1b95dc9c48df16de86",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
