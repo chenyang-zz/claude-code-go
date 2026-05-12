@@ -34,9 +34,9 @@ import (
 	listresources "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/list_resources"
 	readresource "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/read_resource"
 	notebookedit "github.com/sheepzhao/claude-code-go/internal/services/tools/notebook_edit"
-		"github.com/sheepzhao/claude-code-go/internal/services/tools/powershell"
-		repltool "github.com/sheepzhao/claude-code-go/internal/services/tools/repl"
+	"github.com/sheepzhao/claude-code-go/internal/services/tools/powershell"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/remote_trigger"
+	repltool "github.com/sheepzhao/claude-code-go/internal/services/tools/repl"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/schedule_wakeup"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/send_message"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/skill"
@@ -165,11 +165,11 @@ var webFetchCache = web_fetch.NewCache(50*1024*1024, 15*time.Minute)
 
 // BaseWorkspaceTools returns the canonical registration list for the base workspace toolset.
 func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, homeDir, projectDir string) []tool.Tool {
+	psExecutor := powershell.NewExecutor()
 	executor := platformshell.NewExecutor()
 	wireSkillShellExecutor(executor)
-	return []tool.Tool{
+	tools := []tool.Tool{
 		bash.NewToolWithRuntime(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
-		powershell.NewToolWithRuntime(powershell.NewExecutor(), powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
 		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
@@ -208,17 +208,21 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		sleep.NewTool(),
 		lsptool.NewTool(),
 	}
+	if psExecutor != nil {
+		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore))
+	}
+	return tools
 }
 
 // BaseWorkspaceToolsWithHooks returns the base toolset with hook dispatch injected into task tools.
 func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermission.FilesystemPolicy, permissions coreconfig.PermissionConfig, backgroundTaskStore *runtimesession.BackgroundTaskStore, taskStore coretask.Store, hookRunner *runtimehooks.Runner, hookCfg hook.HooksConfig, disableAllHooks bool, homeDir, projectDir string) []tool.Tool {
 	dispatcher := &hookDispatcher{runner: hookRunner, config: hookCfg}
+	psExecutor := powershell.NewExecutor()
 	executor := platformshell.NewExecutor()
 	wireSkillShellExecutor(executor)
 	bashNotifier := &bashNotificationEmitter{runner: hookRunner, config: hookCfg}
-	return []tool.Tool{
+	tools := []tool.Tool{
 		bash.NewToolWithNotification(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore, bashNotifier),
-		powershell.NewToolWithRuntime(powershell.NewExecutor(), powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
 		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
@@ -255,11 +259,15 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		repltool.NewTool(),
 		lsptool.NewTool(),
 	}
+	if psExecutor != nil {
+		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore))
+	}
+	return tools
 }
 
 // wireSkillShellExecutor sets the skill package's ShellExecutor to use the
 // platform shell executor. This enables shell command execution (!`...`
-// and ```! ``` patterns) inside skill content.
+// and ```!``` patterns) inside skill content.
 func wireSkillShellExecutor(executor *platformshell.Executor) {
 	skill.ShellExecutor = func(ctx context.Context, command string, workingDir string) (stdout, stderr string, err error) {
 		req := platformshell.Request{

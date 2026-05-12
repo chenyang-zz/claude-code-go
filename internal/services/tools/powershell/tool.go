@@ -172,16 +172,9 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		return coretool.Result{Error: err.Error()}, nil
 	}
 
-	// Background execution: bypass permissions, run immediately
-	if input.RunInBackground {
-		if t.backgroundExecutor == nil {
-			return coretool.Result{Error: "Background execution is not supported (no background executor configured)"}, nil
-		}
-		return t.startBackgroundCommand(ctx, call, input, command, timeoutMilliseconds)
-	}
 
 	if t.approvalMode == "bypassPermissions" {
-		return t.executeCommand(ctx, call, command, timeoutMilliseconds)
+		return t.executeOrBackground(ctx, call, input, command, timeoutMilliseconds)
 	}
 
 	// Enhanced permission check: rules + sub-commands + allowlist + provider paths + mode
@@ -201,7 +194,7 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 		logger.DebugCF("powershell_tool", "command allowed by runtime grant", map[string]any{
 			"command": normalizedCommand,
 		})
-		return t.executeCommand(ctx, call, command, timeoutMilliseconds)
+		return t.executeOrBackground(ctx, call, input, command, timeoutMilliseconds)
 	}
 
 	switch permDecision.Evaluation.Decision {
@@ -228,6 +221,17 @@ func (t *Tool) Invoke(ctx context.Context, call coretool.Call) (coretool.Result,
 }
 
 // executeCommand runs the PowerShell command and returns the result.
+// executeOrBackground routes to foreground or background based on RunInBackground flag.
+func (t *Tool) executeOrBackground(ctx context.Context, call coretool.Call, input Input, command string, timeoutMilliseconds int) (coretool.Result, error) {
+	if input.RunInBackground {
+		if t.backgroundExecutor == nil {
+			return coretool.Result{Error: "Background execution is not supported (no background executor configured)"}, nil
+		}
+		return t.startBackgroundCommand(ctx, call, input, command, timeoutMilliseconds)
+	}
+	return t.executeCommand(ctx, call, command, timeoutMilliseconds)
+}
+
 func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command string, timeoutMilliseconds int) (coretool.Result, error) {
 	startTime := time.Now()
 	shellResult, err := t.executor.Execute(ctx, platformshell.Request{
@@ -243,9 +247,6 @@ func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command s
 		}
 		return coretool.Result{Error: fmt.Sprintf("Failed to execute command: %v", err)}, nil
 	}
-
-	// Detect image output (data URI)
-	isImage := isImageOutput(shellResult.Stdout)
 
 	// Interpret exit code using semantic rules
 	semantic := interpretCommandResult(command, shellResult.ExitCode, shellResult.Stdout, shellResult.Stderr)
@@ -274,18 +275,7 @@ func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command s
 	}
 
 	rendered := renderSuccess(output)
-	if isImage {
-		rendered = fmt.Sprintf("data:image/png;base64,%s", shellResult.Stdout)
-	}
-
 	return coretool.Result{Output: rendered}, nil
-}
-
-// dataURIPattern matches a base64-encoded image data URI in shell output.
-var dataURIPattern = regexp.MustCompile(`^data:image/[a-z0-9.+_-]+;base64,`)
-
-func isImageOutput(content string) bool {
-	return dataURIPattern.MatchString(strings.TrimSpace(content))
 }
 
 // startBackgroundCommand launches a PowerShell command in the background and returns a task ID.
@@ -308,7 +298,7 @@ func (t *Tool) startBackgroundCommand(_ context.Context, call coretool.Call, inp
 			Type:              "shell",
 			Summary:           summary,
 			Status:            coresession.BackgroundTaskStatusRunning,
-			ControlsAvailable: false,
+			ControlsAvailable: true,
 		}, bgProcess)
 	}
 
@@ -339,7 +329,8 @@ func (t *Tool) startBackgroundCommand(_ context.Context, call coretool.Call, inp
 		}
 
 		emitStatus := string(status)
-		if t.notificationEmitter != nil {
+		emitNotification := t.notificationEmitter != nil
+		if emitNotification {
 			interpret := interpretCommandResult(command, result.ExitCode, result.Stdout, result.Stderr)
 			outputPath := ""
 			outputSummary := summary
@@ -347,6 +338,10 @@ func (t *Tool) startBackgroundCommand(_ context.Context, call coretool.Call, inp
 				outputSummary = summary + ": " + interpret.message
 			}
 			t.notificationEmitter.EmitTaskNotification(taskID, emitStatus, outputSummary, outputPath)
+		}
+		// Remove from store after notification
+		if t.taskStore != nil {
+			t.taskStore.Remove(taskID)
 		}
 	}()
 
