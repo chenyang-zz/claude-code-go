@@ -1010,8 +1010,101 @@ func isExternalCommandInAllowlist(command string) bool {
 	}
 }
 
-// tokenizeCommand splits a command string into tokens (like strings.Fields
-// but also handles quoted strings). Simple implementation for argument extraction.
+// tokenizeCommand splits a command string into tokens, handling PowerShell
+// quoting (single quotes, double quotes) and backtick escapes.
+// Compared to strings.Fields, this keeps quoted strings with internal spaces
+// as single tokens (e.g., `--format="%H %s"` stays intact).
+// Ported from TS tokenizeCommand with PowerShell quoting support.
 func tokenizeCommand(command string) []string {
-	return strings.Fields(command)
+	var tokens []string
+	var cur strings.Builder
+	runes := []rune(command)
+	i := 0
+
+	flush := func() {
+		if cur.Len() > 0 {
+			tokens = append(tokens, cur.String())
+			cur.Reset()
+		}
+	}
+
+	for i < len(runes) {
+		ch := runes[i]
+
+		// Whitespace separates tokens
+		if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+			flush()
+			i++
+			continue
+		}
+
+		// Backtick escape: next character is literal
+		if ch == '`' {
+			i++
+			if i < len(runes) {
+				cur.WriteRune(runes[i])
+				i++
+			}
+			continue
+		}
+
+		// Single-quoted string: everything is literal, '' → single quote
+		if ch == '\'' {
+			i++
+			quotedEmpty := true
+			for i < len(runes) {
+				if runes[i] == '\'' {
+					i++
+					if i < len(runes) && runes[i] == '\'' {
+						// '' inside single quotes → literal single quote
+						cur.WriteByte('\'')
+						i++
+						continue
+					}
+					break // end of single-quoted string
+				}
+				quotedEmpty = false
+				cur.WriteRune(runes[i])
+				i++
+			}
+			if quotedEmpty {
+				tokens = append(tokens, "")
+			}
+			continue
+		}
+
+		// Double-quoted string: supports backtick escapes
+		if ch == '"' {
+			i++
+			quotedEmpty := true
+			for i < len(runes) {
+				if runes[i] == '"' {
+					i++
+					break // end of double-quoted string
+				}
+				quotedEmpty = false
+				if runes[i] == '`' {
+					i++
+					if i < len(runes) {
+						cur.WriteRune(runes[i])
+						i++
+					}
+					continue
+				}
+				cur.WriteRune(runes[i])
+				i++
+			}
+			if quotedEmpty {
+				tokens = append(tokens, "")
+			}
+			continue
+		}
+
+		// Normal character
+		cur.WriteRune(ch)
+		i++
+	}
+
+	flush()
+	return tokens
 }
