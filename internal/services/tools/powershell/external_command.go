@@ -507,6 +507,7 @@ var ghReadOnlyCommands = map[string]externalCommandConfig{
 			"--json": flagString, "-j": flagNone,
 			"--assignee": flagString, "--author": flagString,
 			"--label": flagString, "--limit": flagNumber, "-L": flagNumber,
+			"--milestone": flagString, "-m": flagString,
 			"--search": flagString, "--sort": flagString, "--state": flagString,
 			"--repo": flagString, "-R": flagString, "--web": flagNone, "-w": flagNone,
 		},
