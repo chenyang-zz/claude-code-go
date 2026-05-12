@@ -232,13 +232,36 @@ func (t *Tool) executeOrBackground(ctx context.Context, call coretool.Call, inpu
 	return t.executeCommand(ctx, call, command, timeoutMilliseconds)
 }
 
+// PowerShellProgressData carries one incremental stdout update emitted by a running command.
+type PowerShellProgressData struct {
+	Output         string  `json:"output"`
+	FullOutput     string  `json:"fullOutput"`
+	ElapsedSeconds float64 `json:"elapsedSeconds"`
+}
+
 func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command string, timeoutMilliseconds int) (coretool.Result, error) {
 	startTime := time.Now()
-	shellResult, err := t.executor.Execute(ctx, platformshell.Request{
+
+	// Wire up progress reporting via context-based ProgressFunc.
+	// This enables the runtime to stream incremental output to the user.
+	req := platformshell.Request{
 		Command:    command,
 		WorkingDir: call.Context.WorkingDir,
 		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
-	})
+	}
+	if progressFn := coretool.GetProgress(ctx); progressFn != nil {
+		var fullOutput strings.Builder
+		req.OnStdoutLine = func(line string) {
+			fullOutput.WriteString(line)
+			progressFn(PowerShellProgressData{
+				Output:         line,
+				FullOutput:     fullOutput.String(),
+				ElapsedSeconds: time.Since(startTime).Seconds(),
+			})
+		}
+	}
+
+	shellResult, err := t.executor.Execute(ctx, req)
 	elapsed := time.Since(startTime).Seconds()
 
 	if err != nil {
