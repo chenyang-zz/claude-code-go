@@ -1,0 +1,24 @@
+internal/services/tools/powershell/permissions_test.go
+  s_865e849b6b0c41::t_1857d770955a7c 9
+  s_865e849b6b0c41::t_dbb6422f146dcb 474-703
+internal/services/tools/powershell/permissions.go
+  s_865e849b6b0c41::t_61d96eaab21801 897-898,901,907-912,915,920,925-928
+  s_865e849b6b0c41::t_996f494b9486a8 727,731
+  s_865e849b6b0c41::t_4207f2851d60a3 573-578,593-601,603,614-626,628-629,632,637,640,645,649,654,658,662,664,668-669,673,676,678,683,690,693,695,698,705,708,711,724-725,732,737-738,743,750,752-753,755,762,766,769,776,779,782,789,792,795,802,805,807,814,817,824,827,829,832,835,837,849,856,859,866,870,875,879,881,888-896,913-914,916-919,921-924
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4587b7ed6a27d0efc66b566e03260053871423c6",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
