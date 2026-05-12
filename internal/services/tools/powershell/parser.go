@@ -103,22 +103,43 @@ type ParsedRedirection struct {
 
 // ParsedStatement is a parsed statement from PowerShell.
 type ParsedStatement struct {
-	StatementType string                `json:"statementType"`
-	Commands      []ParsedCommandElement `json:"commands"`
-	Redirections  []ParsedRedirection   `json:"redirections"`
-	Text          string                `json:"text"`
+	StatementType  string                `json:"statementType"`
+	Commands       []ParsedCommandElement `json:"commands"`
+	Redirections   []ParsedRedirection   `json:"redirections"`
+	Text           string                `json:"text"`
 	NestedCommands []ParsedCommandElement `json:"nestedCommands,omitempty"`
+	SecurityPatterns *SecurityPatterns   `json:"securityPatterns,omitempty"`
+}
+
+// SecurityPatterns holds security-relevant patterns found by the PS1 parse script.
+type SecurityPatterns struct {
+	HasMemberInvocations  bool `json:"hasMemberInvocations,omitempty"`
+	HasSubExpressions     bool `json:"hasSubExpressions,omitempty"`
+	HasExpandableStrings  bool `json:"hasExpandableStrings,omitempty"`
+	HasScriptBlocks       bool `json:"hasScriptBlocks,omitempty"`
 }
 
 // ParsedPowerShellCommand is the complete parsed result.
 type ParsedPowerShellCommand struct {
-	Valid          bool              `json:"valid"`
-	Errors         []parseError      `json:"errors"`
-	Statements     []ParsedStatement `json:"statements"`
-	Variables      []rawVariable     `json:"variables"`
-	HasStopParsing bool              `json:"hasStopParsing"`
-	OriginalCommand string           `json:"originalCommand"`
-	TypeLiterals   []string          `json:"typeLiterals,omitempty"`
+	Valid              bool              `json:"valid"`
+	Errors             []parseError      `json:"errors"`
+	Statements         []ParsedStatement `json:"statements"`
+	Variables          []rawVariable     `json:"variables"`
+	HasStopParsing     bool              `json:"hasStopParsing"`
+	OriginalCommand    string            `json:"originalCommand"`
+	TypeLiterals       []string          `json:"typeLiterals,omitempty"`
+	HasUsingStatements bool              `json:"hasUsingStatements,omitempty"`
+}
+
+// SecurityFlags holds security-relevant flags derived from the parsed command.
+type SecurityFlags struct {
+	HasSubExpressions    bool
+	HasScriptBlocks      bool
+	HasSplatting         bool
+	HasExpandableStrings bool
+	HasMemberInvocations bool
+	HasAssignments       bool
+	HasStopParsing       bool
 }
 
 type parseError struct {
@@ -608,15 +629,34 @@ func transformStatement(raw rawStatement) ParsedStatement {
 		stmt.Redirections = transformRedirections(raw.Redirections)
 	}
 
+	// Transform security patterns
+	if raw.SecurityPatterns != nil {
+		s := &SecurityPatterns{}
+		if raw.SecurityPatterns.HasMemberInvocations != nil && *raw.SecurityPatterns.HasMemberInvocations {
+			s.HasMemberInvocations = true
+		}
+		if raw.SecurityPatterns.HasSubExpressions != nil && *raw.SecurityPatterns.HasSubExpressions {
+			s.HasSubExpressions = true
+		}
+		if raw.SecurityPatterns.HasExpandableStrings != nil && *raw.SecurityPatterns.HasExpandableStrings {
+			s.HasExpandableStrings = true
+		}
+		if raw.SecurityPatterns.HasScriptBlocks != nil && *raw.SecurityPatterns.HasScriptBlocks {
+			s.HasScriptBlocks = true
+		}
+		stmt.SecurityPatterns = s
+	}
+
 	return stmt
 }
 
 func transformRawOutput(raw rawParsedOutput) ParsedPowerShellCommand {
 	result := ParsedPowerShellCommand{
-		Valid:           raw.Valid,
-		OriginalCommand: raw.OriginalCommand,
-		HasStopParsing:  raw.HasStopParsing,
-		TypeLiterals:    raw.TypeLiterals,
+		Valid:              raw.Valid,
+		OriginalCommand:    raw.OriginalCommand,
+		HasStopParsing:     raw.HasStopParsing,
+		TypeLiterals:       raw.TypeLiterals,
+		HasUsingStatements: raw.HasUsingStatements,
 	}
 
 	// Transform errors
@@ -691,4 +731,121 @@ func ParsePowerShellCommand(command string) ParsedPowerShellCommand {
 	}
 
 	return transformRawOutput(raw)
+}
+
+// DeriveSecurityFlags derives security-relevant flags from the parsed command structure.
+// Ported from TS parser.ts deriveSecurityFlags.
+func DeriveSecurityFlags(parsed ParsedPowerShellCommand) SecurityFlags {
+	flags := SecurityFlags{
+		HasStopParsing: parsed.HasStopParsing,
+	}
+
+	checkElements := func(cmd ParsedCommandElement) {
+		if cmd.ElementTypes == nil {
+			return
+		}
+		for _, et := range cmd.ElementTypes {
+			switch et {
+			case "ScriptBlock":
+				flags.HasScriptBlocks = true
+			case "SubExpression":
+				flags.HasSubExpressions = true
+			case "ExpandableString":
+				flags.HasExpandableStrings = true
+			case "MemberInvocation":
+				flags.HasMemberInvocations = true
+			}
+		}
+	}
+
+	for _, stmt := range parsed.Statements {
+		if stmt.StatementType == "AssignmentStatementAst" {
+			flags.HasAssignments = true
+		}
+		for _, cmd := range stmt.Commands {
+			checkElements(cmd)
+		}
+		if stmt.NestedCommands != nil {
+			for _, cmd := range stmt.NestedCommands {
+				checkElements(cmd)
+			}
+		}
+		// securityPatterns provides a belt-and-suspenders check
+		if stmt.SecurityPatterns != nil {
+			if stmt.SecurityPatterns.HasMemberInvocations {
+				flags.HasMemberInvocations = true
+			}
+			if stmt.SecurityPatterns.HasSubExpressions {
+				flags.HasSubExpressions = true
+			}
+			if stmt.SecurityPatterns.HasExpandableStrings {
+				flags.HasExpandableStrings = true
+			}
+			if stmt.SecurityPatterns.HasScriptBlocks {
+				flags.HasScriptBlocks = true
+			}
+		}
+	}
+
+	for _, v := range parsed.Variables {
+		if v.IsSplatted {
+			flags.HasSplatting = true
+			break
+		}
+	}
+
+	return flags
+}
+
+// PS_TOKENIZER_DASH_CHARS is the set of Unicode dash characters that PowerShell
+// accepts as parameter prefixes. Ported from TS parser.ts PS_TOKENIZER_DASH_CHARS.
+// The set includes: ASCII hyphen-minus (U+002D), en-dash (U+2013),
+// em-dash (U+2014), and horizontal bar (U+2015).
+func isPowerShellParameter(arg string, elementType string) bool {
+	if elementType != "" {
+		return elementType == "Parameter"
+	}
+	if len(arg) == 0 {
+		return false
+	}
+	runes := []rune(arg)
+	ch := runes[0]
+	return ch == '-' || ch == '–' || ch == '—' || ch == '―'
+}
+
+// isNullRedirectionTarget returns true when the redirection target is PowerShell's
+// $null automatic variable. $null discards output (like /dev/null), so it is not
+// a filesystem write. Ported from TS parser.ts isNullRedirectionTarget.
+func isNullRedirectionTarget(target string) bool {
+	t := strings.TrimSpace(strings.ToLower(target))
+	return t == "$null" || t == "${null}"
+}
+
+// getFileRedirections returns all non-merging, non-null-target file redirections
+// from a parsed command. Ported from TS parser.ts getFileRedirections.
+func getFileRedirections(parsed *ParsedPowerShellCommand) []ParsedRedirection {
+	var result []ParsedRedirection
+	for _, stmt := range parsed.Statements {
+		for _, r := range stmt.Redirections {
+			if !r.IsMerging && !isNullRedirectionTarget(r.Target) {
+				result = append(result, r)
+			}
+		}
+	}
+	return result
+}
+
+// getAllCommandNames returns all command names across all statements and nested
+// commands, lowercased. Ported from TS parser.ts getAllCommandNames.
+func getAllCommandNames(parsed ParsedPowerShellCommand) []string {
+	var names []string
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			names = append(names, strings.ToLower(cmd.Name))
+		}
+		for _, cmd := range stmt.NestedCommands {
+			names = append(names, strings.ToLower(cmd.Name))
+		}
+	}
+	return names
 }

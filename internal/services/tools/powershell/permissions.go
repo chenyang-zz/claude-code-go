@@ -259,6 +259,274 @@ func looksLikeEnvAssignment(token string) bool {
 	return true
 }
 
+// firstParsedCommandElement extracts the first CommandAst command element from
+// a parsed PowerShell command. Returns an empty element when no command found.
+func firstParsedCommandElement(parsed ParsedPowerShellCommand) ParsedCommandElement {
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			if cmd.ElementType == "CommandAst" {
+				return cmd
+			}
+		}
+	}
+	return ParsedCommandElement{}
+}
+
+// checkAcceptEditsMode performs the full acceptEdits mode check, mirroring TS
+// modeValidation.ts checkPermissionMode. Returns a PermissionDecision when the
+// command should be handled by acceptEdits mode (allow or passthrough), or nil
+// when acceptEdits does not apply.
+func checkAcceptEditsMode(command string, parsed ParsedPowerShellCommand) *PermissionDecision {
+	// SECURITY: Check for subexpressions, script blocks, or member invocations
+	// that could be used to smuggle arbitrary code through acceptEdits mode.
+	secFlags := DeriveSecurityFlags(parsed)
+	if secFlags.HasSubExpressions || secFlags.HasScriptBlocks ||
+		secFlags.HasMemberInvocations || secFlags.HasSplatting ||
+		secFlags.HasAssignments || secFlags.HasExpandableStrings {
+		return &PermissionDecision{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision:          corepermission.DecisionAsk,
+				NormalizedCommand: command,
+				Message:           "Command contains subexpressions, script blocks, or member invocations that require approval in acceptEdits mode",
+			},
+			Reason: "acceptEdits: security flags",
+		}
+	}
+
+	// Check each statement and each command for acceptEdits eligibility
+	allSubCommands := getAcceptEditsSubCommands(parsed)
+	if len(allSubCommands) == 0 {
+		return &PermissionDecision{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision:          corepermission.DecisionAsk,
+				NormalizedCommand: command,
+				Message:           "No commands found to validate for acceptEdits mode",
+			},
+			Reason: "acceptEdits: no commands",
+		}
+	}
+
+	// Check for cwd-changing cmdlets in compound commands (cd desync guard)
+	// and symlink-create compounds
+	hasCdCommand := false
+	hasSymlinkCreate := false
+	hasWriteCommand := false
+	totalCommands := 0
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			if cmd.ElementType != "CommandAst" {
+				continue
+			}
+			totalCommands++
+			if isCwdChangingCmdlet(cmd.Name) {
+				hasCdCommand = true
+			}
+			if isSymlinkCreatingCmdlet(cmd.Name, cmd.Args) {
+				hasSymlinkCreate = true
+			}
+			if isAcceptEditsCmdlet(resolvePSCommand(cmd.Name)) {
+				hasWriteCommand = true
+			}
+		}
+	}
+
+	// Compound cwd desync guard
+	if totalCommands > 1 && hasCdCommand && hasWriteCommand {
+		return &PermissionDecision{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision:          corepermission.DecisionAsk,
+				NormalizedCommand: command,
+				Message:           "Compound command contains a directory-changing command (Set-Location/Push-Location/Pop-Location) with a write operation",
+			},
+			Reason: "acceptEdits: cd + write compound",
+		}
+	}
+
+	// Symlink-create compound guard
+	if totalCommands > 1 && hasSymlinkCreate {
+		return &PermissionDecision{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision:          corepermission.DecisionAsk,
+				NormalizedCommand: command,
+				Message:           "Compound command creates a filesystem link (New-Item -ItemType SymbolicLink/Junction/HardLink)",
+			},
+			Reason: "acceptEdits: symlink compound",
+		}
+	}
+
+	// Check each command for acceptEdits eligibility
+	for _, cmd := range allSubCommands {
+		if cmd.ElementType != "CommandAst" {
+			return &PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: command,
+					Message:           "Pipeline contains expression source that cannot be statically validated",
+				},
+				Reason: "acceptEdits: non-CommandAst element",
+			}
+		}
+		// nameType 'application' rejection
+		if cmd.NameType == "application" {
+			return &PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: command,
+					Message:           "Command resolved from a path-like name and requires approval in acceptEdits mode",
+				},
+				Reason: "acceptEdits: application nameType",
+			}
+		}
+		// Element type whitelist check.
+		// NOTE: ElementTypes[0] corresponds to Args[0] (first argument).
+		// The parser strips the command name, so types are aligned 1:1 with args.
+		if cmd.ElementTypes != nil {
+			for i := 0; i < len(cmd.ElementTypes); i++ {
+				t := cmd.ElementTypes[i]
+				if t != "StringConstant" && t != "Parameter" {
+					return &PermissionDecision{
+						Evaluation: platformshell.PermissionEvaluation{
+							Decision:          corepermission.DecisionAsk,
+							NormalizedCommand: command,
+							Message:           "Command argument has unvalidatable type in acceptEdits mode",
+						},
+						Reason: "acceptEdits: unsafe element type",
+					}
+				}
+				// Colon-bound expression detection
+				if t == "Parameter" {
+					if i < len(cmd.Args) {
+						arg := cmd.Args[i]
+						colonIdx := strings.Index(arg, ":")
+						if colonIdx > 0 {
+							val := arg[colonIdx+1:]
+							if strings.ContainsAny(val, "$(@{[") {
+								return &PermissionDecision{
+									Evaluation: platformshell.PermissionEvaluation{
+										Decision:          corepermission.DecisionAsk,
+										NormalizedCommand: command,
+										Message:           "Colon-bound parameter contains an expression that cannot be statically validated",
+									},
+									Reason: "acceptEdits: colon-bound expression",
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		// Check if this is an acceptEdits-allowed cmdlet
+		canonical := resolvePSCommand(cmd.Name)
+		if !isAcceptEditsCmdlet(resolvePSCommand(cmd.Name)) && !isSafeOutputCmdlet(canonical) {
+			return &PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: command,
+					Message:           "No mode-specific handling for this command in acceptEdits mode",
+				},
+				Reason: "acceptEdits: not an allowed cmdlet",
+			}
+		}
+	}
+
+	// Also check nested commands from control flow statements
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.NestedCommands {
+			if cmd.ElementType != "CommandAst" {
+				return &PermissionDecision{
+					Evaluation: platformshell.PermissionEvaluation{
+						Decision:          corepermission.DecisionAsk,
+						NormalizedCommand: command,
+						Message:           "Nested expression element cannot be statically validated in acceptEdits mode",
+					},
+					Reason: "acceptEdits: nested non-CommandAst",
+				}
+			}
+			if cmd.NameType == "application" {
+				return &PermissionDecision{
+					Evaluation: platformshell.PermissionEvaluation{
+						Decision:          corepermission.DecisionAsk,
+						NormalizedCommand: command,
+						Message:           "Nested command resolved from a path-like name in acceptEdits mode",
+					},
+					Reason: "acceptEdits: nested application",
+				}
+			}
+			canonical := resolvePSCommand(cmd.Name)
+			if !isAcceptEditsCmdlet(canonical) && !isSafeOutputCmdlet(canonical) {
+				return &PermissionDecision{
+					Evaluation: platformshell.PermissionEvaluation{
+						Decision:          corepermission.DecisionAsk,
+						NormalizedCommand: command,
+						Message:           "Nested command not allowed in acceptEdits mode",
+					},
+					Reason: "acceptEdits: nested not allowed",
+				}
+			}
+		}
+	}
+
+	// All commands are acceptable -- auto-allow
+	return &PermissionDecision{
+		Evaluation: platformshell.PermissionEvaluation{
+			Decision:          corepermission.DecisionAllow,
+			NormalizedCommand: command,
+			Message:           "Command is safe for acceptEdits mode",
+		},
+		Reason: "acceptEdits: all commands allowed",
+	}
+}
+
+// getAcceptEditsSubCommands collects all CommandAst commands from the parsed
+// command that are eligible for acceptEdits checking.
+func getAcceptEditsSubCommands(parsed ParsedPowerShellCommand) []ParsedCommandElement {
+	var cmds []ParsedCommandElement
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			if cmd.ElementType == "CommandAst" {
+				cmds = append(cmds, cmd)
+			}
+		}
+	}
+	return cmds
+}
+
+// isSymlinkCreatingCmdlet detects New-Item -ItemType SymbolicLink/Junction/HardLink.
+// Ported from TS modeValidation.ts isSymlinkCreatingCommand.
+func isSymlinkCreatingCmdlet(name string, args []string) bool {
+	canonical := resolvePSCommand(name)
+	if canonical != "new-item" {
+		return false
+	}
+	linkTypes := map[string]bool{"symboliclink": true, "junction": true, "hardlink": true}
+	for _, arg := range args {
+		lower := strings.ToLower(arg)
+		// Check -ItemType or -Type parameter
+		if strings.HasPrefix(lower, "-itemtype") || strings.HasPrefix(lower, "-type") {
+			// Check colon-bound value
+			if colonIdx := strings.Index(lower, ":"); colonIdx > 0 {
+				val := lower[colonIdx+1:]
+				if linkTypes[val] {
+					return true
+				}
+			}
+		}
+	}
+	// Also check positional args for -ItemType value
+	for i, arg := range args {
+		lower := strings.ToLower(arg)
+		if lower == "-itemtype" || lower == "-type" || lower == "-it" || lower == "-ty" {
+			if i+1 < len(args) {
+				val := strings.ToLower(args[i+1])
+				if linkTypes[val] {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // Compile-time interface check.
 var _ CommandPermissionChecker = (*PermissionChecker)(nil)
 
@@ -396,8 +664,11 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		}
 	}
 
-	// 3a. Path constraints: parse command and validate file paths
+	// 3a. Parse command with AST -- reuse for all subsequent checks
 	parsed := ParsePowerShellCommand(command)
+	firstCmdElement := firstParsedCommandElement(parsed)
+
+	// 3b. Path constraints: parse command and validate file paths
 	if parsed.Valid {
 		pathResult := checkPathConstraints(command, &parsed)
 		if pathResult.ShouldAsk {
@@ -408,6 +679,35 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 					Message:           pathResult.Message,
 				},
 				Reason: "path constraint: " + pathResult.Message,
+			}
+		}
+	}
+
+	// 3c. Security flags from AST: reject commands with subexpressions,
+	// script blocks, member invocations, splatting, assignments, etc.
+	if parsed.Valid {
+		secFlags := DeriveSecurityFlags(parsed)
+		if secFlags.HasScriptBlocks || secFlags.HasSubExpressions ||
+			secFlags.HasMemberInvocations || secFlags.HasSplatting ||
+			secFlags.HasAssignments || secFlags.HasExpandableStrings {
+			return PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: normalized,
+					Message:           "Command contains subexpressions, script blocks, or member invocations that require approval",
+				},
+				Reason: "security flags",
+			}
+		}
+		// Using statements -- invisible to command block walk
+		if parsed.HasUsingStatements {
+			return PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAsk,
+					NormalizedCommand: normalized,
+					Message:           "Command contains a using statement that may load external code (module or assembly)",
+				},
+				Reason: "using statement",
 			}
 		}
 	}
@@ -450,7 +750,6 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 			Reason: "arg leaks",
 		}
 	}
-	
 
 	// 6. Git safety: detect writes to .git/ paths and bare-repo compounds
 	if checkGitInternalWrite(command) {
@@ -473,8 +772,8 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 			Reason: "bare repo compound",
 		}
 	}
-	
-	// 5. If an explicit allow rule matched, return it
+
+	// 7. If an explicit allow rule matched, return it
 	if baseResult.Decision == corepermission.DecisionAllow {
 		return PermissionDecision{
 			Evaluation: baseResult,
@@ -482,30 +781,51 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		}
 	}
 
-	// 6. Read-only cmdlet auto-allow in default mode
-	if isReadOnlyPSCmdlet(command) {
-		return PermissionDecision{
-			Evaluation: platformshell.PermissionEvaluation{
-				Decision:          corepermission.DecisionAllow,
-				NormalizedCommand: normalized,
-				Message:           "Command is read-only and safe to execute",
-			},
-			Reason: "read-only cmdlet",
+	// 8. Read-only cmdlet auto-allow in default mode (with AST element types)
+	if isReadOnlyPSCmdletChecked(command, firstCmdElement) {
+		// Also check nested commands -- if any exist, the statement is not
+		// a simple read-only invocation (it contains executables inside
+		// script blocks, control flow, etc.)
+		if parsed.Valid {
+			hasNested := false
+			for _, stmt := range parsed.Statements {
+				if len(stmt.NestedCommands) > 0 {
+					hasNested = true
+					break
+				}
+			}
+			if !hasNested {
+				return PermissionDecision{
+					Evaluation: platformshell.PermissionEvaluation{
+						Decision:          corepermission.DecisionAllow,
+						NormalizedCommand: normalized,
+						Message:           "Command is read-only and safe to execute",
+					},
+					Reason: "read-only cmdlet + nested check",
+				}
+			}
+		} else {
+			return PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionAllow,
+					NormalizedCommand: normalized,
+					Message:           "Command is read-only and safe to execute",
+				},
+				Reason: "read-only cmdlet",
+			}
 		}
 	}
 
-	// 7. acceptEdits mode: auto-allow safe write cmdlets
-	if approvalMode == "acceptEdits" && isAcceptEditsCmdlet(command) {
-		return PermissionDecision{
-			Evaluation: platformshell.PermissionEvaluation{
-				Decision:          corepermission.DecisionAllow,
-				NormalizedCommand: normalized,
-			},
-			Reason: "acceptEdits mode: allowed write cmdlet",
+	// 9. acceptEdits mode: full AST-based check with security guards.
+	// Mirrors TS checkPermissionMode (modeValidation.ts).
+	if approvalMode == "acceptEdits" && parsed.Valid {
+		permDecision := checkAcceptEditsMode(command, parsed)
+		if permDecision != nil {
+			return *permDecision
 		}
 	}
 
-	// 8. dontAsk mode: anything not explicitly allowed or read-only is denied
+	// 10. dontAsk mode: anything not explicitly allowed or read-only is denied
 	if approvalMode == "dontAsk" {
 		return PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
@@ -517,7 +837,7 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		}
 	}
 
-	// 9. Default: ask for approval
+	// 11. Default: ask for approval
 	return PermissionDecision{
 		Evaluation: baseResult,
 		Reason:     "default: requires approval",
