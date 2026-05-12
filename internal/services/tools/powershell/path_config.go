@@ -216,6 +216,8 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 				paramName := paramLower[:colonIdx]
 				value := arg[colonIdx+1:]
 				if pathParam[paramName] {
+					// Colon-bound paths can't be validated for element type without children
+					hasUnvalidatable = true
 					paths = append(paths, value)
 				}
 				continue
@@ -278,7 +280,7 @@ type checkPathConstraintsResult struct {
 // and CMDLET_PATH_CONFIG. Returns ask when:
 // - Expression pipeline sources are detected (variable piped to cmdlet)
 // - Path arguments have unvalidatable element types (Variable, ScriptBlock)
-// - Dangerous removal paths are targeted
+// Dangerous removal targeting is handled separately by permissions.go Step 0.
 // Ported from TS pathValidation.ts checkPathConstraints.
 func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) checkPathConstraintsResult {
 	if parsed == nil || !parsed.Valid {
@@ -306,8 +308,9 @@ func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) check
 		}
 	}
 
-	// Expression pipeline source + a path-operating cmdlet = unvalidatable path
-	if hasExpressionSource && len(allPaths) > 0 {
+	// Expression pipeline source + path-operating cmdlet = unvalidatable path.
+	// Also triggers when allPaths is empty (piped paths have no explicit args).
+	if hasExpressionSource {
 		return checkPathConstraintsResult{
 			ShouldAsk:       true,
 			Message:         "Command pipes data through the pipeline to a path-operating cmdlet — the piped path cannot be validated",

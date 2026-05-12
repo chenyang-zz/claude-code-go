@@ -653,6 +653,8 @@ func isCwdChangingCmdlet(command string) bool {
 
 // hasSyncSecurityConcerns returns true when a command contains security-relevant
 // patterns that should prevent read-only auto-allow. Quick sync check without AST.
+var splatRe = regexp.MustCompile(`@[\w]+`)
+
 func hasSyncSecurityConcerns(command string) bool {
     // Subexpressions: $(
     if strings.Contains(command, "$(") {
@@ -660,7 +662,6 @@ func hasSyncSecurityConcerns(command string) bool {
     }
     // Splatting: @variable
     if strings.Contains(command, "@") {
-        splatRe := regexp.MustCompile(`@[\w]+`)
         if splatRe.MatchString(strings.TrimSpace(command)) {
             return true
         }

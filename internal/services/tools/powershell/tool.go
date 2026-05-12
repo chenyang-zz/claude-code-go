@@ -250,12 +250,10 @@ func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command s
 		Timeout:    time.Duration(timeoutMilliseconds) * time.Millisecond,
 	}
 	if progressFn := coretool.GetProgress(ctx); progressFn != nil {
-		var fullOutput strings.Builder
 		req.OnStdoutLine = func(line string) {
-			fullOutput.WriteString(line)
 			progressFn(PowerShellProgressData{
 				Output:         line,
-				FullOutput:     fullOutput.String(),
+				FullOutput:     line,
 				ElapsedSeconds: time.Since(startTime).Seconds(),
 			})
 		}
@@ -300,10 +298,16 @@ func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command s
 	rendered := renderSuccess(output)
 
 	// Check for image output (data URI) and set Meta["image"] for runtime
-	// content block conversion.
+	// content block conversion. Replace output with placeholder when image is
+	// detected to avoid bloating transcripts with base64 data.
+	imageMeta := imageMetaFromOutput(shellResult.Stdout)
+	resultOutput := rendered
+	if imageMeta != nil {
+		resultOutput = "[Image output]"
+	}
 	result := coretool.Result{
-		Output: rendered,
-		Meta:   imageMetaFromOutput(shellResult.Stdout),
+		Output: resultOutput,
+		Meta:   imageMeta,
 	}
 
 	return result, nil
@@ -558,6 +562,8 @@ func isSearchOrReadPowerShellCommand(command string) (isSearch, isRead bool) {
 }
 
 // detectBlockedSleepPattern detects blocking Start-Sleep patterns.
+var sleepPatternRe = regexp.MustCompile(`(?i)^(?:start-sleep|sleep)(?:\s+-s(?:econds)?)?\s+(\d+)\s*$`)
+
 func detectBlockedSleepPattern(command string) string {
     first := command
     if idx := strings.IndexAny(first, ";|&"); idx >= 0 {
@@ -568,7 +574,7 @@ func detectBlockedSleepPattern(command string) string {
         return ""
     }
 
-    re := regexp.MustCompile(`(?i)^(?:start-sleep|sleep)(?:\s+-s(?:econds)?)?\s+(\d+)\s*$`)
+    re := sleepPatternRe
     m := re.FindStringSubmatch(first)
     if m == nil {
         return ""

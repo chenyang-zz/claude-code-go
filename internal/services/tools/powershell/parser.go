@@ -1,11 +1,13 @@
 package powershell
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
@@ -512,14 +514,29 @@ func transformRedirections(rawReds []rawRedirection) []ParsedRedirection {
 		pr := ParsedRedirection{}
 		if r.Type == "MergingRedirectionAst" {
 			pr.IsMerging = true
-		}
-		if r.LocationText != "" {
+			pr.Operator = r.FromStream + ">&1"
+			if pr.Operator == ">&1" {
+				pr.Operator = "2>&1"
+			}
+		} else if r.LocationText != "" {
 			pr.Target = r.LocationText
-		}
-		if r.Append != nil && *r.Append {
-			pr.Operator = ">>"
-		} else {
-			pr.Operator = ">"
+			if r.FromStream != "" && r.FromStream != "Output" {
+				prefix := "1"
+				switch r.FromStream {
+				case "Error": prefix = "2"
+				case "Warning": prefix = "3"
+				case "Verbose": prefix = "4"
+				case "Debug": prefix = "5"
+				case "Information": prefix = "6"
+				case "Progress": prefix = "7"
+				}
+				pr.Operator = prefix + ">"
+			} else {
+				pr.Operator = ">"
+			}
+			if r.Append != nil && *r.Append {
+				pr.Operator += ">"
+			}
 		}
 		result = append(result, pr)
 	}
@@ -558,13 +575,21 @@ func transformStatement(raw rawStatement) ParsedStatement {
 		Text:          raw.Text,
 	}
 
-	// Transform pipeline elements into commands
+	// Transform ALL pipeline elements - preserve non-CommandAst elements
+	// so checkPathConstraints can detect expression pipeline sources.
 	for _, elem := range raw.Elements {
 		if elem.Type == "CommandAst" {
 			ce := transformPipelineElement(elem)
 			if ce != nil {
 				stmt.Commands = append(stmt.Commands, *ce)
 			}
+		} else {
+			// Preserve non-CommandAst elements (CommandExpressionAst, etc.)
+			// with their element type for expression source detection.
+			stmt.Commands = append(stmt.Commands, ParsedCommandElement{
+				Text:        elem.Text,
+				ElementType: elem.Type,
+			})
 		}
 	}
 
@@ -642,8 +667,10 @@ func ParsePowerShellCommand(command string) ParsedPowerShellCommand {
 	script := buildParseScript(command)
 	encodedScript := toUtf16LeBase64(script)
 
-	// Call pwsh with -EncodedCommand
-	cmd := exec.Command(pwshPath, "-NoProfile", "-NonInteractive", "-NoLogo", "-EncodedCommand", encodedScript)
+	// Call pwsh with -EncodedCommand (5s timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, pwshPath, "-NoProfile", "-NonInteractive", "-NoLogo", "-EncodedCommand", encodedScript)
 	output, err := cmd.Output()
 	if err != nil {
 		return ParsedPowerShellCommand{
