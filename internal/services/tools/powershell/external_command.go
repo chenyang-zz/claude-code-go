@@ -705,8 +705,8 @@ func isAlphaNumDashLike(s string) bool {
 }
 
 // validateExternalFlags checks that all flags in the token slice are in the safe set.
-// Ported from TS readOnlyCommandValidation.ts validateExternalFlags.
-// This is distinct from allowlist.go's validateExternalFlags which checks PS cmdlet flags.
+// Ported from TS readOnlyCommandValidation.ts validateFlags.
+// This is distinct from allowlist.go's validateFlags which checks PS cmdlet flags.
 func validateExternalFlags(args []string, startIdx int, config externalCommandConfig) bool {
 	if config.safeFlags == nil {
 		return true
@@ -813,9 +813,8 @@ func isGitSafe(args []string) bool {
 			}
 		}
 		hasInlineValue := strings.Contains(arg, "=")
-		flagName := hasInlineValue && strings.Index(arg, "=") > 0
 		var cleanFlag string
-		if flagName {
+		if hasInlineValue {
 			cleanFlag = strings.SplitN(arg, "=", 2)[0]
 		} else {
 			cleanFlag = arg
