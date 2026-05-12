@@ -34,6 +34,7 @@ import (
 	listresources "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/list_resources"
 	readresource "github.com/sheepzhao/claude-code-go/internal/services/tools/mcp/read_resource"
 	notebookedit "github.com/sheepzhao/claude-code-go/internal/services/tools/notebook_edit"
+		"github.com/sheepzhao/claude-code-go/internal/services/tools/powershell"
 		repltool "github.com/sheepzhao/claude-code-go/internal/services/tools/repl"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/remote_trigger"
 	"github.com/sheepzhao/claude-code-go/internal/services/tools/schedule_wakeup"
@@ -168,6 +169,7 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 	wireSkillShellExecutor(executor)
 	return []tool.Tool{
 		bash.NewToolWithRuntime(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
+		powershell.NewToolWithRuntime(powershell.NewExecutor(), powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
 		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
@@ -216,6 +218,7 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 	bashNotifier := &bashNotificationEmitter{runner: hookRunner, config: hookCfg}
 	return []tool.Tool{
 		bash.NewToolWithNotification(executor, platformshell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore, bashNotifier),
+		powershell.NewToolWithRuntime(powershell.NewExecutor(), powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore),
 		taskstop.NewTool(backgroundTaskStore),
 		glob.NewTool(fs, policy),
 		grep.NewTool(fs, policy),
