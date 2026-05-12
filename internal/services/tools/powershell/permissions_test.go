@@ -6,6 +6,7 @@ import (
 
 	coreconfig "github.com/sheepzhao/claude-code-go/internal/core/config"
 	corepermission "github.com/sheepzhao/claude-code-go/internal/core/permission"
+	platformshell "github.com/sheepzhao/claude-code-go/internal/platform/shell"
 )
 
 // newTestPolicy creates a minimal FilesystemPolicy with deny/ask rules for testing.
@@ -469,5 +470,234 @@ func TestFilesystemPolicyExpandArchiveMixedIO(t *testing.T) {
 	}
 	if result.PathAccess[1] != opWrite {
 		t.Errorf("expected -DestinationPath to be opWrite, got %v", result.PathAccess[1])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Collect-then-reduce decision model tests
+// ---------------------------------------------------------------------------
+
+// TestReducePermissionDecisionsDenyWins verifies that deny > ask priority
+// is correctly applied in the reduce phase.
+func TestReducePermissionDecisionsDenyWins(t *testing.T) {
+	decisions := []PermissionDecision{
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAsk,
+				Message:  "earlier ask signal",
+			},
+			Reason: "ask reason",
+		},
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionDeny,
+				Message:  "later deny signal",
+			},
+			Reason: "deny reason",
+		},
+	}
+
+	result := reducePermissionDecisions(decisions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Evaluation.Decision != corepermission.DecisionDeny {
+		t.Errorf("expected DecisionDeny (deny > ask), got %v", result.Evaluation.Decision)
+	}
+	if result.Evaluation.Message != "later deny signal" {
+		t.Errorf("expected deny message, got %q", result.Evaluation.Message)
+	}
+}
+
+// TestReducePermissionDecisionsDenyWinsOverAllow verifies that deny > allow priority
+// is correctly applied.
+func TestReducePermissionDecisionsDenyWinsOverAllow(t *testing.T) {
+	decisions := []PermissionDecision{
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAllow,
+				Message:  "earlier allow signal",
+			},
+			Reason: "allow reason",
+		},
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionDeny,
+				Message:  "later deny signal",
+			},
+			Reason: "deny reason",
+		},
+	}
+
+	result := reducePermissionDecisions(decisions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Evaluation.Decision != corepermission.DecisionDeny {
+		t.Errorf("expected DecisionDeny (deny > allow), got %v", result.Evaluation.Decision)
+	}
+}
+
+// TestReducePermissionDecisionsAskWinsOverAllow verifies that ask > allow priority
+// is correctly applied.
+func TestReducePermissionDecisionsAskWinsOverAllow(t *testing.T) {
+	decisions := []PermissionDecision{
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAllow,
+				Message:  "allow signal",
+			},
+			Reason: "allow reason",
+		},
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAsk,
+				Message:  "ask signal",
+			},
+			Reason: "ask reason",
+		},
+	}
+
+	result := reducePermissionDecisions(decisions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Evaluation.Decision != corepermission.DecisionAsk {
+		t.Errorf("expected DecisionAsk (ask > allow), got %v", result.Evaluation.Decision)
+	}
+}
+
+// TestReducePermissionDecisionsEmpty verifies that an empty slice returns nil.
+func TestReducePermissionDecisionsEmpty(t *testing.T) {
+	result := reducePermissionDecisions(nil)
+	if result != nil {
+		t.Errorf("expected nil for empty decisions, got %v", result)
+	}
+
+	result = reducePermissionDecisions([]PermissionDecision{})
+	if result != nil {
+		t.Errorf("expected nil for empty decisions, got %v", result)
+	}
+}
+
+// TestReducePermissionDecisionsFirstOfEach verifies that the first match
+// for each behavior type wins (preserving step-order messaging).
+func TestReducePermissionDecisionsFirstOfEach(t *testing.T) {
+	decisions := []PermissionDecision{
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAsk,
+				Message:  "first ask",
+			},
+			Reason: "first ask",
+		},
+		{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision: corepermission.DecisionAsk,
+				Message:  "second ask",
+			},
+			Reason: "second ask",
+		},
+	}
+
+	result := reducePermissionDecisions(decisions)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Evaluation.Message != "first ask" {
+		t.Errorf("expected first ask message, got %q", result.Evaluation.Message)
+	}
+}
+
+// TestCheckEnhancedCollectThenReduceAskBeforeDenyIntegration verifies that
+// collect-then-reduce prevents ask-before-deny masking at the CheckEnhanced
+// level: an earlier 'ask' from path constraint checks does not mask a later
+// 'deny' from filesystem policy. Requires pwsh for AST parsing.
+func TestCheckEnhancedCollectThenReduceAskBeforeDenyIntegration(t *testing.T) {
+	skipIfNoPwsh(t)
+
+	// Create a filesystem policy where:
+	// - /home/user/restricted/* → DecisionAsk (read)
+	// - /home/user/protected/* → DecisionDeny (write)
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{
+		Read: []corepermission.Rule{
+			{
+				Source:   corepermission.RuleSourceSession,
+				Decision: corepermission.DecisionAsk,
+				Pattern:  "**/restricted/**",
+			},
+		},
+		Write: []corepermission.Rule{
+			{
+				Source:   corepermission.RuleSourceSession,
+				Decision: corepermission.DecisionDeny,
+				Pattern:  "**/protected/**",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy: %v", err)
+	}
+
+	checker := NewPermissionChecker(coreconfig.PermissionConfig{
+		DefaultMode: "default",
+	}, policy)
+
+	// Copy-Item -Path (read source) is before -Destination (write target) in
+	// the argument list. With collect-then-reduce, the deny from the
+	// protected write path must win over the ask from the restricted read path.
+	decision := checker.CheckEnhanced(
+		`Copy-Item -Path /home/user/restricted/source.txt -Destination /home/user/protected/backup.txt`,
+		ScanResult{Level: RiskLevelSafe},
+		"default",
+		context.Background(),
+		"/home/user",
+	)
+
+	if decision.Evaluation.Decision != corepermission.DecisionDeny {
+		t.Errorf("expected DecisionDeny (deny > ask via collect-then-reduce), got %v (reason: %s)",
+			decision.Evaluation.Decision, decision.Reason)
+	}
+}
+
+// TestCheckEnhancedCollectThenReduceCompoundBeforeFilesystem verifies that
+// collect-then-reduce correctly handles a compound command where a sub-command
+// needs approval (ask) but a filesystem policy deny exists for the command paths.
+// Requires pwsh for AST parsing.
+func TestCheckEnhancedCollectThenReduceCompoundBeforeFilesystem(t *testing.T) {
+	skipIfNoPwsh(t)
+
+	policy, err := corepermission.NewFilesystemPolicy(corepermission.RuleSet{
+		Write: []corepermission.Rule{
+			{
+				Source:   corepermission.RuleSourceSession,
+				Decision: corepermission.DecisionDeny,
+				Pattern:  "**/protected/**",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewFilesystemPolicy: %v", err)
+	}
+
+	checker := NewPermissionChecker(coreconfig.PermissionConfig{
+		DefaultMode: "default",
+	}, policy)
+
+	// Compound command: Get-ChildItem (read-only, auto-pass) followed by
+	// Set-Content writing to a protected path. The compound check produces an
+	// ask (sub-command needs approval), but the filesystem policy produces a
+	// deny. Collect-then-reduce should return deny.
+	decision := checker.CheckEnhanced(
+		`Get-ChildItem C:\ && Set-Content -Path /home/user/protected/config.txt -Value 'data'`,
+		ScanResult{Level: RiskLevelSafe},
+		"default",
+		context.Background(),
+		"/home/user",
+	)
+
+	if decision.Evaluation.Decision != corepermission.DecisionDeny {
+		t.Errorf("expected DecisionDeny (compound ask masked by fs deny via collect-then-reduce), got %v (reason: %s)",
+			decision.Evaluation.Decision, decision.Reason)
 	}
 }
