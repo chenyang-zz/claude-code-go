@@ -1,0 +1,25 @@
+internal/services/tools/powershell/external_command.go
+  s_865e849b6b0c41::t_9e58c4de0678d4 1071-1073
+  s_865e849b6b0c41::t_62254da3b163fd 1100-1102
+internal/services/tools/powershell/external_command_test.go
+  s_865e849b6b0c41::t_6618b3a1c35e84 1000-1001
+  s_865e849b6b0c41::t_3b4d562d826095 945-968,971-973,977-999
+  s_865e849b6b0c41::t_821a69849346dd 794-798,807-811,820-824,833-837,846-850,859-863,872-876,885-889,898-902,911-915,938-942,1003-1006
+  s_865e849b6b0c41::t_2b0c3782afc138 943-944
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e92fafb4d47ade63392d4ffcd97782b2ffd28ad5",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": null
+    }
+  }
+}
