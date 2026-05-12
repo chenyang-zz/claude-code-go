@@ -1,0 +1,24 @@
+internal/services/tools/powershell/path_config_test.go
+  s_865e849b6b0c41::t_f83eeebf53cfee 1-153
+internal/services/tools/powershell/parser.go
+  s_865e849b6b0c41::t_5ef4bc6ed06c57 205-379
+  s_865e849b6b0c41::t_c93cf7b30b5614 401-621
+internal/services/tools/powershell/path_config.go
+  s_865e849b6b0c41::t_1fc0eba8ef324d 1-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "1336134c64ee7963a57d39dcfff5bb9adc3a0992",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
