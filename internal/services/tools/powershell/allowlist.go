@@ -735,7 +735,7 @@ func isSafeArgElementType(elementType string) bool {
 
 // argLeaksMetaCharRe detects variable references ($), subexpressions ($(, @(),
 // arrays (@{), paren expressions ((), type literals ([), script blocks ({).
-var argLeaksMetaCharRe = regexp.MustCompile(`[\$\@\[\(]`)
+var argLeaksMetaCharRe = regexp.MustCompile(`[\$\@\[\(\{]`)
 
 // checkArgElementTypes verifies all argument element types in a parsed command
 // element. Returns true if any arg has an unsafe element type (Variable, Other,
@@ -743,22 +743,24 @@ var argLeaksMetaCharRe = regexp.MustCompile(`[\$\@\[\(]`)
 //
 // Ported from TS readOnlyValidation.ts isAllowlistedCommand elementTypes whitelist.
 // Also checks colon-bound parameters for expression metacharacters.
+//
+// NOTE: ElementTypes[0] corresponds to Args[0] (the first argument).
+// The parser (transformPipelineElement) strips the command name from both
+// stacks, so ElementTypes are already aligned 1:1 with Args.
 func checkArgElementTypes(cmd ParsedCommandElement) bool {
 	if cmd.ElementTypes == nil {
 		// No element types available — fail-closed for untrusted elements
 		return true
 	}
-	// elementTypes[0] is the command name; args start at elementTypes[1]
-	for i := 1; i < len(cmd.ElementTypes); i++ {
+	for i := 0; i < len(cmd.ElementTypes); i++ {
 		t := cmd.ElementTypes[i]
 		if !isSafeArgElementType(t) {
 			// For 'Other' type, do a text check for metacharacters.
 			// ArrayLiteralAst (Get-Process Name, Id) maps to 'Other' but is safe
 			// if the text has no metacharacters ($, @, {, (, [).
 			if t == "Other" {
-				argIdx := i - 1
-				if argIdx < len(cmd.Args) {
-					arg := cmd.Args[argIdx]
+				if i < len(cmd.Args) {
+					arg := cmd.Args[i]
 					if !argLeaksMetaCharRe.MatchString(arg) {
 						continue
 					}
@@ -770,9 +772,8 @@ func checkArgElementTypes(cmd ParsedCommandElement) bool {
 		// CommandParameterAst; the VariableExpressionAst is its .Argument child.
 		// The outer 'Parameter' element type masks the inner expression type.
 		if t == "Parameter" {
-			argIdx := i - 1
-			if argIdx < len(cmd.Args) {
-				arg := cmd.Args[argIdx]
+			if i < len(cmd.Args) {
+				arg := cmd.Args[i]
 				colonIdx := strings.Index(arg, ":")
 				if colonIdx > 0 && argLeaksMetaCharRe.MatchString(arg[colonIdx+1:]) {
 					return true
@@ -789,6 +790,7 @@ func checkArgElementTypes(cmd ParsedCommandElement) bool {
 func checkArgLeaksForElement(cmd ParsedCommandElement) bool {
 	return checkArgElementTypes(cmd)
 }
+
 
 // isProvablySafeStatement returns true only for a PipelineAst where every
 // element is a CommandAst — the one statement shape we can fully validate.

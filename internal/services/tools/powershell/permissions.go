@@ -377,9 +377,11 @@ func checkAcceptEditsMode(command string, parsed ParsedPowerShellCommand) *Permi
 				Reason: "acceptEdits: application nameType",
 			}
 		}
-		// Element type whitelist check
+		// Element type whitelist check.
+		// NOTE: ElementTypes[0] corresponds to Args[0] (first argument).
+		// The parser strips the command name, so types are aligned 1:1 with args.
 		if cmd.ElementTypes != nil {
-			for i := 1; i < len(cmd.ElementTypes); i++ {
+			for i := 0; i < len(cmd.ElementTypes); i++ {
 				t := cmd.ElementTypes[i]
 				if t != "StringConstant" && t != "Parameter" {
 					return &PermissionDecision{
@@ -393,9 +395,8 @@ func checkAcceptEditsMode(command string, parsed ParsedPowerShellCommand) *Permi
 				}
 				// Colon-bound expression detection
 				if t == "Parameter" {
-					argIdx := i - 1
-					if argIdx < len(cmd.Args) {
-						arg := cmd.Args[argIdx]
+					if i < len(cmd.Args) {
+						arg := cmd.Args[i]
 						colonIdx := strings.Index(arg, ":")
 						if colonIdx > 0 {
 							val := arg[colonIdx+1:]
