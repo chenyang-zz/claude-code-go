@@ -275,7 +275,33 @@ func (t *Tool) executeCommand(ctx context.Context, call coretool.Call, command s
 	}
 
 	rendered := renderSuccess(output)
-	return coretool.Result{Output: rendered}, nil
+
+	// Check for image output (data URI) and set Meta["image"] for runtime
+	// content block conversion.
+	result := coretool.Result{
+		Output: rendered,
+		Meta:   imageMetaFromOutput(shellResult.Stdout),
+	}
+
+	return result, nil
+}
+
+// dataURIPattern matches a base64-encoded image data URI.
+var dataURIPattern = regexp.MustCompile(`^data:([^;]+);base64,(.+)$`)
+
+// imageMetaFromOutput checks if stdout is a data URI and returns Meta["image"].
+func imageMetaFromOutput(stdout string) map[string]any {
+	trimmed := strings.TrimSpace(stdout)
+	matches := dataURIPattern.FindStringSubmatch(trimmed)
+	if len(matches) < 3 {
+		return nil
+	}
+	return map[string]any{
+		"image": coretool.ImageData{
+			MediaType: matches[1],
+			Base64:    matches[2],
+		},
+	}
 }
 
 // startBackgroundCommand launches a PowerShell command in the background and returns a task ID.
