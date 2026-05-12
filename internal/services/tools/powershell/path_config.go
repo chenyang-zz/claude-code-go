@@ -21,6 +21,7 @@ const (
 type cmdletPathConfig struct {
 	OperationType    operationType
 	PathParams       []string // e.g., "-Path", "-LiteralPath"
+	WriteOnlyPathParams []string // subset of PathParams that are write destinations (others are read sources)
 	KnownSwitches    []string // e.g., "-Force", "-Recurse"
 	KnownValueParams []string // e.g., "-Filter", "-Encoding"
 	// LeafOnlyPathParams are parameter names that accept a leaf filename resolved
@@ -94,12 +95,14 @@ func buildCmdletPathConfigs() map[string]cmdletPathConfig {
 		"copy-item": {
 			OperationType: opWrite,
 			PathParams:    []string{"-path", "-literalpath", "-pspath", "-lp", "-destination"},
+			WriteOnlyPathParams: []string{"-destination"},
 			KnownSwitches: []string{"-container", "-force", "-passthru", "-recurse", "-whatif", "-confirm", "-usetransaction"},
 			KnownValueParams: []string{"-filter", "-include", "-exclude", "-credential"},
 		},
 		"move-item": {
 			OperationType: opWrite,
 			PathParams:    []string{"-path", "-literalpath", "-pspath", "-lp", "-destination"},
+			WriteOnlyPathParams: []string{"-destination"},
 			KnownSwitches: []string{"-force", "-passthru", "-whatif", "-confirm", "-usetransaction"},
 			KnownValueParams: []string{"-filter", "-include", "-exclude", "-credential"},
 		},
@@ -215,6 +218,7 @@ func buildCmdletPathConfigs() map[string]cmdletPathConfig {
 		"invoke-webrequest": {
 			OperationType:   opWrite,
 			PathParams:    []string{"-outfile", "-infile"},
+			WriteOnlyPathParams: []string{"-outfile"},
 			PositionalSkip: 1,
 			OptionalWrite: true,
 			KnownSwitches: []string{"-allowinsecureredirect", "-disablekeepalive", "-passthru", "-resume", "-skipcertificatecheck", "-skipheadervalidation", "-skiphttperrorcheck", "-usebasicparsing", "-usedefaultcredentials"},
@@ -223,6 +227,7 @@ func buildCmdletPathConfigs() map[string]cmdletPathConfig {
 		"invoke-restmethod": {
 			OperationType:   opWrite,
 			PathParams:    []string{"-outfile", "-infile"},
+			WriteOnlyPathParams: []string{"-outfile"},
 			PositionalSkip: 1,
 			OptionalWrite: true,
 			KnownSwitches: []string{"-allowinsecureredirect", "-disablekeepalive", "-passthru", "-resume", "-skipcertificatecheck", "-skipheadervalidation", "-skiphttperrorcheck", "-usebasicparsing", "-usedefaultcredentials"},
@@ -232,11 +237,13 @@ func buildCmdletPathConfigs() map[string]cmdletPathConfig {
 		"expand-archive": {
 			OperationType:    opWrite,
 			PathParams:    []string{"-path", "-literalpath", "-pspath", "-lp", "-destinationpath"},
+			WriteOnlyPathParams: []string{"-destinationpath"},
 			KnownSwitches: []string{"-force", "-passthru", "-whatif", "-confirm"},
 		},
 		"compress-archive": {
 			OperationType:    opWrite,
 			PathParams:    []string{"-path", "-literalpath", "-pspath", "-lp", "-destinationpath"},
+			WriteOnlyPathParams: []string{"-destinationpath"},
 			KnownSwitches: []string{"-force", "-update", "-passthru", "-whatif", "-confirm"},
 			KnownValueParams: []string{"-compressionlevel"},
 		},
@@ -296,8 +303,15 @@ var safePathElementTypes = map[string]bool{
 type extractPathsResult struct {
 	Paths                   []string
 	OperationType           operationType
+	PathAccess              []operationType // per-path access (parallel to Paths), falls back to OperationType when nil/empty
 	HasUnvalidatablePathArg bool
 	OptionalWrite           bool
+}
+
+// ExtractedPath pairs a file path with its operation type from the cmdlet config.
+type ExtractedPath struct {
+	Path          string
+	OperationType operationType
 }
 
 // extractPathsFromCommand extracts file paths from a parsed command element
@@ -333,6 +347,12 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 	for _, p := range config.LeafOnlyPathParams {
 		leafOnlyParam[strings.ToLower(p)] = true
 	}
+	writeOnlyParam := make(map[string]bool)
+	for _, p := range config.WriteOnlyPathParams {
+		writeOnlyParam[strings.ToLower(p)] = true
+	}
+
+	var pathAccess []operationType
 
 	positionalsSeen := 0
 	positionalSkip := config.PositionalSkip
@@ -356,9 +376,20 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 					// Colon-bound paths can't be validated for element type without children
 					hasUnvalidatable = true
 					paths = append(paths, value)
+					// Determine access: write-only params are write, others are read
+					if writeOnlyParam[paramName] {
+						pathAccess = append(pathAccess, opWrite)
+					} else {
+						pathAccess = append(pathAccess, opRead)
+					}
 				} else if leafOnlyParam[paramName] {
 					hasUnvalidatable = true
 					paths = append(paths, value)
+					if writeOnlyParam[paramName] {
+						pathAccess = append(pathAccess, opWrite)
+					} else {
+						pathAccess = append(pathAccess, opRead)
+					}
 				}
 				continue
 			}
@@ -385,6 +416,12 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 							hasUnvalidatable = true
 						}
 						paths = append(paths, nextArg)
+						// Determine access: write-only params are write, others are read
+						if writeOnlyParam[paramLower] {
+							pathAccess = append(pathAccess, opWrite)
+						} else {
+							pathAccess = append(pathAccess, opRead)
+						}
 						i++ // skip the value
 						continue
 					}
@@ -411,11 +448,13 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 			hasUnvalidatable = true
 		}
 		paths = append(paths, arg)
+		pathAccess = append(pathAccess, config.OperationType)
 	}
 
 	return extractPathsResult{
 		Paths:                   paths,
 		OperationType:           config.OperationType,
+		PathAccess:              pathAccess,
 		HasUnvalidatablePathArg: hasUnvalidatable,
 		OptionalWrite:           config.OptionalWrite,
 	}
@@ -423,9 +462,9 @@ func extractPathsFromCommand(cmd ParsedCommandElement) extractPathsResult {
 
 // checkPathConstraintsResult holds the outcome of path constraint validation.
 type checkPathConstraintsResult struct {
-	ShouldAsk    bool
-	Message      string
-	ExtractedPaths []string
+	ShouldAsk       bool
+	Message         string
+	ExtractedPaths  []ExtractedPath
 }
 
 // checkPathConstraints validates file paths in a command using the AST parser
@@ -439,7 +478,7 @@ func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) check
 		return checkPathConstraintsResult{}
 	}
 
-	var allPaths []string
+	var allPaths []ExtractedPath
 	var hasExpressionSource bool
 	var hasUnvalidatable bool
 
@@ -453,7 +492,13 @@ func checkPathConstraints(command string, parsed *ParsedPowerShellCommand) check
 
 			// Extract paths using CMDLET_PATH_CONFIG
 			result := extractPathsFromCommand(cmd)
-			allPaths = append(allPaths, result.Paths...)
+			for i, p := range result.Paths {
+				access := result.OperationType
+				if i < len(result.PathAccess) {
+					access = result.PathAccess[i]
+				}
+				allPaths = append(allPaths, ExtractedPath{Path: p, OperationType: access})
+			}
 			if result.HasUnvalidatablePathArg {
 				hasUnvalidatable = true
 			}

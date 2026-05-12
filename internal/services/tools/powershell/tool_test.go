@@ -299,7 +299,7 @@ func TestPermissionChecker(t *testing.T) {
 		Ask:   []string{"PowerShell(Set-Content:*)"},
 	}
 
-	checker := NewPermissionChecker(cfg)
+	checker := NewPermissionChecker(cfg, nil)
 
 	// Deny rule
 	eval := checker.Check("Remove-Item / -Recurse")
@@ -331,7 +331,7 @@ func TestPermissionCheckerAliasResolution(t *testing.T) {
 		Deny: []string{"PowerShell(iex:*)"},
 	}
 
-	checker := NewPermissionChecker(cfg)
+	checker := NewPermissionChecker(cfg, nil)
 
 	// Alias should be resolved to canonical cmdlet
 	eval := checker.Check("iex 'malicious code'")
@@ -351,7 +351,7 @@ func TestPermissionCheckerExactMatch(t *testing.T) {
 		Allow: []string{"PowerShell(Get-Process)"},
 	}
 
-	checker := NewPermissionChecker(cfg)
+	checker := NewPermissionChecker(cfg, nil)
 
 	// Exact match
 	eval := checker.Check("Get-Process")

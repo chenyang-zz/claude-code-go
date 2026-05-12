@@ -209,7 +209,7 @@ func BaseWorkspaceTools(fs platformfs.FileSystem, policy *corepermission.Filesys
 		lsptool.NewTool(),
 	}
 	if psExecutor != nil {
-		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore))
+		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions, policy), permissions.DefaultMode, backgroundTaskStore))
 	}
 	return tools
 }
@@ -260,7 +260,7 @@ func BaseWorkspaceToolsWithHooks(fs platformfs.FileSystem, policy *corepermissio
 		lsptool.NewTool(),
 	}
 	if psExecutor != nil {
-		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions), permissions.DefaultMode, backgroundTaskStore))
+		tools = append(tools, powershell.NewToolWithRuntime(psExecutor, powershell.NewPermissionChecker(permissions, policy), permissions.DefaultMode, backgroundTaskStore))
 	}
 	return tools
 }
