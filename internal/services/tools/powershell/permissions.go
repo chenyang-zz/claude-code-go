@@ -570,6 +570,12 @@ type PermissionDecision struct {
 // - Approval mode integration
 // - Security scan results
 // - Filesystem policy (deny/allow rules for extracted file paths)
+//
+// Uses collect-then-reduce decision model (ported from TS powershellPermissions.ts):
+// every post-parse check pushes its decision into a slice, then a single reduce
+// applies priority: deny > ask > allow > passthrough. This structurally closes
+// the ask-before-deny bug class: an 'ask' from an earlier check can no longer
+// mask a 'deny' from a later check.
 func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult, approvalMode string, ctx context.Context, workingDir string) PermissionDecision {
 	normalized := normalizePSCommandForPermission(command)
 	if normalized == "" {
@@ -584,16 +590,17 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 	}
 
 	// 0. Hard deny: dangerous removal of protected system paths
-		if isDangerousRemoval(command) {
-			return PermissionDecision{
-				Evaluation: platformshell.PermissionEvaluation{
-					Decision:          corepermission.DecisionDeny,
-					NormalizedCommand: normalized,
-					Message:           fmt.Sprintf("Permission to execute %q has been denied: targets protected system path.", normalized),
-				},
-				Reason: "dangerous removal path",
-			}
+	// (Early return — non-negotiable security boundary)
+	if isDangerousRemoval(command) {
+		return PermissionDecision{
+			Evaluation: platformshell.PermissionEvaluation{
+				Decision:          corepermission.DecisionDeny,
+				NormalizedCommand: normalized,
+				Message:           fmt.Sprintf("Permission to execute %q has been denied: targets protected system path.", normalized),
+			},
+			Reason: "dangerous removal path",
 		}
+	}
 
 	// 1. Rule-based check (deny/ask/allow rules)
 	baseResult := c.Check(command)
@@ -604,93 +611,104 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		}
 	}
 
+	// Parse AST once, reused by all post-parse checks
+	parsed := ParsePowerShellCommand(command)
+	firstCmdElement := firstParsedCommandElement(parsed)
+
+	// ========================================================================
+	// COLLECT PHASE
+	// ========================================================================
+	// Every post-parse check pushes its decision into this slice. No early
+	// returns — all checks run so that a 'deny' from a later check cannot
+	// be masked by an 'ask' from an earlier check.
+	// Ported from TS powershellPermissions.ts collect-then-reduce (step 3-4).
+	var decisions []PermissionDecision
+
 	// 2. Compound command: split into sub-commands and evaluate each independently.
-	// This mirrors powershellPermissions.ts step 5: each pipeline segment or
-	// statement separator creates an independent sub-command.
+	// This mirrors TS step 5: each pipeline segment or statement separator
+	// creates an independent sub-command.
 	subCmds := splitSubCommands(command)
 	if len(subCmds) > 1 {
-		var subCmdsNeedingApproval []string
+		var subAskReasons []string
 		for _, subCmd := range subCmds {
 			subResult := c.Check(subCmd)
 			switch subResult.Decision {
 			case corepermission.DecisionDeny:
-				return PermissionDecision{
+				decisions = append(decisions, PermissionDecision{
 					Evaluation: subResult,
 					Reason:     "sub-command deny: " + subCmd,
-				}
+				})
 			case corepermission.DecisionAsk:
 				// Check each gate independently for this sub-command
 				subScan := NewSecurityScanner().Scan(subCmd)
 				if subScan.Level >= RiskLevelDangerous {
-					subCmdsNeedingApproval = append(subCmdsNeedingApproval, subCmd)
+					subAskReasons = append(subAskReasons, subCmd)
 					continue
 				}
 				if hasProviderPath(subCmd) {
-					subCmdsNeedingApproval = append(subCmdsNeedingApproval, subCmd)
+					subAskReasons = append(subAskReasons, subCmd)
 					continue
 				}
 				if !isReadOnlyPSCmdlet(subCmd) {
 					if checkArgLeaks(subCmd) {
-						subCmdsNeedingApproval = append(subCmdsNeedingApproval, subCmd)
+						subAskReasons = append(subAskReasons, subCmd)
 						continue
 					}
 					if !(approvalMode == "acceptEdits" && isAcceptEditsCmdlet(subCmd)) {
-						subCmdsNeedingApproval = append(subCmdsNeedingApproval, subCmd)
+						subAskReasons = append(subAskReasons, subCmd)
 						continue
 					}
 				}
-				// Read-only or acceptEdits-allowed sub-command - auto-pass
+				// Read-only or acceptEdits-allowed sub-command — auto-pass
 			case corepermission.DecisionAllow:
-				// Allowed sub-command - auto-pass
+				// Allowed sub-command — auto-pass
 			}
 		}
 
-		if len(subCmdsNeedingApproval) > 0 {
-			return PermissionDecision{
+		if len(subAskReasons) > 0 {
+			decisions = append(decisions, PermissionDecision{
 				Evaluation: platformshell.PermissionEvaluation{
 					Decision:          corepermission.DecisionAsk,
 					NormalizedCommand: normalized,
-					Message:           fmt.Sprintf("Compound command has %d sub-command(s) that require approval", len(subCmdsNeedingApproval)),
+					Message:           fmt.Sprintf("Compound command has %d sub-command(s) that require approval", len(subAskReasons)),
 				},
 				Reason: "compound: sub-commands need approval",
-			}
+			})
 		}
-		// All sub-commands passed - fall through
+		// No early return: all sub-commands checked, continue collecting.
 	}
 
 	// 3. Security scan: dangerous commands always require approval
 	if scanResult.Level >= RiskLevelDangerous {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           scanResult.Message,
 			},
 			Reason: "security: " + scanResult.Message,
-		}
+		})
 	}
 
-	// 3a. Parse command with AST -- reuse for all subsequent checks
-	parsed := ParsePowerShellCommand(command)
-	firstCmdElement := firstParsedCommandElement(parsed)
-
-	// 3b. Path constraints: parse command and validate file paths
+	// 4. Post-parse checks (require valid AST)
 	if parsed.Valid {
+		// 4a. Path constraints: parse command and validate file paths
 		pathResult := checkPathConstraints(command, &parsed)
 		if pathResult.ShouldAsk {
-			return PermissionDecision{
+			decisions = append(decisions, PermissionDecision{
 				Evaluation: platformshell.PermissionEvaluation{
 					Decision:          corepermission.DecisionAsk,
 					NormalizedCommand: normalized,
 					Message:           pathResult.Message,
 				},
 				Reason: "path constraint: " + pathResult.Message,
-			}
+			})
 		}
 
-		// 3b-ii. Filesystem policy: validate extracted paths against
+		// 4b. Filesystem policy: validate extracted paths against
 		// filesystem deny/allow rules. Each extracted path is checked with
 		// the appropriate access type (read/write) from CMDLET_PATH_CONFIG.
+		// ALL paths are checked (no early return) to collect all signals.
 		if c.fsPolicy != nil && len(pathResult.ExtractedPaths) > 0 {
 			for _, ep := range pathResult.ExtractedPaths {
 				access := corepermission.AccessWrite
@@ -703,131 +721,120 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 					WorkingDir: workingDir,
 					Access:     access,
 				})
-				if fsEval.Decision == corepermission.DecisionDeny {
-					return PermissionDecision{
+				if fsEval.Decision == corepermission.DecisionDeny || fsEval.Decision == corepermission.DecisionAsk {
+					decisions = append(decisions, PermissionDecision{
 						Evaluation: platformshell.PermissionEvaluation{
-							Decision:          corepermission.DecisionDeny,
+							Decision:          fsEval.Decision,
 							NormalizedCommand: normalized,
 							Message:           fsEval.Message,
 						},
-						Reason: "filesystem policy deny: " + ep.Path,
-					}
-				}
-				if fsEval.Decision == corepermission.DecisionAsk {
-					return PermissionDecision{
-						Evaluation: platformshell.PermissionEvaluation{
-							Decision:          corepermission.DecisionAsk,
-							NormalizedCommand: normalized,
-							Message:           fsEval.Message,
-						},
-						Reason: "filesystem policy ask: " + ep.Path,
-					}
+						Reason: "filesystem policy " + string(fsEval.Decision) + ": " + ep.Path,
+					})
 				}
 			}
 		}
-	}
 
-	// 3c. Security flags from AST: reject commands with subexpressions,
-	// script blocks, member invocations, splatting, assignments, etc.
-	if parsed.Valid {
+		// 4c. Security flags from AST: reject commands with subexpressions,
+		// script blocks, member invocations, splatting, assignments, etc.
 		secFlags := DeriveSecurityFlags(parsed)
 		if secFlags.HasScriptBlocks || secFlags.HasSubExpressions ||
 			secFlags.HasMemberInvocations || secFlags.HasSplatting ||
 			secFlags.HasAssignments || secFlags.HasExpandableStrings {
-			return PermissionDecision{
+			decisions = append(decisions, PermissionDecision{
 				Evaluation: platformshell.PermissionEvaluation{
 					Decision:          corepermission.DecisionAsk,
 					NormalizedCommand: normalized,
 					Message:           "Command contains subexpressions, script blocks, or member invocations that require approval",
 				},
 				Reason: "security flags",
-			}
+			})
 		}
-		// Using statements -- invisible to command block walk
+
+		// 4d. Using statements — invisible to command block walk
 		if parsed.HasUsingStatements {
-			return PermissionDecision{
+			decisions = append(decisions, PermissionDecision{
 				Evaluation: platformshell.PermissionEvaluation{
 					Decision:          corepermission.DecisionAsk,
 					NormalizedCommand: normalized,
 					Message:           "Command contains a using statement that may load external code (module or assembly)",
 				},
 				Reason: "using statement",
-			}
+			})
 		}
 	}
 
-	// 4. Provider path detection: commands accessing PSDrive non-filesystem
+	// 5. Provider path detection: commands accessing PSDrive non-filesystem
 	// resources (env:, HKLM:, cert:) should always ask.
 	if hasProviderPath(command) {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           "Command accesses non-filesystem provider paths (env:/HKLM:/cert:) and requires approval",
 			},
 			Reason: "provider path",
-		}
+		})
 	}
 
-	// 4a. UNC path detection: commands with UNC paths (\\server\share) can
+	// 6. UNC path detection: commands with UNC paths (\\server\share) can
 	// leak NTLM/Kerberos credentials on Windows.
 	if containsVulnerableUncPath(command) {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           "Command contains a UNC path that could trigger network requests",
 			},
 			Reason: "UNC path",
-		}
+		})
 	}
 
-	// 5. Arg leaks detection: cmdlets that print/display their arguments can
+	// 7. Arg leaks detection: cmdlets that print/display their arguments can
 	// leak sensitive values (e.g., Write-Output $env:SECRET).
 	if checkArgLeaks(command) {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           "Command may expose sensitive values in its output",
 			},
 			Reason: "arg leaks",
-		}
+		})
 	}
 
-	// 6. Git safety: detect writes to .git/ paths and bare-repo compounds
+	// 8. Git safety: detect writes to .git/ paths and bare-repo compounds
 	if checkGitInternalWrite(command) {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           "Command writes to a git-internal path (.git/) which may compromise git security",
 			},
 			Reason: "git internal write",
-		}
+		})
 	}
 	if checkBareRepoCompound(command) {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: platformshell.PermissionEvaluation{
 				Decision:          corepermission.DecisionAsk,
 				NormalizedCommand: normalized,
 				Message:           "Command creates bare-repo paths before running git, which may execute malicious hooks",
 			},
 			Reason: "bare repo compound",
-		}
+		})
 	}
 
-	// 7. If an explicit allow rule matched, return it
+	// 9. If an explicit allow rule matched, push it
 	if baseResult.Decision == corepermission.DecisionAllow {
-		return PermissionDecision{
+		decisions = append(decisions, PermissionDecision{
 			Evaluation: baseResult,
 			Reason:     "rule allow",
-		}
+		})
 	}
 
-	// 8. Read-only cmdlet auto-allow in default mode (with AST element types)
+	// 10. Read-only cmdlet auto-allow in default mode (with AST element types)
 	if isReadOnlyPSCmdletChecked(command, firstCmdElement) {
-		// Also check nested commands -- if any exist, the statement is not
+		// Also check nested commands — if any exist, the statement is not
 		// a simple read-only invocation (it contains executables inside
 		// script blocks, control flow, etc.)
 		if parsed.Valid {
@@ -839,51 +846,97 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 				}
 			}
 			if !hasNested {
-				return PermissionDecision{
+				decisions = append(decisions, PermissionDecision{
 					Evaluation: platformshell.PermissionEvaluation{
 						Decision:          corepermission.DecisionAllow,
 						NormalizedCommand: normalized,
 						Message:           "Command is read-only and safe to execute",
 					},
 					Reason: "read-only cmdlet + nested check",
-				}
+				})
 			}
 		} else {
-			return PermissionDecision{
+			decisions = append(decisions, PermissionDecision{
 				Evaluation: platformshell.PermissionEvaluation{
 					Decision:          corepermission.DecisionAllow,
 					NormalizedCommand: normalized,
 					Message:           "Command is read-only and safe to execute",
 				},
 				Reason: "read-only cmdlet",
-			}
+			})
 		}
 	}
 
-	// 9. acceptEdits mode: full AST-based check with security guards.
+	// 11. acceptEdits mode: full AST-based check with security guards.
 	// Mirrors TS checkPermissionMode (modeValidation.ts).
 	if approvalMode == "acceptEdits" && parsed.Valid {
 		permDecision := checkAcceptEditsMode(command, parsed)
 		if permDecision != nil {
-			return *permDecision
+			decisions = append(decisions, *permDecision)
 		}
 	}
 
-	// 10. dontAsk mode: anything not explicitly allowed or read-only is denied
+	// 12. dontAsk mode: anything not explicitly allowed or read-only is denied.
+	// Only push Deny when no Allow signal exists among collected decisions
+	// and baseResult is not Allow — otherwise the Deny would mask the Allow.
 	if approvalMode == "dontAsk" {
-		return PermissionDecision{
-			Evaluation: platformshell.PermissionEvaluation{
-				Decision:          corepermission.DecisionDeny,
-				NormalizedCommand: normalized,
-				Message:           fmt.Sprintf("Permission to execute %q was not granted.", normalized),
-			},
-			Reason: "dontAsk mode: not explicitly allowed",
+		hasAllow := baseResult.Decision == corepermission.DecisionAllow
+		if !hasAllow {
+			for _, d := range decisions {
+				if d.Evaluation.Decision == corepermission.DecisionAllow {
+					hasAllow = true
+					break
+				}
+			}
+		}
+		if !hasAllow {
+			decisions = append(decisions, PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionDeny,
+					NormalizedCommand: normalized,
+					Message:           fmt.Sprintf("Permission to execute %q was not granted.", normalized),
+				},
+				Reason: "dontAsk mode: not explicitly allowed",
+			})
 		}
 	}
 
-	// 11. Default: ask for approval
+	// ========================================================================
+	// REDUCE PHASE: deny > ask > allow > passthrough
+	// ========================================================================
+	// First of each behavior type wins (preserves step-order messaging for
+	// single-check cases). If nothing decided, fall through to default.
+	// Ported from TS powershellPermissions.ts:1354-1368.
+	if result := reducePermissionDecisions(decisions); result != nil {
+		return *result
+	}
+
+	// Default: ask for approval
 	return PermissionDecision{
 		Evaluation: baseResult,
 		Reason:     "default: requires approval",
 	}
+}
+
+// reducePermissionDecisions applies deny > ask > allow priority to a slice
+// of permission decisions. First of each behavior type wins. Returns the
+// winning decision or nil when the slice is empty.
+// Ported from TS powershellPermissions.ts reduce phase (step 4).
+func reducePermissionDecisions(decisions []PermissionDecision) *PermissionDecision {
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionDeny {
+			return &decisions[i]
+		}
+	}
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionAsk {
+			return &decisions[i]
+		}
+	}
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionAllow {
+			return &decisions[i]
+		}
+	}
+	return nil
 }
