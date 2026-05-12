@@ -188,6 +188,18 @@ var psSafeOutputCmdlets = map[string]bool{
 	"convertto-xml": true, "format-hex": true, "where-object": true,
 }
 
+// psPipelineTailCmdlets lists cmdlets moved from SAFE_OUTPUT_CMDLETS to
+// CMDLET_ALLOWLIST with arg validation. These are pipeline-tail transformers
+// that were previously name-only filtered as safe-output but now require
+// arg validation. Used by isAllowlistedPipelineTail for the narrow fallback.
+// Ported from TS readOnlyValidation.ts PIPELINE_TAIL_CMDLETS.
+var psPipelineTailCmdlets = map[string]bool{
+	"format-table": true, "format-list": true, "format-wide": true,
+	"format-custom": true, "measure-object": true,
+	"select-object": true, "sort-object": true, "group-object": true,
+	"where-object": true, "out-string": true, "out-host": true,
+}
+
 // psProviderPaths is the set of PSDrive providers that access non-filesystem resources.
 var psProviderPaths = map[string]bool{
 	"env": true, "hklm": true, "hkcu": true, "function": true,
@@ -422,6 +434,11 @@ func isReadOnlyPSCmdlet(command string) bool {
 // read-only PowerShell cmdlet, with optional AST element type validation.
 // When cmd contains valid ElementTypes, they are checked against the whitelist
 // (rejecting Variable, ScriptBlock, SubExpression, MemberInvocation, etc.).
+//
+// SECURITY: For external commands (git, gh, docker, dotnet), delegates to
+// isExternalCommandInAllowlist which performs subcommand-level safety checking.
+// Previously, any git command was auto-allowed because "git" was in
+// psReadOnlyCmdlets without any subcommand validation.
 func isReadOnlyPSCmdletChecked(command string, cmd ParsedCommandElement) bool {
 	first := firstCmdlet(command)
 	if first == "" {
@@ -429,7 +446,13 @@ func isReadOnlyPSCmdletChecked(command string, cmd ParsedCommandElement) bool {
 	}
 	canonical := resolvePSCommand(first)
 
-	// Check the read-only set
+	// SECURITY: External commands (git, gh, docker, dotnet) require subcommand-level
+	// safety checking — delegate to isExternalCommandInAllowlist.
+	if canonical == "git" || canonical == "gh" || canonical == "docker" || canonical == "dotnet" {
+		return isExternalCommandInAllowlist(command)
+	}
+
+	// Check the read-only set (non-external commands)
 	if !psReadOnlyCmdlets[canonical] {
 		return false
 	}
@@ -765,4 +788,36 @@ func checkArgElementTypes(cmd ParsedCommandElement) bool {
 // cmdlets like Write-Output, Write-Host, Start-Sleep, Format-*.
 func checkArgLeaksForElement(cmd ParsedCommandElement) bool {
 	return checkArgElementTypes(cmd)
+}
+
+// isProvablySafeStatement returns true only for a PipelineAst where every
+// element is a CommandAst — the one statement shape we can fully validate.
+// Ported from TS readOnlyValidation.ts isProvablySafeStatement.
+func isProvablySafeStatement(stmt ParsedStatement) bool {
+	if stmt.StatementType != "PipelineAst" {
+		return false
+	}
+	if len(stmt.Commands) == 0 {
+		return false
+	}
+	for _, cmd := range stmt.Commands {
+		if cmd.ElementType != "CommandAst" {
+			return false
+		}
+	}
+	return true
+}
+
+// isAllowlistedPipelineTail checks if a command is a pipeline-tail transformer
+// (Format-Table, Select-Object, etc.) that passes arg validation.
+// Ported from TS readOnlyValidation.ts isAllowlistedPipelineTail.
+func isAllowlistedPipelineTail(cmd ParsedCommandElement) bool {
+	canonical := resolvePSCommand(cmd.Name)
+	if !psPipelineTailCmdlets[canonical] {
+		return false
+	}
+	if cmd.ElementTypes == nil || len(cmd.ElementTypes) == 0 {
+		return true
+	}
+	return !checkArgElementTypes(cmd)
 }

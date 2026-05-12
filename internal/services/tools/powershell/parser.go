@@ -796,3 +796,56 @@ func DeriveSecurityFlags(parsed ParsedPowerShellCommand) SecurityFlags {
 
 	return flags
 }
+
+// PS_TOKENIZER_DASH_CHARS is the set of Unicode dash characters that PowerShell
+// accepts as parameter prefixes. Ported from TS parser.ts PS_TOKENIZER_DASH_CHARS.
+// The set includes: ASCII hyphen-minus (U+002D), en-dash (U+2013),
+// em-dash (U+2014), and horizontal bar (U+2015).
+func isPowerShellParameter(arg string, elementType string) bool {
+	if elementType != "" {
+		return elementType == "Parameter"
+	}
+	if len(arg) == 0 {
+		return false
+	}
+	runes := []rune(arg)
+	ch := runes[0]
+	return ch == '-' || ch == '–' || ch == '—' || ch == '―'
+}
+
+// isNullRedirectionTarget returns true when the redirection target is PowerShell's
+// $null automatic variable. $null discards output (like /dev/null), so it is not
+// a filesystem write. Ported from TS parser.ts isNullRedirectionTarget.
+func isNullRedirectionTarget(target string) bool {
+	t := strings.TrimSpace(strings.ToLower(target))
+	return t == "$null" || t == "${null}"
+}
+
+// getFileRedirections returns all non-merging, non-null-target file redirections
+// from a parsed command. Ported from TS parser.ts getFileRedirections.
+func getFileRedirections(parsed *ParsedPowerShellCommand) []ParsedRedirection {
+	var result []ParsedRedirection
+	for _, stmt := range parsed.Statements {
+		for _, r := range stmt.Redirections {
+			if !r.IsMerging && !isNullRedirectionTarget(r.Target) {
+				result = append(result, r)
+			}
+		}
+	}
+	return result
+}
+
+// getAllCommandNames returns all command names across all statements and nested
+// commands, lowercased. Ported from TS parser.ts getAllCommandNames.
+func getAllCommandNames(parsed ParsedPowerShellCommand) []string {
+	var names []string
+	for _, stmt := range parsed.Statements {
+		for _, cmd := range stmt.Commands {
+			names = append(names, strings.ToLower(cmd.Name))
+		}
+		for _, cmd := range stmt.NestedCommands {
+			names = append(names, strings.ToLower(cmd.Name))
+		}
+	}
+	return names
+}
