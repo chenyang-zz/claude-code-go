@@ -876,16 +876,29 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 		}
 	}
 
-	// 12. dontAsk mode: anything not explicitly allowed or read-only is denied
+	// 12. dontAsk mode: anything not explicitly allowed or read-only is denied.
+	// Only push Deny when no Allow signal exists among collected decisions
+	// and baseResult is not Allow — otherwise the Deny would mask the Allow.
 	if approvalMode == "dontAsk" {
-		decisions = append(decisions, PermissionDecision{
-			Evaluation: platformshell.PermissionEvaluation{
-				Decision:          corepermission.DecisionDeny,
-				NormalizedCommand: normalized,
-				Message:           fmt.Sprintf("Permission to execute %q was not granted.", normalized),
-			},
-			Reason: "dontAsk mode: not explicitly allowed",
-		})
+		hasAllow := baseResult.Decision == corepermission.DecisionAllow
+		if !hasAllow {
+			for _, d := range decisions {
+				if d.Evaluation.Decision == corepermission.DecisionAllow {
+					hasAllow = true
+					break
+				}
+			}
+		}
+		if !hasAllow {
+			decisions = append(decisions, PermissionDecision{
+				Evaluation: platformshell.PermissionEvaluation{
+					Decision:          corepermission.DecisionDeny,
+					NormalizedCommand: normalized,
+					Message:           fmt.Sprintf("Permission to execute %q was not granted.", normalized),
+				},
+				Reason: "dontAsk mode: not explicitly allowed",
+			})
+		}
 	}
 
 	// ========================================================================
@@ -910,19 +923,19 @@ func (c *PermissionChecker) CheckEnhanced(command string, scanResult ScanResult,
 // winning decision or nil when the slice is empty.
 // Ported from TS powershellPermissions.ts reduce phase (step 4).
 func reducePermissionDecisions(decisions []PermissionDecision) *PermissionDecision {
-	for _, d := range decisions {
-		if d.Evaluation.Decision == corepermission.DecisionDeny {
-			return &d
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionDeny {
+			return &decisions[i]
 		}
 	}
-	for _, d := range decisions {
-		if d.Evaluation.Decision == corepermission.DecisionAsk {
-			return &d
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionAsk {
+			return &decisions[i]
 		}
 	}
-	for _, d := range decisions {
-		if d.Evaluation.Decision == corepermission.DecisionAllow {
-			return &d
+	for i := range decisions {
+		if decisions[i].Evaluation.Decision == corepermission.DecisionAllow {
+			return &decisions[i]
 		}
 	}
 	return nil

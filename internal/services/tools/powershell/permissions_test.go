@@ -701,3 +701,74 @@ func TestCheckEnhancedCollectThenReduceCompoundBeforeFilesystem(t *testing.T) {
 			decision.Evaluation.Decision, decision.Reason)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// dontAsk mode tests — verify that allow signals are preserved under dontAsk
+// ---------------------------------------------------------------------------
+
+// TestCheckEnhancedDontAskWithAllowRule verifies that an explicit allow rule
+// still works in dontAsk mode (the unconditional deny regression fix).
+func TestCheckEnhancedDontAskWithAllowRule(t *testing.T) {
+	checker := NewPermissionChecker(coreconfig.PermissionConfig{
+		Allow:       []string{"PowerShell(Get-ChildItem:*)"},
+		DefaultMode: "default",
+	}, nil)
+
+	// The allow rule matches → baseResult is Allow → dontAsk should NOT push deny
+	decision := checker.CheckEnhanced(
+		`Get-ChildItem C:\`,
+		ScanResult{Level: RiskLevelSafe},
+		"dontAsk",
+		context.Background(),
+		"/",
+	)
+
+	if decision.Evaluation.Decision != corepermission.DecisionAllow {
+		t.Errorf("expected DecisionAllow in dontAsk mode with explicit allow rule, got %v (reason: %s)",
+			decision.Evaluation.Decision, decision.Reason)
+	}
+}
+
+// TestCheckEnhancedDontAskWithReadOnly verifies that read-only auto-allow
+// bypasses dontAsk mode's deny (the unconditional deny regression fix).
+func TestCheckEnhancedDontAskWithReadOnly(t *testing.T) {
+	checker := NewPermissionChecker(coreconfig.PermissionConfig{
+		DefaultMode: "dontAsk",
+	}, nil)
+
+	// Read-only commands should auto-allow even in dontAsk mode
+	decision := checker.CheckEnhanced(
+		`Get-Process`,
+		ScanResult{Level: RiskLevelSafe},
+		"dontAsk",
+		context.Background(),
+		"/",
+	)
+
+	if decision.Evaluation.Decision != corepermission.DecisionAllow {
+		t.Errorf("expected DecisionAllow for read-only command in dontAsk mode, got %v (reason: %s)",
+			decision.Evaluation.Decision, decision.Reason)
+	}
+}
+
+// TestCheckEnhancedDontAskDenyNonAllowed verifies that a non-allowed command
+// in dontAsk mode is correctly denied.
+func TestCheckEnhancedDontAskDenyNonAllowed(t *testing.T) {
+	checker := NewPermissionChecker(coreconfig.PermissionConfig{
+		DefaultMode: "dontAsk",
+	}, nil)
+
+	// Write command with no matching allow rule → should be denied in dontAsk
+	decision := checker.CheckEnhanced(
+		`Set-Content -Path /tmp/test.txt -Value 'data'`,
+		ScanResult{Level: RiskLevelSafe},
+		"dontAsk",
+		context.Background(),
+		"/",
+	)
+
+	if decision.Evaluation.Decision != corepermission.DecisionDeny {
+		t.Errorf("expected DecisionDeny for non-allowed command in dontAsk mode, got %v (reason: %s)",
+			decision.Evaluation.Decision, decision.Reason)
+	}
+}
