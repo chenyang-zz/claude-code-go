@@ -7,6 +7,19 @@ set -e
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TUI_DIR="$DIR/tui"
+TUI_LOG_DIR="$TUI_DIR/logs"
+mkdir -p "$TUI_LOG_DIR"
+
+# 默认开启前端调试日志；显式设置 TUI_DEBUG=0 可关闭
+if [ -z "${TUI_DEBUG+x}" ]; then
+  TUI_DEBUG=1
+fi
+if [ -z "${TUI_DEBUG_LEVEL+x}" ]; then
+  TUI_DEBUG_LEVEL=debug
+fi
+if [ -z "${TUI_DEBUG_MODULE+x}" ]; then
+  TUI_DEBUG_MODULE="ws,render,state"
+fi
 
 # 编译（如果二进制不存在或源码更新）
 cd "$DIR"
@@ -42,6 +55,28 @@ fi
 echo "Go 后端已启动 (PID: $CC_PID)"
 echo "WebSocket 端口: $PORT"
 
+# 透传前端调试环境变量到 bun 进程（含 tmux 场景）
+FRONTEND_ENV=""
+[ -n "${TUI_DEBUG:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG='$TUI_DEBUG'"
+[ -n "${TUI_DEBUG_LEVEL:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG_LEVEL='$TUI_DEBUG_LEVEL'"
+[ -n "${TUI_DEBUG_MODULE:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG_MODULE='$TUI_DEBUG_MODULE'"
+[ -n "${TUI_DEBUG_STDERR:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG_STDERR='$TUI_DEBUG_STDERR'"
+[ -n "${TUI_DEBUG_FILE:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG_FILE='$TUI_DEBUG_FILE'"
+[ -n "${TUI_DEBUG_CONTENT:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_DEBUG_CONTENT='$TUI_DEBUG_CONTENT'"
+[ -n "${TUI_TYPEWRITER_INTERVAL_MS:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_TYPEWRITER_INTERVAL_MS='$TUI_TYPEWRITER_INTERVAL_MS'"
+[ -n "${TUI_TYPEWRITER_DELTA_CHARS_PER_TICK:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_TYPEWRITER_DELTA_CHARS_PER_TICK='$TUI_TYPEWRITER_DELTA_CHARS_PER_TICK'"
+[ -n "${TUI_TYPEWRITER_THINKING_CHARS_PER_TICK:-}" ] && FRONTEND_ENV="$FRONTEND_ENV TUI_TYPEWRITER_THINKING_CHARS_PER_TICK='$TUI_TYPEWRITER_THINKING_CHARS_PER_TICK'"
+
+if [ "${TUI_DEBUG:-}" != "0" ]; then
+  EFFECTIVE_DEBUG_FILE="${TUI_DEBUG_FILE:-$TUI_LOG_DIR/frontend-debug.log}"
+  if [ "${TUI_DEBUG_RESET_ON_START:-0}" = "1" ]; then
+    mkdir -p "$(dirname "$EFFECTIVE_DEBUG_FILE")"
+    : > "$EFFECTIVE_DEBUG_FILE"
+    clear
+  fi
+  echo "前端调试日志: $EFFECTIVE_DEBUG_FILE"
+fi
+
 # 使用 script 创建 PTY 运行 TUI，配合 tmux 分屏显示日志
 # TUI_TMUX=0 可禁用 tmux（直接全屏运行 TUI）
 if command -v tmux &>/dev/null && [ "${TUI_TMUX:-1}" != "0" ]; then
@@ -49,7 +84,7 @@ if command -v tmux &>/dev/null && [ "${TUI_TMUX:-1}" != "0" ]; then
   tmux kill-session -t cc-tui 2>/dev/null || true
 
   # 创建 tmux session：左 TUI / 右日志
-  tmux new-session -d -s cc-tui "script -q /dev/null sh -c \"cd '$TUI_DIR' && bun run src/index.tsx --port $PORT\""
+  tmux new-session -d -s cc-tui "script -q /dev/null sh -c \"cd '$TUI_DIR' && env$FRONTEND_ENV bun run src/index.tsx --port $PORT\""
   tmux split-window -t cc-tui -h "tail -f /tmp/cc-tui-port.log"
 
   echo "切换 pane（TUI ↔ 日志）: Ctrl+B → ←/→"
@@ -68,7 +103,7 @@ else
   grep -vE '^[[:space:]]*$' /tmp/cc-tui-port.log | tail -3
   echo "Go 日志: tail -f /tmp/cc-tui-port.log"
   echo ""
-  script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
+  script -q /dev/null sh -c "cd '$TUI_DIR' && env$FRONTEND_ENV bun run src/index.tsx --port $PORT"
 fi
 
 # TUI 退出后，清理 Go 进程

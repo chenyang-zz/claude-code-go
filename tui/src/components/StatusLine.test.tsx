@@ -3,6 +3,10 @@ import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import { StatusLine } from "./StatusLine.js";
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 describe("StatusLine", () => {
   it("shows Idle when not running", () => {
     const { lastFrame } = render(
@@ -19,6 +23,18 @@ describe("StatusLine", () => {
       <StatusLine connected={true} isRunning={true} isThinking={true} />
     );
     expect(lastFrame()).toContain("Thinking");
+  });
+
+  it("animates Thinking dots", async () => {
+    const { lastFrame, unmount } = render(
+      <StatusLine connected={true} isRunning={true} isThinking={true} />
+    );
+    expect(lastFrame()).toContain("Thinking.");
+
+    await wait(380);
+
+    expect(lastFrame()).toContain("Thinking..");
+    unmount();
   });
 
   it("shows Running when running but not thinking", () => {

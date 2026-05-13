@@ -10,5 +10,7 @@ import TerminalRenderer from "marked-terminal";
  */
 export default function Markdown({ children, ...options }: { children: string; [key: string]: any }) {
   setOptions({ renderer: new (TerminalRenderer as any)(options) as any });
-  return React.createElement(Text, null, (parse as any)(children).trim());
+  const rendered = String((parse as any)(children) ?? "").trim();
+  const output = rendered.length > 0 ? rendered : children;
+  return React.createElement(Text, null, output);
 }

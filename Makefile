@@ -1,4 +1,4 @@
-.PHONY: build test test-tui test-all tui-deps tui-run tui-build clean run-tui run
+.PHONY: build test test-tui test-all tui-deps tui-run tui-build clean run-tui run run-tui-debug
 
 # Go binary name
 BINARY=cc
@@ -39,6 +39,10 @@ clean:
 # Run TUI mode (set TUI_TMUX=0 to disable tmux split-pane)
 run-tui:
 	chmod +x scripts/run-tui.sh && scripts/run-tui.sh
+
+# Run TUI mode with full frontend debug logging
+run-tui-debug:
+	chmod +x scripts/run-tui.sh && TUI_DEBUG=1 TUI_DEBUG_LEVEL=trace TUI_DEBUG_MODULE=ws,render,state TUI_DEBUG_CONTENT=full TUI_DEBUG_RESET_ON_START=1 scripts/run-tui.sh
 
 # Watch Go logs from the TUI session (run in another terminal)
 tui-logs:

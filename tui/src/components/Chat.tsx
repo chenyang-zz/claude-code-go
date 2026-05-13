@@ -2,13 +2,10 @@ import React from "react";
 import { Box, Text } from "ink";
 import Markdown from "./MarkdownWrapper.js";
 import { CodeBlock } from "./Markdown.js";
+import { ThinkingIndicator } from "./ThinkingIndicator.js";
+import type { Line } from "../types/tui.js";
 
-export interface Line {
-  id: number;
-  text: string;
-  type: "delta" | "thinking" | "tool" | "error" | "info" | "line" | "code";
-  codeLanguage?: string;
-}
+export type { Line } from "../types/tui.js";
 
 export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean }) {
 
@@ -43,7 +40,7 @@ export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean
       ))}
       {isThinking && (
         <Box>
-          <Text color="yellow">⠋ Thinking...</Text>
+          <ThinkingIndicator />
         </Box>
       )}
     </Box>

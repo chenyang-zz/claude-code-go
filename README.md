@@ -155,4 +155,43 @@ go build ./cmd/cc
 go vet ./...
 ```
 
+### TUI 调试与打字机配置
+
+```bash
+# 默认 TUI 运行
+make run-tui
+
+# 开启 trace 级前端调试日志，并在启动时清空日志和终端
+make run-tui-debug
+```
+
+TUI 前端调试日志默认写入 `tui/logs/frontend-debug.log`。`make run-tui` 会默认开启前端调试日志；如需关闭，可显式设置 `TUI_DEBUG=0`。
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `TUI_DEBUG` | `1` | 是否开启 TUI 前端 JSONL 调试日志；设为 `0` 关闭。 |
+| `TUI_DEBUG_LEVEL` | `debug` | 日志级别：`error`、`warn`、`info`、`debug`、`trace`。 |
+| `TUI_DEBUG_MODULE` | `ws,render,state` | 逗号分隔的模块过滤，可选 `ws`、`render`、`state`、`perf`。 |
+| `TUI_DEBUG_CONTENT` | `preview` | 内容记录模式：`off` 不记录文本，`preview` 记录截断预览，`full` 记录完整文本。 |
+| `TUI_DEBUG_FILE` | `tui/logs/frontend-debug.log` | 前端调试日志文件路径。相对路径以 `tui/` 目录为基准。 |
+| `TUI_DEBUG_STDERR` | `0` | 是否把 warn/error 级前端调试日志同时输出到 stderr。 |
+| `TUI_DEBUG_RESET_ON_START` | `0` | 设为 `1` 时，启动前清空前端调试日志并清屏；`make run-tui-debug` 默认开启。 |
+| `TUI_TMUX` | `1` | 是否使用 tmux 分屏运行 TUI；设为 `0` 可禁用 tmux。 |
+| `TUI_TYPEWRITER_INTERVAL_MS` | `16` | 打字机 tick 间隔，单位毫秒。 |
+| `TUI_TYPEWRITER_DELTA_CHARS_PER_TICK` | `6` | 正文 `message.delta` 每次 tick 显示的字符数。 |
+| `TUI_TYPEWRITER_THINKING_CHARS_PER_TICK` | `8` | `thinking` 每次 tick 显示的字符数。 |
+
+示例：
+
+```bash
+# 记录完整正文内容，便于排查渲染问题
+TUI_DEBUG_CONTENT=full make run-tui-debug
+
+# 加快正文打字机速度
+TUI_TYPEWRITER_DELTA_CHARS_PER_TICK=10 make run-tui-debug
+
+# 不使用 tmux，直接全屏运行 TUI
+TUI_TMUX=0 make run-tui
+```
+
 更多开发指南见 [docs/](docs/) 目录与 [AGENTS.md](AGENTS.md)。
