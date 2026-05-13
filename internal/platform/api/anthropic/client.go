@@ -888,8 +888,13 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 				return
 			}
 			block.thinking.WriteString(payload.Delta.Thinking)
-		}
-		if payload.Delta.Type == "signature_delta" {
+				out <- model.Event{
+					Type:      model.EventTypeThinking,
+					Thinking:  block.thinking.String(),
+					Signature: block.signature,
+				}
+			}
+			if payload.Delta.Type == "signature_delta" {
 			block, ok := contentBlocks[payload.Index]
 			if !ok || (block.blockType != "thinking" && block.blockType != "connector_text") {
 				out <- model.Event{
@@ -963,11 +968,8 @@ func (c *Client) handleSSEEvent(eventName, data string, contentBlocks map[int]*s
 				},
 			}
 		case "thinking":
-			out <- model.Event{
-				Type:      model.EventTypeThinking,
-				Thinking:  block.thinking.String(),
-				Signature: block.signature,
-			}
+			// Thinking already emitted incrementally via thinking_delta
+			// and signature_delta events; no need to emit again on stop.
 		case "redacted_thinking":
 			out <- model.Event{
 				Type:      model.EventTypeThinking,
