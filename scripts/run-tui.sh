@@ -1,6 +1,7 @@
 #!/bin/bash
 # TUI 启动脚本：单命令同时启动 Go 后端 + TUI 前端
 # Go 后台运行，TUI 独占终端（通过 script 分配 PTY）
+# 自动使用临时 session DB，避免迁移冲突
 
 set -e
 
@@ -14,8 +15,12 @@ go build -o /tmp/cc-tui ./cmd/cc/. 2>/dev/null || {
   exit 1
 }
 
+# 使用临时 DB 避免迁移冲突
+SESSION_DB="/tmp/cc-tui-sessions.db"
+rm -f "$SESSION_DB"
+
 # 启动 Go 后端（后台），捕获端口
-/tmp/cc-tui --tui 2>/tmp/cc-tui-port.log &
+CLAUDE_CODE_SESSION_DB_PATH="$SESSION_DB" /tmp/cc-tui --tui 2>/tmp/cc-tui-port.log &
 CC_PID=$!
 
 # 等待端口输出（日志包含 ANSI 转义码，需 strip 后解析）
