@@ -31,10 +31,11 @@ func TestRendererStartAndConnect(t *testing.T) {
 	require.NoError(t, r.WaitForConnection(ctx))
 
 	// Send an event via the renderer.
-	r.RenderEvent(event.Event{
+	err = r.RenderEvent(event.Event{
 		Type:    event.TypeMessageDelta,
 		Payload: event.MessageDeltaPayload{Text: "hello"},
 	})
+	require.NoError(t, err)
 
 	// Read the event on the WebSocket side.
 	_, raw, err := c.ReadMessage()
@@ -137,7 +138,7 @@ func TestRendererNoClientNoBlock(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		r.RenderEvent(event.Event{
+		err = r.RenderEvent(event.Event{
 			Type:    event.TypeMessageDelta,
 			Payload: event.MessageDeltaPayload{Text: "test"},
 		})

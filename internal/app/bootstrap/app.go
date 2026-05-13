@@ -126,6 +126,7 @@ type App struct {
 	// GrowthBookRefreshCleanup unsubscribes the OnRefresh listener wired to
 	// the analytics emitter. nil when FlagGrowthBook is disabled.
 	GrowthBookRefreshCleanup func()
+	TUICleanup func()
 	// Haiku is the single-prompt Haiku query helper used by downstream
 	// services (e.g. tool use summary). nil when the Anthropic provider
 	// is not selected or FlagHaikuQuery is disabled.
@@ -240,6 +241,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	eng := assembly.Engine
 	policy := assembly.Policy
 
+	var tuiCleanup func()
 	var renderer console.EventRenderer
 	var tuiRenderer *tui.Renderer
 	switch cfg.OutputFormat {
@@ -256,10 +258,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if waitErr := tuiR.WaitForConnection(waitCtx); waitErr == nil {
 			tuiRenderer = tuiR
+			tuiCleanup = func() { _ = tuiR.Close() }
 			renderer = tuiR
 			logger.InfoCF("tui", "TUI client connected", nil)
 		} else {
 			tuiR.Close()
+			cfg.OutputFormat = "console"
+			configureConsoleLogging("console")
 			renderer = console.NewStreamRenderer(console.NewPrinter(nil))
 			logger.WarnCF("tui", "no TUI client within timeout, using console output", nil)
 		}
@@ -268,6 +273,15 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		renderer = console.NewStreamRenderer(console.NewPrinter(nil))
 	}
 	runner := repl.NewRunner(eng, renderer)
+
+	if tuiRenderer != nil {
+		if rt, ok := eng.(*engine.Runtime); ok {
+			rt.ApprovalService = approval.NewPromptingService(
+				cfg.ApprovalMode,
+				console.NewApprovalRenderer(approvalPrinterForConfig(cfg), tuiRenderer.InputReader()),
+			)
+		}
+	}
 	runner.ProjectPath = cfg.ProjectPath
 	runner.RemoteSession = cfg.RemoteSession
 	if cfg.RemoteSession.Enabled && strings.TrimSpace(cfg.RemoteSession.StreamURL) != "" {
@@ -573,6 +587,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		SessionMemoryCompact:    sessionmemorycompact.CurrentService(),
 		CoordinatorScheduler:    coordinatorScheduler,
 			GrowthBookRefreshCleanup: gbRefreshCleanup,
+			TUICleanup: tuiCleanup,
 	}, nil
 }
 
@@ -1920,6 +1935,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	}
 	if a.GrowthBookRefreshCleanup != nil {
 		defer a.GrowthBookRefreshCleanup()
+	}
+	if a.TUICleanup != nil {
+		defer a.TUICleanup()
 	}
 
 	// Emit session lifecycle events.

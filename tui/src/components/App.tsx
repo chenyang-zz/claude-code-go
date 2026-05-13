@@ -66,7 +66,7 @@ export function App({ port }: AppProps) {
             }
             case "tool.call.finished": {
               const name = evt.payload?.name ?? "unknown";
-              const isErr = evt.payload?.isError;
+              const isErr = evt.payload?.is_error;
               addLine(`${isErr ? "✗" : "✓"} ${name}${isErr ? " (error)" : ""}`, isErr ? "error" : "tool");
               setIsThinking(false);
               break;
@@ -77,23 +77,23 @@ export function App({ port }: AppProps) {
               break;
             }
             case "usage": {
-              const usage = evt.payload?.turnUsage ?? evt.payload?.usage ?? {};
+              const usage = evt.payload?.turn_usage ?? evt.payload?.usage ?? {};
               addLine(
-                `📊 in=${usage.inputTokens ?? "?"} out=${usage.outputTokens ?? "?"} cache_c=${usage.cacheCreationInputTokens ?? "?"} cache_r=${usage.cacheReadInputTokens ?? "?"} stop=${evt.payload?.stopReason ?? "?"}`,
+                `📊 in=${usage.input_tokens ?? "?"} out=${usage.output_tokens ?? "?"} cache_c=${usage.cache_creation_input_tokens ?? "?"} cache_r=${usage.cache_read_input_tokens ?? "?"} stop=${evt.payload?.stop_reason ?? "?"}`,
                 "info"
               );
               break;
             }
             case "retry.attempted": {
-              addLine(`⟳ Attempt ${evt.payload?.attempt}/${evt.payload?.maxAttempts}: ${evt.payload?.error}`, "info");
+              addLine(`⟳ Attempt ${evt.payload?.attempt}/${evt.payload?.max_attempts}: ${evt.payload?.error}`, "info");
               break;
             }
             case "model.fallback": {
-              addLine(`⇄ Model fallback: ${evt.payload?.originalModel} → ${evt.payload?.fallbackModel}`, "info");
+              addLine(`⇄ Model fallback: ${evt.payload?.original_model} → ${evt.payload?.fallback_model}`, "info");
               break;
             }
             case "compact.done": {
-              addLine(`📦 Compact: ${evt.payload?.preTokenCount} → ${evt.payload?.postTokenCount} tokens`, "info");
+              addLine(`📦 Compact: ${evt.payload?.pre_token_count} → ${evt.payload?.post_token_count} tokens`, "info");
               break;
             }
             case "tool.progress": {

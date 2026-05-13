@@ -98,10 +98,11 @@ func (r *Renderer) WaitForConnection(ctx context.Context) error {
 		r.mu.RUnlock()
 		return nil
 	}
+	ch := r.connCh
 	r.mu.RUnlock()
 
 	select {
-	case <-r.connCh:
+	case <-ch:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
