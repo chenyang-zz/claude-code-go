@@ -5,7 +5,6 @@ import { Input } from "./Input.js";
 import { PermissionDialog } from "./PermissionDialog.js";
 import { StatusLine } from "./StatusLine.js";
 import { connectWS, sendInput, sendApproval, type WSMessage } from "../ws-client.js";
-import { writeSync } from "fs";
 
 interface AppProps {
   port: number;
@@ -23,7 +22,8 @@ export function App({ port }: AppProps) {
   const [inputDisabled, setInputDisabled] = useState(true);
   const lineIdRef = useRef(2);
   const currentDeltaRef = useRef("");
-  const lastDeltaFlushRef = useRef(0);
+  const deltaQueueRef = useRef<string[]>([]);
+  const deltaProcessingRef = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Permission dialog state
@@ -74,16 +74,13 @@ export function App({ port }: AppProps) {
                 setIsRunning(true);
                 setIsThinking(false);
                 currentDeltaRef.current += text;
-                writeSync(2, text);
-                const id = lineIdRef.current++;
-                const content = currentDeltaRef.current;
-                setLines((prev) => {
-                  const last = prev[prev.length - 1];
-                  if (last?.type === "delta") {
-                    return [...prev.slice(0, -1), { id, text: content, type: "delta" }];
-                  }
-                  return [...prev, { id, text: content, type: "delta" }];
-                });
+                // Queue the delta for async processing to allow React
+                // to render between messages (prevent batching).
+                deltaQueueRef.current.push(text);
+                if (!deltaProcessingRef.current) {
+                  deltaProcessingRef.current = true;
+                  processDeltaQueue();
+                }
               }
               break;
             }
@@ -214,6 +211,25 @@ export function App({ port }: AppProps) {
     },
     [connected, addLine],
   );
+
+  function processDeltaQueue() {
+    const text = deltaQueueRef.current.shift();
+    if (!text) {
+      deltaProcessingRef.current = false;
+      return;
+    }
+    const id = lineIdRef.current++;
+    const content = currentDeltaRef.current;
+    setLines((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.type === "delta") {
+        return [...prev.slice(0, -1), { id, text: content, type: "delta" }];
+      }
+      return [...prev, { id, text: content, type: "delta" }];
+    });
+    // Process next delta after React has had a chance to render.
+    setTimeout(processDeltaQueue, 0);
+  }
 
   function finalizeResponse() {
     const full = currentDeltaRef.current;
