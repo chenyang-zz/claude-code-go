@@ -49,7 +49,8 @@ if command -v tmux &>/dev/null && [ -n "$TMUX" ]; then
   tmux split-window -h "tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'"
   script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
 elif command -v tmux &>/dev/null; then
-  # 不在 tmux 中：创建新 session
+  # 不在 tmux 中：先清理旧 session，再创建新 session
+  tmux kill-session -t cc-tui 2>/dev/null || true
   tmux new-session -d -s cc-tui "script -q /dev/null sh -c \"cd '$TUI_DIR' && bun run src/index.tsx --port $PORT\""
   tmux split-window -t cc-tui -h "tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'"
   tmux attach-session -t cc-tui
@@ -64,9 +65,10 @@ else
   script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
 fi
 
-# TUI 退出后，清理 Go 进程
+# TUI 退出后，清理 Go 进程和 tmux session
 kill $CC_PID 2>/dev/null
 wait $CC_PID 2>/dev/null || true
+tmux kill-session -t cc-tui 2>/dev/null || true
 echo ""
 echo "TUI 已退出"
 echo "Go 日志: tail -f /tmp/cc-tui-port.log"
