@@ -18,10 +18,10 @@ go build -o /tmp/cc-tui ./cmd/cc/. 2>/dev/null || {
 /tmp/cc-tui --tui 2>/tmp/cc-tui-port.log &
 CC_PID=$!
 
-# 等待端口输出
+# 等待端口输出（日志包含 ANSI 转义码，需 strip 后解析）
 PORT=""
 for i in $(seq 1 10); do
-  PORT=$(grep -Eo 'port=[0-9]+' /tmp/cc-tui-port.log 2>/dev/null | tail -1 | cut -d= -f2)
+  PORT=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/cc-tui-port.log 2>/dev/null | grep -Eo 'port=[0-9]+' | tail -1 | cut -d= -f2)
   if [ -n "$PORT" ]; then
     break
   fi
