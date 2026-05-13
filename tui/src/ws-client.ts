@@ -40,3 +40,11 @@ export function sendInput(ws: WebSocket, text: string): void {
     payload: { text },
   }));
 }
+
+export function sendApproval(ws: WebSocket, approved: boolean): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    type: "approval",
+    payload: { approved },
+  }));
+}

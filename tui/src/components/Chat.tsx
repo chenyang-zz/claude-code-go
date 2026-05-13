@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { Box, Text } from "ink";
+import { MarkdownLine } from "./Markdown.js";
 import { type WSMessage } from "../ws-client.js";
 
 export interface Line {
@@ -9,6 +10,11 @@ export interface Line {
 }
 
 export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when new content arrives
+  }, [lines]);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -29,10 +35,10 @@ export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean
             <Text color="gray">{line.text}</Text>
           )}
           {line.type === "delta" && (
-            <Text>{line.text}</Text>
+            <MarkdownLine text={line.text} />
           )}
           {line.type === "line" && (
-            <Text>{line.text}</Text>
+            <MarkdownLine text={line.text} />
           )}
         </Box>
       ))}

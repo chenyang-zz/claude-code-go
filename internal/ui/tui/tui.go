@@ -12,14 +12,17 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 // Message types over WebSocket.
 const (
-	msgTypeEvent = "event"
-	msgTypeInput = "input"
-	msgTypeLine  = "line"
+	msgTypeEvent   = "event"
+	msgTypeInput   = "input"
+	msgTypeLine    = "line"
+	msgTypeApprovalPrompt = "approval_prompt"
+	msgTypeApproval = "approval"
 )
 
 // WSMessage is the wire format for all WebSocket communication.
@@ -48,8 +51,9 @@ type Renderer struct {
 	conn    *websocket.Conn
 	connCh  chan struct{} // closed when first (or next) TUI connects
 
-	inputCh chan string   // TUI input lines arrive here
-	done    chan struct{} // closed on Close
+	inputCh       chan string   // TUI input lines arrive here
+	approvalRespCh chan approval.Response // TUI approval responses arrive here (buffer 1)
+	done          chan struct{} // closed on Close
 }
 
 // NewRenderer creates a TUI renderer, starts listening on a random TCP port,
@@ -67,9 +71,10 @@ func NewRenderer() (*Renderer, error) {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		connCh: make(chan struct{}),
-		inputCh: make(chan string, 64),
-		done:   make(chan struct{}),
+		connCh:         make(chan struct{}),
+		inputCh:        make(chan string, 64),
+		approvalRespCh: make(chan approval.Response, 1),
+		done:           make(chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -241,6 +246,20 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 			default:
 				// Input channel full; drop.
 			}
+		case msgTypeApproval:
+			payload, ok := msg.Payload.(map[string]any)
+			if !ok {
+				continue
+			}
+			approved, ok := payload["approved"].(bool)
+			if !ok {
+				continue
+			}
+			select {
+			case r.approvalRespCh <- approval.Response{Approved: approved}:
+			default:
+				// No one waiting for approval; drop.
+			}
 		}
 	}
 }
@@ -269,4 +288,39 @@ func (r *wsInputReader) Read(p []byte) (int, error) {
 	n := copy(p, r.buf)
 	r.buf = r.buf[n:]
 	return n, nil
+}
+
+// ApprovalPrompter implements approval.Prompter by sending prompts to the TUI
+// over WebSocket and blocking for a response.
+type ApprovalPrompter struct {
+	r *Renderer
+}
+
+// NewApprovalPrompter creates a Prompter that sends approval requests to the
+// connected TUI via WebSocket and waits for an approve/deny response.
+func NewApprovalPrompter(r *Renderer) *ApprovalPrompter {
+	return &ApprovalPrompter{r: r}
+}
+
+// Prompt sends an approval request to the TUI and blocks until the user
+// responds or the context is cancelled.
+func (p *ApprovalPrompter) Prompt(ctx context.Context, prompt approval.Prompt) (approval.Response, error) {
+	// Send the approval prompt to the TUI.
+	p.r.writeJSON(WSMessage{
+		Type: msgTypeApprovalPrompt,
+		Payload: map[string]string{
+			"title": prompt.Title,
+			"body":  prompt.Body,
+		},
+	})
+
+	// Wait for a response or context cancellation.
+	select {
+	case resp := <-p.r.approvalRespCh:
+		return resp, nil
+	case <-ctx.Done():
+		return approval.Response{}, ctx.Err()
+	case <-p.r.done:
+		return approval.Response{Approved: false, Reason: "TUI closed"}, nil
+	}
 }

@@ -2,7 +2,9 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Box, Text, useApp } from "ink";
 import { Chat, type Line } from "./Chat.js";
 import { Input } from "./Input.js";
-import { connectWS, sendInput, type WSMessage } from "../ws-client.js";
+import { PermissionDialog } from "./PermissionDialog.js";
+import { StatusLine } from "./StatusLine.js";
+import { connectWS, sendInput, sendApproval, type WSMessage } from "../ws-client.js";
 
 interface AppProps {
   port: number;
@@ -21,10 +23,37 @@ export function App({ port }: AppProps) {
   const currentDeltaRef = useRef("");
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Permission dialog state
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const [dialogTitle, setDialogTitle] = useState("");
+  const [dialogBody, setDialogBody] = useState("");
+
+  // Status line state
+  const [inputTokens, setInputTokens] = useState<number | undefined>();
+  const [outputTokens, setOutputTokens] = useState<number | undefined>();
+
   const addLine = useCallback((text: string, type: Line["type"]) => {
     const id = lineIdRef.current++;
     setLines((prev) => [...prev, { id, text, type }]);
   }, []);
+
+  const handleApprove = useCallback(() => {
+    if (wsRef.current && connected) {
+      sendApproval(wsRef.current, true);
+    }
+    setDialogVisible(false);
+    setDialogTitle("");
+    setDialogBody("");
+  }, [connected]);
+
+  const handleDeny = useCallback(() => {
+    if (wsRef.current && connected) {
+      sendApproval(wsRef.current, false);
+    }
+    setDialogVisible(false);
+    setDialogTitle("");
+    setDialogBody("");
+  }, [connected]);
 
   useEffect(() => {
     const ws = connectWS(port, (msg: WSMessage) => {
@@ -78,8 +107,12 @@ export function App({ port }: AppProps) {
             }
             case "usage": {
               const usage = evt.payload?.turn_usage ?? evt.payload?.usage ?? {};
+              const inTk = usage.input_tokens;
+              const outTk = usage.output_tokens;
+              if (inTk != null) setInputTokens(inTk);
+              if (outTk != null) setOutputTokens(outTk);
               addLine(
-                `📊 in=${usage.input_tokens ?? "?"} out=${usage.output_tokens ?? "?"} cache_c=${usage.cache_creation_input_tokens ?? "?"} cache_r=${usage.cache_read_input_tokens ?? "?"} stop=${evt.payload?.stop_reason ?? "?"}`,
+                `📊 in=${inTk ?? "?"} out=${outTk ?? "?"} cache_c=${usage.cache_creation_input_tokens ?? "?"} cache_r=${usage.cache_read_input_tokens ?? "?"} stop=${evt.payload?.stop_reason ?? "?"}`,
                 "info"
               );
               break;
@@ -110,6 +143,15 @@ export function App({ port }: AppProps) {
           }
           break;
         }
+        case "approval_prompt": {
+          const title = msg.payload?.title ?? "Approval Required";
+          const body = msg.payload?.body ?? "";
+          setDialogTitle(title);
+          setDialogBody(body);
+          setDialogVisible(true);
+          setInputDisabled(true);
+          break;
+        }
       }
     });
 
@@ -127,6 +169,7 @@ export function App({ port }: AppProps) {
     ws.onclose = () => {
       setConnected(false);
       setInputDisabled(true);
+      setDialogVisible(false);
       setLines((prev) => [
         ...prev,
         { id: lineIdRef.current++, text: "✗ Disconnected", type: "error" },
@@ -159,9 +202,24 @@ export function App({ port }: AppProps) {
           </Text>
         </Box>
         <Chat lines={lines} isThinking={isThinking} />
+        <PermissionDialog
+          visible={dialogVisible}
+          title={dialogTitle}
+          body={dialogBody}
+          onApprove={handleApprove}
+          onDeny={handleDeny}
+        />
       </Box>
-      <Box marginTop={1}>
-        <Input onSubmit={handleSubmit} disabled={inputDisabled} />
+      <Box flexDirection="column">
+        <StatusLine
+          connected={connected}
+          isThinking={isThinking && !dialogVisible}
+          inputTokens={inputTokens}
+          outputTokens={outputTokens}
+        />
+        <Box marginTop={1}>
+          <Input onSubmit={handleSubmit} disabled={inputDisabled || dialogVisible} />
+        </Box>
       </Box>
     </Box>
   );

@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -151,5 +152,118 @@ func TestRendererNoClientNoBlock(t *testing.T) {
 		// Success: didn't block.
 	case <-time.After(2 * time.Second):
 		t.Fatal("RenderEvent with no client blocked unexpectedly")
+	}
+}
+
+func TestApprovalPrompter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	prompter := NewApprovalPrompter(r)
+
+	// Run Prompt in a goroutine — it blocks until the TUI responds.
+	respCh := make(chan approval.Response, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := prompter.Prompt(ctx, approval.Prompt{
+			Title: "Approve Bash?",
+			Body:  "Execute: ls /tmp",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	// Read the approval_prompt message from WebSocket.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeApprovalPrompt, msg.Type)
+
+	// Send back an approval response.
+	err = c.WriteJSON(WSMessage{
+		Type: msgTypeApproval,
+		Payload: map[string]any{
+			"approved": true,
+		},
+	})
+	require.NoError(t, err)
+
+	select {
+	case resp := <-respCh:
+		assert.True(t, resp.Approved)
+	case err := <-errCh:
+		t.Fatalf("Prompt error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt did not return after approval response")
+	}
+}
+
+func TestApprovalPrompterDeny(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	prompter := NewApprovalPrompter(r)
+
+	respCh := make(chan approval.Response, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := prompter.Prompt(ctx, approval.Prompt{
+			Title: "Approve Write?",
+			Body:  "Write to: /tmp/test",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	// Read the approval_prompt message.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeApprovalPrompt, msg.Type)
+
+	// Send back a deny response.
+	err = c.WriteJSON(WSMessage{
+		Type: msgTypeApproval,
+		Payload: map[string]any{
+			"approved": false,
+		},
+	})
+	require.NoError(t, err)
+
+	select {
+	case resp := <-respCh:
+		assert.False(t, resp.Approved)
+	case err := <-errCh:
+		t.Fatalf("Prompt error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt did not return after deny response")
 	}
 }
