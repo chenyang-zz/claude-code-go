@@ -38,7 +38,7 @@ clean:
 
 # Run TUI mode: Go backend (background) + TUI frontend (foreground, with PTY)
 run-tui:
-	chmod +x run-tui.sh && ./run-tui.sh
+	chmod +x scripts/run-tui.sh && scripts/run-tui.sh
 
 # Connect TUI frontend to a running Go TUI server (run in separate terminal)
 tui-connect:
