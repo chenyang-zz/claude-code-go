@@ -2,3 +2,4 @@
 .DS_Store
 .gitnexus
 .agents/
+node_modules

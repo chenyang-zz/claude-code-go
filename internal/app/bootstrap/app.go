@@ -82,6 +82,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/webfetchsummary"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
+	"github.com/sheepzhao/claude-code-go/internal/ui/tui"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -240,9 +241,30 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	policy := assembly.Policy
 
 	var renderer console.EventRenderer
-	if cfg.OutputFormat == "stream-json" {
+	var tuiRenderer *tui.Renderer
+	switch cfg.OutputFormat {
+	case "stream-json":
 		renderer = jsonout.NewWriter(os.Stdout)
-	} else {
+	case "tui":
+		tuiR, err := tui.NewRenderer()
+		if err != nil {
+			return nil, fmt.Errorf("tui init: %w", err)
+		}
+		logger.InfoCF("tui", "TUI WebSocket server on port", map[string]any{"port": tuiR.Port()})
+		// Wait briefly for a TUI client to connect. If none connects,
+		// fall back to normal console output so the app doesn't hang.
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if waitErr := tuiR.WaitForConnection(waitCtx); waitErr == nil {
+			tuiRenderer = tuiR
+			renderer = tuiR
+			logger.InfoCF("tui", "TUI client connected", nil)
+		} else {
+			tuiR.Close()
+			renderer = console.NewStreamRenderer(console.NewPrinter(nil))
+			logger.WarnCF("tui", "no TUI client within timeout, using console output", nil)
+		}
+		waitCancel()
+	default:
 		renderer = console.NewStreamRenderer(console.NewPrinter(nil))
 	}
 	runner := repl.NewRunner(eng, renderer)
@@ -261,7 +283,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			runner.RemoteSender = platformremote.NewCCRClient(endpoint, cfg.RemoteSession.SessionID, opts...)
 		}
 	}
-	runner.Input = os.Stdin
+	if tuiRenderer != nil {
+		runner.Input = tuiRenderer.InputReader()
+	} else {
+		runner.Input = os.Stdin
+	}
 	runner.WorktreeLister = platformgit.NewClient()
 
 	if cfg.SessionDBPath != "" {
@@ -551,7 +577,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 }
 
 func configureConsoleLogging(outputFormat string) {
-	if outputFormat == "stream-json" {
+	if outputFormat == "stream-json" || outputFormat == "tui" {
 		logger.SetConsoleOutput(os.Stderr)
 		return
 	}
@@ -1821,7 +1847,7 @@ func loadMCPConfigs() map[string]mcpclient.ServerConfig {
 // approvalPrinterForConfig returns a printer directed at stderr when stream-json
 // mode is active so that approval prompts do not pollute the NDJSON stdout stream.
 func approvalPrinterForConfig(cfg coreconfig.Config) *console.Printer {
-	if cfg.OutputFormat == "stream-json" {
+	if cfg.OutputFormat == "stream-json" || cfg.OutputFormat == "tui" {
 		return console.NewPrinter(os.Stderr)
 	}
 	return console.NewPrinter(nil)
