@@ -41,17 +41,28 @@ fi
 
 echo "Go 后端已启动 (PID: $CC_PID)"
 echo "WebSocket 端口: $PORT"
-echo "Go 日志: tail -f /tmp/cc-tui-port.log"
-
-# 显示最近几条 Go 日志（不含 ANIS 转义码）
-echo ""
-echo "--- 最近 Go 日志 ---"
-sed 's/\x1b\[[0-9;]*m//g' /tmp/cc-tui-port.log | grep -v '^[[:space:]]*$' | tail -5
-echo "---"
 echo ""
 
-# 使用 script 创建 PTY，让 TUI 拥有独立终端
-script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
+# 使用 script 创建 PTY 运行 TUI，配合 tmux 分屏显示日志
+if command -v tmux &>/dev/null && [ -n "$TMUX" ]; then
+  # 已在 tmux 中：直接分屏
+  tmux split-window -h "tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'"
+  script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
+elif command -v tmux &>/dev/null; then
+  # 不在 tmux 中：创建新 session
+  tmux new-session -d -s cc-tui "script -q /dev/null sh -c \"cd '$TUI_DIR' && bun run src/index.tsx --port $PORT\""
+  tmux split-window -t cc-tui -h "tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'"
+  tmux attach-session -t cc-tui
+else
+  # 无 tmux：仅显示日志路径
+  echo "--- 最近 Go 日志 ---"
+  sed 's/\x1b\[[0-9;]*m//g' /tmp/cc-tui-port.log | grep -v '^[[:space:]]*$' | tail -5
+  echo "---"
+  echo "Go 日志: tail -f /tmp/cc-tui-port.log"
+  echo ""
+
+  script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
+fi
 
 # TUI 退出后，清理 Go 进程
 kill $CC_PID 2>/dev/null
