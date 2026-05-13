@@ -4,7 +4,7 @@
 
 set -e
 
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TUI_DIR="$DIR/tui"
 
 # 编译（如果二进制不存在或源码更新）
