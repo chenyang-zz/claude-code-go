@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -255,43 +254,23 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		}
 		logger.InfoCF("tui", "TUI WebSocket server on port", map[string]any{"port": tuiR.Port()})
 
-		// Auto-start the TUI client if the project directory is found.
-		var tuiCmd *exec.Cmd
-		if dir := findTUIPath(); dir != "" {
-			cmd := exec.Command("bun", "run", "src/index.tsx", "--port", strconv.Itoa(tuiR.Port()))
-			cmd.Dir = dir
-			cmd.Stdout = os.Stderr
-			cmd.Stderr = os.Stderr
-			if startErr := cmd.Start(); startErr == nil {
-				tuiCmd = cmd
-				logger.InfoCF("tui", "TUI client auto-started", nil)
-			} else {
-				logger.WarnCF("tui", "failed to auto-start TUI", map[string]any{"error": startErr.Error()})
-			}
-		} else {
-			logger.WarnCF("tui", "TUI project not found; start TUI manually", nil)
-		}
+		// Print the command so the user can start the TUI in a separate terminal.
+		// The TUI process must own the terminal for Ink raw mode, so auto-spawning
+		// as a subprocess (sharing stdin) does not work.
+		fmt.Fprintf(os.Stderr, "\n  TUI ready on port %d\n", tuiR.Port())
+		fmt.Fprintf(os.Stderr, "  Run in another terminal:\n")
+		fmt.Fprintf(os.Stderr, "    cd tui && bun run src/index.tsx --port=%d\n\n", tuiR.Port())
 
 		// Wait briefly for a TUI client to connect. If none connects,
 		// fall back to normal console output so the app doesn't hang.
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 120*time.Second)
 		if waitErr := tuiR.WaitForConnection(waitCtx); waitErr == nil {
 			tuiRenderer = tuiR
-			tuiCleanup = func() {
-				if tuiCmd != nil {
-					tuiCmd.Process.Kill() //nolint:errcheck
-					tuiCmd.Wait()          //nolint:errcheck
-				}
-				_ = tuiR.Close()
-			}
+			tuiCleanup = func() { _ = tuiR.Close() }
 			renderer = tuiR
 			logger.InfoCF("tui", "TUI client connected", nil)
 		} else {
 			tuiR.Close()
-			if tuiCmd != nil {
-				tuiCmd.Process.Kill() //nolint:errcheck
-				tuiCmd.Wait()          //nolint:errcheck
-			}
 			cfg.OutputFormat = "console"
 			configureConsoleLogging("console")
 			renderer = console.NewStreamRenderer(console.NewPrinter(nil))
