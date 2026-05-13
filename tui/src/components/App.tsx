@@ -5,6 +5,7 @@ import { Input } from "./Input.js";
 import { PermissionDialog } from "./PermissionDialog.js";
 import { StatusLine } from "./StatusLine.js";
 import { connectWS, sendInput, sendApproval, type WSMessage } from "../ws-client.js";
+import { writeSync } from "fs";
 
 interface AppProps {
   port: number;
@@ -74,8 +75,9 @@ export function App({ port }: AppProps) {
                 setIsRunning(true);
                 setIsThinking(false);
                 currentDeltaRef.current += text;
-                // Queue the delta for async processing to allow React
-                // to render between messages (prevent batching).
+                // Write directly to terminal for real-time streaming (bypasses React batching).
+                writeSync(2, text);
+                // Queue for React state update as well (for proper Ink layout).
                 deltaQueueRef.current.push(text);
                 if (!deltaProcessingRef.current) {
                   deltaProcessingRef.current = true;

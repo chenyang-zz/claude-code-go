@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -347,4 +348,62 @@ func TestNoTCPDelay(t *testing.T) {
 	var msg WSMessage
 	require.NoError(t, json.Unmarshal(raw, &msg))
 	assert.Equal(t, msgTypeEvent, msg.Type)
+}
+
+// TestStreamingWithVCRFixture reads recorded fixtures and verifies that
+// multiple delta events produce distinct WebSocket messages (no batching).
+func TestStreamingWithVCRFixture(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Read recorded fixture data and send text_delta events.
+	type fixtureEvent struct {
+		Type string `json:"Type"`
+		Text string `json:"Text"`
+	}
+	type fixture struct {
+		Events []fixtureEvent `json:"events"`
+	}
+	var f fixture
+	raw, err := os.ReadFile("../../../fixtures/system-prompt-stream-7286b5774627.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &f))
+
+	var sent int
+	for _, fe := range f.Events {
+		if fe.Type != "text_delta" || fe.Text == "" {
+			continue
+		}
+		require.NoError(t, r.RenderEvent(event.Event{
+			Type:    event.TypeMessageDelta,
+			Timestamp: time.Now(),
+			Payload: event.MessageDeltaPayload{Text: fe.Text},
+		}))
+		sent++
+	}
+	t.Logf("Sent %d text_delta events from VCR fixture", sent)
+	require.GreaterOrEqual(t, sent, 3, "fixture should have at least 3 text deltas")
+
+	// Verify each delta produced a separate WebSocket message.
+	for i := 0; i < sent; i++ {
+		_, raw, err := c.ReadMessage()
+		require.NoError(t, err)
+		var msg WSMessage
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		require.Equal(t, msgTypeEvent, msg.Type)
+		p, ok := msg.Payload.(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "message.delta", p["type"])
+	}
+	t.Logf("All %d delta events arrived as separate WebSocket messages", sent)
 }
