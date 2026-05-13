@@ -51,6 +51,7 @@ type Renderer struct {
 	conn    *websocket.Conn
 	connCh  chan struct{} // closed when first (or next) TUI connects
 
+	writeMu       sync.Mutex // serializes gorilla/websocket writes
 	inputCh       chan string   // TUI input lines arrive here
 	approvalRespCh chan approval.Response // TUI approval responses arrive here (buffer 1)
 	done          chan struct{} // closed on Close
@@ -173,6 +174,9 @@ func (r *Renderer) writeJSON(msg WSMessage) error {
 		return nil
 	}
 
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+
 	// Set a short write deadline so a stuck TUI doesn't block the engine.
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return nil
@@ -214,6 +218,11 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 			r.conn = nil
 			// Reset connCh so WaitForConnection blocks again.
 			r.connCh = make(chan struct{})
+			// Unblock any waiting ApprovalPrompter with a denied response.
+			select {
+			case r.approvalRespCh <- approval.Response{Approved: false, Reason: "TUI disconnected"}:
+			default:
+			}
 		}
 		r.mu.Unlock()
 		conn.Close() //nolint:errcheck
@@ -311,6 +320,14 @@ func (p *ApprovalPrompter) Prompt(ctx context.Context, prompt approval.Prompt) (
 	default:
 	}
 
+	// Check whether a TUI client is actually connected before sending and
+	// blocking. Without this check, a disconnected TUI causes Prompt to
+	// block until ctx expires or the Renderer shuts down, stalling the
+	// guarded tool call.
+	if !p.r.isConnected() {
+		return approval.Response{Approved: false, Reason: "No TUI connected"}, nil
+	}
+
 	// Send the approval prompt to the TUI.
 	p.r.writeJSON(WSMessage{
 		Type: msgTypeApprovalPrompt,
@@ -329,4 +346,11 @@ func (p *ApprovalPrompter) Prompt(ctx context.Context, prompt approval.Prompt) (
 	case <-p.r.done:
 		return approval.Response{Approved: false, Reason: "TUI closed"}, nil
 	}
+}
+
+// isConnected reports whether a TUI WebSocket client is currently connected.
+func (r *Renderer) isConnected() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.conn != nil
 }
