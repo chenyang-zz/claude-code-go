@@ -1,0 +1,23 @@
+internal/app/bootstrap/app.go
+  s_865e849b6b0c41::t_c3d3c924fd7936 85,244-246,248-267,286-290,580,1850
+internal/app/bootstrap/cli_args.go
+  s_865e849b6b0c41::t_c3d3c924fd7936 27-28,105-106,181-182
+.gitignore
+  s_865e849b6b0c41::t_c3d3c924fd7936 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "68852610ac99d6996ae85f57246596940bf55d65",
+  "prompts": {},
+  "sessions": {
+    "s_865e849b6b0c41": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bec3eb-37e8-40c2-a456-27beaaf076b6",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "chenyang <904852749@qq.com>"
+    }
+  }
+}
