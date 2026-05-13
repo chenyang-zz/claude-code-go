@@ -40,9 +40,9 @@ clean:
 run-tui:
 	chmod +x scripts/run-tui.sh && scripts/run-tui.sh
 
-# Connect TUI frontend to a running Go TUI server (run in separate terminal)
-tui-connect:
-	cd tui && bun run src/index.tsx --port=$${TUI_PORT:-8080}
+# Watch Go logs from the TUI session (run in another terminal)
+tui-logs:
+	tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'
 
 # Run in console mode (default)
 run:
