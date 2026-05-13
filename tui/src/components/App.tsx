@@ -64,6 +64,10 @@ export function App({ port }: AppProps) {
         case "event": {
           const evt = msg.payload;
           if (!evt) break;
+              // Debug: log non-chat event types
+              if (evt.type !== "message.delta" && evt.type !== "tool.progress") {
+                addLine(`[evt: ${evt.type}]`, "info");
+              }
 
           switch (evt.type) {
             case "message.delta": {
