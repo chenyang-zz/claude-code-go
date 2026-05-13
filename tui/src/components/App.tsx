@@ -124,8 +124,6 @@ export function App({ port }: AppProps) {
               const outTk = usage.output_tokens;
               if (inTk != null) setInputTokens(inTk);
               if (outTk != null) setOutputTokens(outTk);
-              // Finalize delta content: strip raw ``` markers and add code blocks
-              finalizeResponse();
               addLine(
                 `📊 in=${inTk ?? "?"} out=${outTk ?? "?"} cache_c=${usage.cache_creation_input_tokens ?? "?"} cache_r=${usage.cache_read_input_tokens ?? "?"} stop=${evt.payload?.stop_reason ?? "?"}`,
                 "info"
@@ -229,56 +227,6 @@ export function App({ port }: AppProps) {
     });
     // Process next delta after React has had a chance to render.
     setTimeout(processDeltaQueue, 0);
-  }
-
-  function finalizeResponse() {
-    const full = currentDeltaRef.current;
-    if (!full) return;
-
-    // Replace the last delta line(s) with code-block-separated segments
-    const segments: Array<{ text: string; type: "delta" | "code"; lang?: string }> = [];
-        const blockRegex = /```(\w*)\n([\s\S]*?)```/g;;
-    let lastIdx = 0;
-    let match;
-    while ((match = blockRegex.exec(full)) !== null) {
-      if (match.index > lastIdx) {
-        segments.push({ text: full.slice(lastIdx, match.index), type: "delta" });
-      }
-      segments.push({ text: match[2], type: "code", lang: match[1] || undefined });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < full.length) {
-      segments.push({ text: full.slice(lastIdx), type: "delta" });
-    }
-
-    if (segments.length === 1 && segments[0].type === "delta") {
-      // No code blocks found; just update the last delta line with the plain text
-      const id = lineIdRef.current++;
-      setLines((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.type === "delta") {
-          return [...prev.slice(0, -1), { id, text: segments[0].text, type: "delta" }];
-        }
-        return [...prev, { id, text: segments[0].text, type: "delta" }];
-      });
-      return;
-    }
-
-    // One or more code blocks found: replace trailing delta lines with segments
-    setLines((prev) => {
-      let i = prev.length - 1;
-      while (i >= 0 && prev[i].type === "delta") i--;
-      const base = prev.slice(0, i + 1);
-      for (const seg of segments) {
-        base.push({
-          id: lineIdRef.current++,
-          text: seg.text,
-          type: seg.type === "code" ? "code" : "delta",
-          codeLanguage: seg.lang,
-        });
-      }
-      return base;
-    });
   }
 
   return (
