@@ -98,7 +98,14 @@ export function App({ port }: AppProps) {
               setIsRunning(true);
               setIsThinking(true);
               if (thought) {
-                addLine(`Thinking: ${thought}`, "thinking");
+                const id = lineIdRef.current++;
+                setLines((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.type === "thinking") {
+                    return [...prev.slice(0, -1), { id, text: `Thinking: ${thought}`, type: "thinking" }];
+                  }
+                  return [...prev, { id, text: `Thinking: ${thought}`, type: "thinking" }];
+                });
               }
               break;
             }
