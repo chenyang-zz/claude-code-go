@@ -36,7 +36,7 @@ clean:
 	rm -f $(BINARY) tui-bin
 	go clean
 
-# Run TUI mode: Go backend (background) + TUI frontend (foreground, with PTY)
+# Run TUI mode (set TUI_TMUX=0 to disable tmux split-pane)
 run-tui:
 	chmod +x scripts/run-tui.sh && scripts/run-tui.sh
 

@@ -43,7 +43,8 @@ echo "Go 后端已启动 (PID: $CC_PID)"
 echo "WebSocket 端口: $PORT"
 
 # 使用 script 创建 PTY 运行 TUI，配合 tmux 分屏显示日志
-if command -v tmux &>/dev/null; then
+# TUI_TMUX=0 可禁用 tmux（直接全屏运行 TUI）
+if command -v tmux &>/dev/null && [ "${TUI_TMUX:-1}" != "0" ]; then
   # 清理旧 session
   tmux kill-session -t cc-tui 2>/dev/null || true
 
