@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 
 interface PermissionDialogProps {
@@ -16,7 +16,7 @@ export function PermissionDialog({
   onApprove,
   onDeny,
 }: PermissionDialogProps) {
-  const [focus, setFocus] = useState<"approve" | "deny">("deny");
+  const [focus, setFocus] = useState<"approve" | "deny">("approve");
 
   useInput(
     (input, key) => {

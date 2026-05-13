@@ -305,6 +305,12 @@ func NewApprovalPrompter(r *Renderer) *ApprovalPrompter {
 // Prompt sends an approval request to the TUI and blocks until the user
 // responds or the context is cancelled.
 func (p *ApprovalPrompter) Prompt(ctx context.Context, prompt approval.Prompt) (approval.Response, error) {
+	// Drain any stale response from a previous cancelled prompt.
+	select {
+	case <-p.r.approvalRespCh:
+	default:
+	}
+
 	// Send the approval prompt to the TUI.
 	p.r.writeJSON(WSMessage{
 		Type: msgTypeApprovalPrompt,

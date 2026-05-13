@@ -307,7 +307,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		if rt, ok := eng.(*engine.Runtime); ok {
 			rt.ApprovalService = approval.NewPromptingService(
 				cfg.ApprovalMode,
-				console.NewApprovalRenderer(approvalPrinterForConfig(cfg), tuiRenderer.InputReader()),
+				tui.NewApprovalPrompter(tuiRenderer),
 			)
 		}
 	}

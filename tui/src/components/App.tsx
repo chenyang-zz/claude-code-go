@@ -44,6 +44,7 @@ export function App({ port }: AppProps) {
     setDialogVisible(false);
     setDialogTitle("");
     setDialogBody("");
+    setInputDisabled(false);
   }, [connected]);
 
   const handleDeny = useCallback(() => {
@@ -53,6 +54,7 @@ export function App({ port }: AppProps) {
     setDialogVisible(false);
     setDialogTitle("");
     setDialogBody("");
+    setInputDisabled(false);
   }, [connected]);
 
   useEffect(() => {
