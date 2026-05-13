@@ -28,8 +28,8 @@ export function Input({
         return;
       }
 
-      // Regular character input
-      if (input.length === 1 && !key.ctrl && !key.meta) {
+      // Regular character input（支持中文等多字符输入法提交）
+      if (input && !key.ctrl && !key.meta) {
         setValue((v) => v + input);
       }
     },
