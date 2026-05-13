@@ -5,6 +5,7 @@ import { Input } from "./Input.js";
 import { PermissionDialog } from "./PermissionDialog.js";
 import { StatusLine } from "./StatusLine.js";
 import { connectWS, sendInput, sendApproval, type WSMessage } from "../ws-client.js";
+import { writeSync } from "fs";
 
 interface AppProps {
   port: number;
@@ -22,6 +23,7 @@ export function App({ port }: AppProps) {
   const [inputDisabled, setInputDisabled] = useState(true);
   const lineIdRef = useRef(2);
   const currentDeltaRef = useRef("");
+  const lastDeltaFlushRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Permission dialog state
@@ -72,16 +74,22 @@ export function App({ port }: AppProps) {
                 setIsRunning(true);
                 setIsThinking(false);
                 currentDeltaRef.current += text;
-                // Replace last delta line if it exists
-                const id = lineIdRef.current;
-                lineIdRef.current = id + 1;
-                setLines((prev) => {
-                  const last = prev[prev.length - 1];
-                  if (last?.type === "delta") {
-                    return [...prev.slice(0, -1), { id, text: currentDeltaRef.current, type: "delta" }];
-                  }
-                  return [...prev, { id, text: currentDeltaRef.current, type: "delta" }];
-                });
+                // Write directly to terminal for streaming, bypassing React batching.
+                writeSync(2, text);
+                // Also batch-update React state at a throttled rate for proper rendering.
+                const now = Date.now();
+                if (now - (lastDeltaFlushRef.current ?? 0) > 50) {
+                  lastDeltaFlushRef.current = now;
+                  const id = lineIdRef.current++;
+                  const content = currentDeltaRef.current;
+                  setLines((prev) => {
+                    const last = prev[prev.length - 1];
+                    if (last?.type === "delta") {
+                      return [...prev.slice(0, -1), { id, text: content, type: "delta" }];
+                    }
+                    return [...prev, { id, text: content, type: "delta" }];
+                  });
+                }
               }
               break;
             }
@@ -109,7 +117,6 @@ export function App({ port }: AppProps) {
             }
             case "error": {
               addLine(`✗ ${evt.payload?.message ?? evt.payload?.error ?? "Error"}`, "error");
-              setIsRunning(false);
               setIsThinking(false);
               break;
             }

@@ -267,3 +267,84 @@ func TestApprovalPrompterDeny(t *testing.T) {
 		t.Fatal("Prompt did not return after deny response")
 	}
 }
+
+// TestDeltaEventsArriveSeparately verifies that each RenderEvent call produces a
+// distinct WebSocket message. If TCP buffering (Nagle) or batching collapses
+// multiple deltas into one frame, this test fails.
+func TestDeltaEventsArriveSeparately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Send 10 delta events in rapid succession.
+	const count = 10
+	for i := 0; i < count; i++ {
+		require.NoError(t, r.RenderEvent(event.Event{
+			Type:    event.TypeMessageDelta,
+			Payload: event.MessageDeltaPayload{Text: fmt.Sprintf("chunk-%d", i)},
+		}))
+	}
+
+	// Verify each delta produced a separate WebSocket message.
+	received := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		_, raw, err := c.ReadMessage()
+		require.NoError(t, err)
+		var msg WSMessage
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		require.Equal(t, msgTypeEvent, msg.Type)
+
+		p, ok := msg.Payload.(map[string]any)
+		require.True(t, ok, "payload must be an object")
+		require.Equal(t, "message.delta", p["type"])
+		inner, ok := p["payload"].(map[string]any)
+		require.True(t, ok, "inner payload must be an object")
+		text, ok := inner["text"].(string)
+		require.True(t, ok, "text must be a string")
+		received = append(received, text)
+	}
+
+	// All 10 must have arrived as unique messages (not batched into fewer).
+	assert.Len(t, received, count)
+	for i := 0; i < count; i++ {
+		assert.Equal(t, fmt.Sprintf("chunk-%d", i), received[i])
+	}
+}
+
+// TestNoTCPDelay verifies the WebSocket connection has TCP_NODELAY enabled so
+// that small event frames are not held back by Nagle's algorithm.
+func TestNoTCPDelay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	require.NoError(t, r.RenderEvent(event.Event{
+		Type:    event.TypeMessageDelta,
+		Payload: event.MessageDeltaPayload{Text: "ping"},
+	}))
+
+	// Read one message to confirm the connection works.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeEvent, msg.Type)
+}

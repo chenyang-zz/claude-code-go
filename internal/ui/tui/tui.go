@@ -195,6 +195,12 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 
 	logger.DebugCF("tui", "TUI client connected", nil)
 
+	// Disable Nagle's algorithm so small WebSocket frames (e.g. individual
+	// message.delta events) are sent immediately rather than buffered by TCP.
+	if tcp, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
+		tcp.SetNoDelay(true) //nolint:errcheck
+	}
+
 	r.mu.Lock()
 	// Close any previous connection.
 	if r.conn != nil {
