@@ -24,6 +24,9 @@ export function App({ port }: AppProps) {
   const lineIdRef = useRef(2);
   const currentDeltaRef = useRef("");
   const lastDeltaFlushRef = useRef(0);
+  const inCodeBlockRef = useRef(false);
+  const codeBlockLangRef = useRef("");
+  const codeBlockLinesRef = useRef<string[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
   // Permission dialog state
@@ -80,15 +83,7 @@ export function App({ port }: AppProps) {
                 const now = Date.now();
                 if (now - (lastDeltaFlushRef.current ?? 0) > 50) {
                   lastDeltaFlushRef.current = now;
-                  const id = lineIdRef.current++;
-                  const content = currentDeltaRef.current;
-                  setLines((prev) => {
-                    const last = prev[prev.length - 1];
-                    if (last?.type === "delta") {
-                      return [...prev.slice(0, -1), { id, text: content, type: "delta" }];
-                    }
-                    return [...prev, { id, text: content, type: "delta" }];
-                  });
+                  processAccumulatedContent();
                 }
               }
               break;
@@ -217,6 +212,51 @@ export function App({ port }: AppProps) {
     },
     [connected, addLine],
   );
+
+  function processAccumulatedContent() {
+    const full = currentDeltaRef.current;
+    const id = lineIdRef.current++;
+
+    // Split accumulated text into segments (text + code blocks)
+    const segments: Array<{ text: string; type: "delta" | "code"; lang?: string }> = [];
+    const blockRegex = /```(\w*)\n([\s\S]*?)```/g;
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    while ((match = blockRegex.exec(full)) !== null) {
+      if (match.index > lastIdx) {
+        segments.push({ text: full.slice(lastIdx, match.index), type: "delta" });
+      }
+      segments.push({ text: match[2], type: "code", lang: match[1] || undefined });
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < full.length) {
+      segments.push({ text: full.slice(lastIdx), type: "delta" });
+    }
+
+    // If it's just one delta segment (common case), replace last delta line
+    if (segments.length === 1 && segments[0].type === "delta") {
+      setLines((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.type === "delta") {
+          return [...prev.slice(0, -1), { id, text: segments[0].text, type: "delta" }];
+        }
+        return [...prev, { id, text: segments[0].text, type: "delta" }];
+      });
+      return;
+    }
+
+    // Multiple segments: replace entire messages list
+    setLines((prev) => {
+      // Remove trailing delta lines
+      let idx = prev.length - 1;
+      while (idx >= 0 && prev[idx].type === "delta") idx--;
+      const base = prev.slice(0, idx + 1);
+      for (const seg of segments) {
+        base.push({ id: lineIdRef.current++, text: seg.text, type: seg.type === "code" ? "code" : "delta", codeLanguage: seg.lang });
+      }
+      return base;
+    });
+  }
 
   return (
     <Box flexDirection="column" height="100%">

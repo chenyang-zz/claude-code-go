@@ -1,11 +1,12 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { MarkdownLine } from "./Markdown.js";
+import { MarkdownLine, CodeBlock } from "./Markdown.js";
 
 export interface Line {
   id: number;
   text: string;
-  type: "delta" | "thinking" | "tool" | "error" | "info" | "line";
+  type: "delta" | "thinking" | "tool" | "error" | "info" | "line" | "code";
+  codeLanguage?: string;
 }
 
 export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean }) {
@@ -33,6 +34,9 @@ export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean
           )}
           {line.type === "line" && (
             <MarkdownLine text={line.text} />
+          )}
+          {line.type === "code" && (
+            <CodeBlock code={line.text} language={line.codeLanguage} />
           )}
         </Box>
       ))}
