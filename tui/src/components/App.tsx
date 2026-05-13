@@ -69,6 +69,8 @@ export function App({ port }: AppProps) {
             case "message.delta": {
               const text = evt.payload?.text ?? "";
               if (text) {
+                setIsRunning(true);
+                setIsThinking(false);
                 currentDeltaRef.current += text;
                 // Replace last delta line if it exists
                 const id = lineIdRef.current;
@@ -85,6 +87,7 @@ export function App({ port }: AppProps) {
             }
             case "thinking": {
               const thought = evt.payload?.thinking ?? evt.payload?.text ?? "";
+              setIsRunning(true);
               setIsThinking(true);
               if (thought) {
                 addLine(`Thinking: ${thought}`, "thinking");
