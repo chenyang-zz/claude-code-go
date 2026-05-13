@@ -42,7 +42,7 @@ run-tui:
 
 # Watch Go logs from the TUI session (run in another terminal)
 tui-logs:
-	tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'
+	tail -f /tmp/cc-tui-port.log
 
 # Run in console mode (default)
 run:

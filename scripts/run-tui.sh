@@ -49,7 +49,7 @@ if command -v tmux &>/dev/null; then
 
   # 创建 tmux session：左 TUI / 右日志
   tmux new-session -d -s cc-tui "script -q /dev/null sh -c \"cd '$TUI_DIR' && bun run src/index.tsx --port $PORT\""
-  tmux split-window -t cc-tui -h "tail -f /tmp/cc-tui-port.log | sed 's/\x1b\[[0-9;]*m//g'"
+  tmux split-window -t cc-tui -h "tail -f /tmp/cc-tui-port.log"
 
   echo "切换 pane（TUI ↔ 日志）: Ctrl+B → ←/→"
   echo "退出 TUI 后自动关闭分屏"
@@ -64,7 +64,7 @@ if command -v tmux &>/dev/null; then
 else
   # 无 tmux：显示日志摘要
   echo ""
-  sed 's/\x1b\[[0-9;]*m//g' /tmp/cc-tui-port.log | grep -vE '^[[:space:]]*$' | tail -3
+  grep -vE '^[[:space:]]*$' /tmp/cc-tui-port.log | tail -3
   echo "Go 日志: tail -f /tmp/cc-tui-port.log"
   echo ""
   script -q /dev/null sh -c "cd '$TUI_DIR' && bun run src/index.tsx --port $PORT"
