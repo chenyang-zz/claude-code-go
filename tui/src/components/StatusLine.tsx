@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 
 interface StatusLineProps {
   connected: boolean;
+  isRunning: boolean;
   isThinking: boolean;
   inputTokens?: number;
   outputTokens?: number;
@@ -10,7 +11,8 @@ interface StatusLineProps {
 
 export function StatusLine({
   connected,
-  isThinking,
+  isRunning: running,
+  isThinking: thinking,
   inputTokens,
   outputTokens,
 }: StatusLineProps) {
@@ -23,8 +25,10 @@ export function StatusLine({
           <Text color="red">●</Text>
         )}
         {" "}
-        {isThinking ? (
+        {running && thinking ? (
           <Text color="yellow">⠋ Thinking...</Text>
+        ) : running ? (
+          <Text color="cyan">⚡ Running...</Text>
         ) : (
           <Text dimColor>Idle</Text>
         )}

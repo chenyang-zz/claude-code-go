@@ -17,6 +17,7 @@ export function App({ port }: AppProps) {
     { id: 1, text: `Connected on port ${port}`, type: "info" },
   ]);
   const [isThinking, setIsThinking] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
   const [connected, setConnected] = useState(false);
   const [inputDisabled, setInputDisabled] = useState(true);
   const lineIdRef = useRef(2);
@@ -68,7 +69,6 @@ export function App({ port }: AppProps) {
             case "message.delta": {
               const text = evt.payload?.text ?? "";
               if (text) {
-                setIsThinking(false);
                 currentDeltaRef.current += text;
                 // Replace last delta line if it exists
                 const id = lineIdRef.current;
@@ -93,6 +93,8 @@ export function App({ port }: AppProps) {
             }
             case "tool.call.started": {
               const name = evt.payload?.name ?? "unknown";
+              setIsRunning(true);
+              setIsThinking(false);
               addLine(`⚡ ${name}`, "tool");
               break;
             }
@@ -100,11 +102,11 @@ export function App({ port }: AppProps) {
               const name = evt.payload?.name ?? "unknown";
               const isErr = evt.payload?.is_error;
               addLine(`${isErr ? "✗" : "✓"} ${name}${isErr ? " (error)" : ""}`, isErr ? "error" : "tool");
-              setIsThinking(false);
               break;
             }
             case "error": {
               addLine(`✗ ${evt.payload?.message ?? evt.payload?.error ?? "Error"}`, "error");
+              setIsRunning(false);
               setIsThinking(false);
               break;
             }
@@ -118,6 +120,8 @@ export function App({ port }: AppProps) {
                 `📊 in=${inTk ?? "?"} out=${outTk ?? "?"} cache_c=${usage.cache_creation_input_tokens ?? "?"} cache_r=${usage.cache_read_input_tokens ?? "?"} stop=${evt.payload?.stop_reason ?? "?"}`,
                 "info"
               );
+              setIsRunning(false);
+              setIsThinking(false);
               break;
             }
             case "retry.attempted": {
@@ -216,6 +220,7 @@ export function App({ port }: AppProps) {
       <Box flexDirection="column">
         <StatusLine
           connected={connected}
+          isRunning={isRunning}
           isThinking={isThinking && !dialogVisible}
           inputTokens={inputTokens}
           outputTokens={outputTokens}
