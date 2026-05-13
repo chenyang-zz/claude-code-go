@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { MarkdownLine, CodeBlock } from "./Markdown.js";
+import Markdown from "./MarkdownWrapper.js";
+import { CodeBlock } from "./Markdown.js";
 
 export interface Line {
   id: number;
@@ -30,10 +31,10 @@ export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean
             <Text color="gray">{line.text}</Text>
           )}
           {line.type === "delta" && (
-            <MarkdownLine text={line.text} />
+            <Markdown>{line.text}</Markdown>
           )}
           {line.type === "line" && (
-            <MarkdownLine text={line.text} />
+            <Markdown>{line.text}</Markdown>
           )}
           {line.type === "code" && (
             <CodeBlock code={line.text} language={line.codeLanguage} />
