@@ -254,12 +254,8 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		}
 		logger.InfoCF("tui", "TUI WebSocket server on port", map[string]any{"port": tuiR.Port()})
 
-		// Print the command so the user can start the TUI in a separate terminal.
-		// The TUI process must own the terminal for Ink raw mode, so auto-spawning
-		// as a subprocess (sharing stdin) does not work.
+		// Print connection info for the run-tui wrapper script.
 		fmt.Fprintf(os.Stderr, "\n  TUI ready on port %d\n", tuiR.Port())
-		fmt.Fprintf(os.Stderr, "  Run in another terminal:\n")
-		fmt.Fprintf(os.Stderr, "    cd tui && bun run src/index.tsx --port=%d\n\n", tuiR.Port())
 
 		// Wait briefly for a TUI client to connect. If none connects,
 		// fall back to normal console output so the app doesn't hang.

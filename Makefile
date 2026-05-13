@@ -36,9 +36,9 @@ clean:
 	rm -f $(BINARY) tui-bin
 	go clean
 
-# Run with TUI mode (start Go server, then run `make tui-connect` in another terminal)
+# Run TUI mode: Go backend (background) + TUI frontend (foreground, with PTY)
 run-tui:
-	go run ./cmd/cc/. --tui
+	chmod +x run-tui.sh && ./run-tui.sh
 
 # Connect TUI frontend to a running Go TUI server (run in separate terminal)
 tui-connect:
