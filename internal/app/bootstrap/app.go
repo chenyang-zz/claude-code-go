@@ -82,6 +82,7 @@ import (
 	"github.com/sheepzhao/claude-code-go/internal/services/webfetchsummary"
 	"github.com/sheepzhao/claude-code-go/internal/ui/console"
 	"github.com/sheepzhao/claude-code-go/internal/ui/jsonout"
+	"github.com/sheepzhao/claude-code-go/internal/ui/tui"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
@@ -125,6 +126,7 @@ type App struct {
 	// GrowthBookRefreshCleanup unsubscribes the OnRefresh listener wired to
 	// the analytics emitter. nil when FlagGrowthBook is disabled.
 	GrowthBookRefreshCleanup func()
+	TUICleanup func()
 	// Haiku is the single-prompt Haiku query helper used by downstream
 	// services (e.g. tool use summary). nil when the Anthropic provider
 	// is not selected or FlagHaikuQuery is disabled.
@@ -239,13 +241,47 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 	eng := assembly.Engine
 	policy := assembly.Policy
 
+	var tuiCleanup func()
 	var renderer console.EventRenderer
-	if cfg.OutputFormat == "stream-json" {
+	var tuiRenderer *tui.Renderer
+	switch cfg.OutputFormat {
+	case "stream-json":
 		renderer = jsonout.NewWriter(os.Stdout)
-	} else {
+	case "tui":
+		tuiR, err := tui.NewRenderer()
+		if err != nil {
+			return nil, fmt.Errorf("tui init: %w", err)
+		}
+		logger.InfoCF("tui", "TUI WebSocket server on port", map[string]any{"port": tuiR.Port()})
+		// Wait briefly for a TUI client to connect. If none connects,
+		// fall back to normal console output so the app doesn't hang.
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if waitErr := tuiR.WaitForConnection(waitCtx); waitErr == nil {
+			tuiRenderer = tuiR
+			tuiCleanup = func() { _ = tuiR.Close() }
+			renderer = tuiR
+			logger.InfoCF("tui", "TUI client connected", nil)
+		} else {
+			tuiR.Close()
+			cfg.OutputFormat = "console"
+			configureConsoleLogging("console")
+			renderer = console.NewStreamRenderer(console.NewPrinter(nil))
+			logger.WarnCF("tui", "no TUI client within timeout, using console output", nil)
+		}
+		waitCancel()
+	default:
 		renderer = console.NewStreamRenderer(console.NewPrinter(nil))
 	}
 	runner := repl.NewRunner(eng, renderer)
+
+	if tuiRenderer != nil {
+		if rt, ok := eng.(*engine.Runtime); ok {
+			rt.ApprovalService = approval.NewPromptingService(
+				cfg.ApprovalMode,
+				console.NewApprovalRenderer(approvalPrinterForConfig(cfg), tuiRenderer.InputReader()),
+			)
+		}
+	}
 	runner.ProjectPath = cfg.ProjectPath
 	runner.RemoteSession = cfg.RemoteSession
 	if cfg.RemoteSession.Enabled && strings.TrimSpace(cfg.RemoteSession.StreamURL) != "" {
@@ -261,7 +297,11 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			runner.RemoteSender = platformremote.NewCCRClient(endpoint, cfg.RemoteSession.SessionID, opts...)
 		}
 	}
-	runner.Input = os.Stdin
+	if tuiRenderer != nil {
+		runner.Input = tuiRenderer.InputReader()
+	} else {
+		runner.Input = os.Stdin
+	}
 	runner.WorktreeLister = platformgit.NewClient()
 
 	if cfg.SessionDBPath != "" {
@@ -547,11 +587,12 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		SessionMemoryCompact:    sessionmemorycompact.CurrentService(),
 		CoordinatorScheduler:    coordinatorScheduler,
 			GrowthBookRefreshCleanup: gbRefreshCleanup,
+			TUICleanup: tuiCleanup,
 	}, nil
 }
 
 func configureConsoleLogging(outputFormat string) {
-	if outputFormat == "stream-json" {
+	if outputFormat == "stream-json" || outputFormat == "tui" {
 		logger.SetConsoleOutput(os.Stderr)
 		return
 	}
@@ -1821,7 +1862,7 @@ func loadMCPConfigs() map[string]mcpclient.ServerConfig {
 // approvalPrinterForConfig returns a printer directed at stderr when stream-json
 // mode is active so that approval prompts do not pollute the NDJSON stdout stream.
 func approvalPrinterForConfig(cfg coreconfig.Config) *console.Printer {
-	if cfg.OutputFormat == "stream-json" {
+	if cfg.OutputFormat == "stream-json" || cfg.OutputFormat == "tui" {
 		return console.NewPrinter(os.Stderr)
 	}
 	return console.NewPrinter(nil)
@@ -1894,6 +1935,9 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	}
 	if a.GrowthBookRefreshCleanup != nil {
 		defer a.GrowthBookRefreshCleanup()
+	}
+	if a.TUICleanup != nil {
+		defer a.TUICleanup()
 	}
 
 	// Emit session lifecycle events.

@@ -1,0 +1,155 @@
+package tui
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestRendererStartAndConnect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+
+	// Wait for the renderer to register the connection.
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Send an event via the renderer.
+	err = r.RenderEvent(event.Event{
+		Type:    event.TypeMessageDelta,
+		Payload: event.MessageDeltaPayload{Text: "hello"},
+	})
+	require.NoError(t, err)
+
+	// Read the event on the WebSocket side.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeEvent, msg.Type)
+
+	// Send input from the WebSocket side.
+	err = c.WriteJSON(WSMessage{
+		Type: msgTypeInput,
+		Payload: map[string]string{
+			"text": "test input",
+		},
+	})
+	require.NoError(t, err)
+
+	// Read the input from the renderer's InputReader.
+	buf := make([]byte, 1024)
+	n, err := r.InputReader().Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "test input\n", string(buf[:n]))
+}
+
+func TestRendererMultipleEvents(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Send multiple event types.
+	events := []event.Event{
+		{Type: event.TypeThinking, Payload: event.ThinkingPayload{Thinking: "hmm"}},
+		{Type: event.TypeToolCallStarted, Payload: event.ToolCallPayload{Name: "Bash"}},
+		{Type: event.TypeToolCallFinished, Payload: event.ToolResultPayload{Name: "Bash"}},
+		{Type: event.TypeError, Payload: event.ErrorPayload{Message: "oops"}},
+		{Type: event.TypeUsage, Payload: event.UsagePayload{
+			TurnUsage: model.Usage{InputTokens: 10, OutputTokens: 20},
+		}},
+	}
+
+	for _, evt := range events {
+		require.NoError(t, r.RenderEvent(evt))
+	}
+
+	// Verify each event arrives on the WebSocket.
+	for range events {
+		_, raw, err := c.ReadMessage()
+		require.NoError(t, err)
+		var msg WSMessage
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		assert.Equal(t, msgTypeEvent, msg.Type)
+
+		p, ok := msg.Payload.(map[string]any)
+		if !ok {
+			continue
+		}
+		evtType, _ := p["type"].(string)
+		assert.NotEmpty(t, evtType)
+	}
+}
+
+func TestRendererRenderLine(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	require.NoError(t, r.RenderLine("status line"))
+
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeLine, msg.Type)
+}
+
+func TestRendererNoClientNoBlock(t *testing.T) {
+	// When no client is connected, RenderEvent and RenderLine should not block.
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	done := make(chan bool, 1)
+	go func() {
+		err = r.RenderEvent(event.Event{
+			Type:    event.TypeMessageDelta,
+			Payload: event.MessageDeltaPayload{Text: "test"},
+		})
+		r.RenderLine("test line")
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// Success: didn't block.
+	case <-time.After(2 * time.Second):
+		t.Fatal("RenderEvent with no client blocked unexpectedly")
+	}
+}

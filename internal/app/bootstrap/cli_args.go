@@ -24,6 +24,8 @@ type EarlyCLIOptions struct {
 	RemoteDescription string
 	// OutputFormat stores the optional `--output-format` value consumed during bootstrap parsing.
 	OutputFormat string
+	// TUIEnabled reports whether `--tui` was explicitly provided.
+	TUIEnabled bool
 }
 
 // ParseEarlyCLIOptions removes bootstrap-time flags from one argv slice and returns the remaining runtime args.
@@ -100,6 +102,8 @@ func ParseEarlyCLIOptions(args []string) (EarlyCLIOptions, []string, error) {
 				}
 				options.OutputFormat = outputFormat
 			}
+		case current == "--tui":
+			options.TUIEnabled = true
 		default:
 			filtered = append(filtered, args[index])
 		}
@@ -173,6 +177,9 @@ func (l earlyOptionsLoader) Load(ctx context.Context) (coreconfig.Config, error)
 	}
 	if l.options.OutputFormat != "" {
 		cfg.OutputFormat = l.options.OutputFormat
+	}
+	if l.options.TUIEnabled {
+		cfg.OutputFormat = "tui"
 	}
 	if !l.options.RemoteEnabled {
 		return cfg, nil

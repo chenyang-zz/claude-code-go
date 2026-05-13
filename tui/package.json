@@ -1,0 +1,19 @@
+{
+  "name": "claude-code-tui",
+  "version": "0.1.0",
+  "description": "Terminal UI for Claude Code (React + Ink)",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.tsx",
+    "build": "bun build --compile src/index.tsx --outfile ../tui-bin",
+    "start": "bun run src/index.tsx"
+  },
+  "dependencies": {
+    "ink": "^7.0.2",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.5.0"
+  }
+}
