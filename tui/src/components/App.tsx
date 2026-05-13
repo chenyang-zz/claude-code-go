@@ -68,6 +68,7 @@ export function App({ port }: AppProps) {
             case "message.delta": {
               const text = evt.payload?.text ?? "";
               if (text) {
+                setIsThinking(false);
                 currentDeltaRef.current += text;
                 // Replace last delta line if it exists
                 const id = lineIdRef.current;
