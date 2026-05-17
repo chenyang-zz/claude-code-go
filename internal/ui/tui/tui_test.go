@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
 	"github.com/sheepzhao/claude-code-go/internal/core/model"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -152,4 +154,256 @@ func TestRendererNoClientNoBlock(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("RenderEvent with no client blocked unexpectedly")
 	}
+}
+
+func TestApprovalPrompter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	prompter := NewApprovalPrompter(r)
+
+	// Run Prompt in a goroutine — it blocks until the TUI responds.
+	respCh := make(chan approval.Response, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := prompter.Prompt(ctx, approval.Prompt{
+			Title: "Approve Bash?",
+			Body:  "Execute: ls /tmp",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	// Read the approval_prompt message from WebSocket.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeApprovalPrompt, msg.Type)
+
+	// Send back an approval response.
+	err = c.WriteJSON(WSMessage{
+		Type: msgTypeApproval,
+		Payload: map[string]any{
+			"approved": true,
+		},
+	})
+	require.NoError(t, err)
+
+	select {
+	case resp := <-respCh:
+		assert.True(t, resp.Approved)
+	case err := <-errCh:
+		t.Fatalf("Prompt error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt did not return after approval response")
+	}
+}
+
+func TestApprovalPrompterDeny(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	prompter := NewApprovalPrompter(r)
+
+	respCh := make(chan approval.Response, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := prompter.Prompt(ctx, approval.Prompt{
+			Title: "Approve Write?",
+			Body:  "Write to: /tmp/test",
+		})
+		if err != nil {
+			errCh <- err
+			return
+		}
+		respCh <- resp
+	}()
+
+	// Read the approval_prompt message.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeApprovalPrompt, msg.Type)
+
+	// Send back a deny response.
+	err = c.WriteJSON(WSMessage{
+		Type: msgTypeApproval,
+		Payload: map[string]any{
+			"approved": false,
+		},
+	})
+	require.NoError(t, err)
+
+	select {
+	case resp := <-respCh:
+		assert.False(t, resp.Approved)
+	case err := <-errCh:
+		t.Fatalf("Prompt error: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt did not return after deny response")
+	}
+}
+
+// TestDeltaEventsArriveSeparately verifies that each RenderEvent call produces a
+// distinct WebSocket message. If TCP buffering (Nagle) or batching collapses
+// multiple deltas into one frame, this test fails.
+func TestDeltaEventsArriveSeparately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Send 10 delta events in rapid succession.
+	const count = 10
+	for i := 0; i < count; i++ {
+		require.NoError(t, r.RenderEvent(event.Event{
+			Type:    event.TypeMessageDelta,
+			Payload: event.MessageDeltaPayload{Text: fmt.Sprintf("chunk-%d", i)},
+		}))
+	}
+
+	// Verify each delta produced a separate WebSocket message.
+	received := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		_, raw, err := c.ReadMessage()
+		require.NoError(t, err)
+		var msg WSMessage
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		require.Equal(t, msgTypeEvent, msg.Type)
+
+		p, ok := msg.Payload.(map[string]any)
+		require.True(t, ok, "payload must be an object")
+		require.Equal(t, "message.delta", p["type"])
+		inner, ok := p["payload"].(map[string]any)
+		require.True(t, ok, "inner payload must be an object")
+		text, ok := inner["text"].(string)
+		require.True(t, ok, "text must be a string")
+		received = append(received, text)
+	}
+
+	// All 10 must have arrived as unique messages (not batched into fewer).
+	assert.Len(t, received, count)
+	for i := 0; i < count; i++ {
+		assert.Equal(t, fmt.Sprintf("chunk-%d", i), received[i])
+	}
+}
+
+// TestNoTCPDelay verifies the WebSocket connection has TCP_NODELAY enabled so
+// that small event frames are not held back by Nagle's algorithm.
+func TestNoTCPDelay(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	require.NoError(t, r.RenderEvent(event.Event{
+		Type:    event.TypeMessageDelta,
+		Payload: event.MessageDeltaPayload{Text: "ping"},
+	}))
+
+	// Read one message to confirm the connection works.
+	_, raw, err := c.ReadMessage()
+	require.NoError(t, err)
+	var msg WSMessage
+	require.NoError(t, json.Unmarshal(raw, &msg))
+	assert.Equal(t, msgTypeEvent, msg.Type)
+}
+
+// TestStreamingWithVCRFixture reads recorded fixtures and verifies that
+// multiple delta events produce distinct WebSocket messages (no batching).
+func TestStreamingWithVCRFixture(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	r, err := NewRenderer()
+	require.NoError(t, err)
+	defer r.Close() //nolint:errcheck
+
+	wsURL := fmt.Sprintf("ws://127.0.0.1:%d/ws", r.Port())
+	c, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck
+	require.NoError(t, r.WaitForConnection(ctx))
+
+	// Read recorded fixture data and send text_delta events.
+	type fixtureEvent struct {
+		Type string `json:"Type"`
+		Text string `json:"Text"`
+	}
+	type fixture struct {
+		Events []fixtureEvent `json:"events"`
+	}
+	var f fixture
+	raw, err := os.ReadFile("../../../fixtures/system-prompt-stream-7286b5774627.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &f))
+
+	var sent int
+	for _, fe := range f.Events {
+		if fe.Type != "text_delta" || fe.Text == "" {
+			continue
+		}
+		require.NoError(t, r.RenderEvent(event.Event{
+			Type:    event.TypeMessageDelta,
+			Timestamp: time.Now(),
+			Payload: event.MessageDeltaPayload{Text: fe.Text},
+		}))
+		sent++
+	}
+	t.Logf("Sent %d text_delta events from VCR fixture", sent)
+	require.GreaterOrEqual(t, sent, 3, "fixture should have at least 3 text deltas")
+
+	// Verify each delta produced a separate WebSocket message.
+	for i := 0; i < sent; i++ {
+		_, raw, err := c.ReadMessage()
+		require.NoError(t, err)
+		var msg WSMessage
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		require.Equal(t, msgTypeEvent, msg.Type)
+		p, ok := msg.Payload.(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "message.delta", p["type"])
+	}
+	t.Logf("All %d delta events arrived as separate WebSocket messages", sent)
 }

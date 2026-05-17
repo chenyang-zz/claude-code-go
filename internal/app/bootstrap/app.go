@@ -253,9 +253,13 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 			return nil, fmt.Errorf("tui init: %w", err)
 		}
 		logger.InfoCF("tui", "TUI WebSocket server on port", map[string]any{"port": tuiR.Port()})
+
+		// Print connection info for the run-tui wrapper script.
+		fmt.Fprintf(os.Stderr, "\n  TUI ready on port %d\n", tuiR.Port())
+
 		// Wait briefly for a TUI client to connect. If none connects,
 		// fall back to normal console output so the app doesn't hang.
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 120*time.Second)
 		if waitErr := tuiR.WaitForConnection(waitCtx); waitErr == nil {
 			tuiRenderer = tuiR
 			tuiCleanup = func() { _ = tuiR.Close() }
@@ -278,7 +282,7 @@ func NewAppWithDependencies(loader coreconfig.Loader, engineFactory EngineFactor
 		if rt, ok := eng.(*engine.Runtime); ok {
 			rt.ApprovalService = approval.NewPromptingService(
 				cfg.ApprovalMode,
-				console.NewApprovalRenderer(approvalPrinterForConfig(cfg), tuiRenderer.InputReader()),
+				tui.NewApprovalPrompter(tuiRenderer),
 			)
 		}
 	}
@@ -2009,4 +2013,26 @@ func (a *agentRunnerAdapter) Run(ctx context.Context, input coordinator.AgentInp
 		TotalDurationMs:   agentOutput.TotalDurationMs,
 		TotalTokens:       agentOutput.TotalTokens,
 	}, nil
+
+
+}
+// findTUIPath searches for the TUI project directory in several standard
+// locations. It returns an empty string when the TUI project is not found.
+func findTUIPath() string {
+	candidates := []string{}
+	if v := os.Getenv("TUI_DIR"); v != "" {
+		candidates = append(candidates, v)
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "tui"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "tui"))
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(filepath.Join(p, "package.json")); err == nil {
+			return p
+		}
+	}
+	return ""
 }

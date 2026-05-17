@@ -12,14 +12,17 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/sheepzhao/claude-code-go/internal/core/event"
+	"github.com/sheepzhao/claude-code-go/internal/runtime/approval"
 	"github.com/sheepzhao/claude-code-go/pkg/logger"
 )
 
 // Message types over WebSocket.
 const (
-	msgTypeEvent = "event"
-	msgTypeInput = "input"
-	msgTypeLine  = "line"
+	msgTypeEvent   = "event"
+	msgTypeInput   = "input"
+	msgTypeLine    = "line"
+	msgTypeApprovalPrompt = "approval_prompt"
+	msgTypeApproval = "approval"
 )
 
 // WSMessage is the wire format for all WebSocket communication.
@@ -48,8 +51,10 @@ type Renderer struct {
 	conn    *websocket.Conn
 	connCh  chan struct{} // closed when first (or next) TUI connects
 
-	inputCh chan string   // TUI input lines arrive here
-	done    chan struct{} // closed on Close
+	writeMu       sync.Mutex // serializes gorilla/websocket writes
+	inputCh       chan string   // TUI input lines arrive here
+	approvalRespCh chan approval.Response // TUI approval responses arrive here (buffer 1)
+	done          chan struct{} // closed on Close
 }
 
 // NewRenderer creates a TUI renderer, starts listening on a random TCP port,
@@ -67,9 +72,10 @@ func NewRenderer() (*Renderer, error) {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		connCh: make(chan struct{}),
-		inputCh: make(chan string, 64),
-		done:   make(chan struct{}),
+		connCh:         make(chan struct{}),
+		inputCh:        make(chan string, 64),
+		approvalRespCh: make(chan approval.Response, 1),
+		done:           make(chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -168,6 +174,9 @@ func (r *Renderer) writeJSON(msg WSMessage) error {
 		return nil
 	}
 
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+
 	// Set a short write deadline so a stuck TUI doesn't block the engine.
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return nil
@@ -185,6 +194,12 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 	}
 
 	logger.DebugCF("tui", "TUI client connected", nil)
+
+	// Disable Nagle's algorithm so small WebSocket frames (e.g. individual
+	// message.delta events) are sent immediately rather than buffered by TCP.
+	if tcp, ok := conn.UnderlyingConn().(*net.TCPConn); ok {
+		tcp.SetNoDelay(true) //nolint:errcheck
+	}
 
 	r.mu.Lock()
 	// Close any previous connection.
@@ -209,6 +224,11 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 			r.conn = nil
 			// Reset connCh so WaitForConnection blocks again.
 			r.connCh = make(chan struct{})
+			// Unblock any waiting ApprovalPrompter with a denied response.
+			select {
+			case r.approvalRespCh <- approval.Response{Approved: false, Reason: "TUI disconnected"}:
+			default:
+			}
 		}
 		r.mu.Unlock()
 		conn.Close() //nolint:errcheck
@@ -241,6 +261,20 @@ func (r *Renderer) handleWS(w http.ResponseWriter, req *http.Request) {
 			default:
 				// Input channel full; drop.
 			}
+		case msgTypeApproval:
+			payload, ok := msg.Payload.(map[string]any)
+			if !ok {
+				continue
+			}
+			approved, ok := payload["approved"].(bool)
+			if !ok {
+				continue
+			}
+			select {
+			case r.approvalRespCh <- approval.Response{Approved: approved}:
+			default:
+				// No one waiting for approval; drop.
+			}
 		}
 	}
 }
@@ -269,4 +303,60 @@ func (r *wsInputReader) Read(p []byte) (int, error) {
 	n := copy(p, r.buf)
 	r.buf = r.buf[n:]
 	return n, nil
+}
+
+// ApprovalPrompter implements approval.Prompter by sending prompts to the TUI
+// over WebSocket and blocking for a response.
+type ApprovalPrompter struct {
+	r *Renderer
+}
+
+// NewApprovalPrompter creates a Prompter that sends approval requests to the
+// connected TUI via WebSocket and waits for an approve/deny response.
+func NewApprovalPrompter(r *Renderer) *ApprovalPrompter {
+	return &ApprovalPrompter{r: r}
+}
+
+// Prompt sends an approval request to the TUI and blocks until the user
+// responds or the context is cancelled.
+func (p *ApprovalPrompter) Prompt(ctx context.Context, prompt approval.Prompt) (approval.Response, error) {
+	// Drain any stale response from a previous cancelled prompt.
+	select {
+	case <-p.r.approvalRespCh:
+	default:
+	}
+
+	// Check whether a TUI client is actually connected before sending and
+	// blocking. Without this check, a disconnected TUI causes Prompt to
+	// block until ctx expires or the Renderer shuts down, stalling the
+	// guarded tool call.
+	if !p.r.isConnected() {
+		return approval.Response{Approved: false, Reason: "No TUI connected"}, nil
+	}
+
+	// Send the approval prompt to the TUI.
+	p.r.writeJSON(WSMessage{
+		Type: msgTypeApprovalPrompt,
+		Payload: map[string]string{
+			"title": prompt.Title,
+			"body":  prompt.Body,
+		},
+	})
+
+	// Wait for a response or context cancellation.
+	select {
+	case resp := <-p.r.approvalRespCh:
+		return resp, nil
+	case <-ctx.Done():
+		return approval.Response{}, ctx.Err()
+	case <-p.r.done:
+		return approval.Response{Approved: false, Reason: "TUI closed"}, nil
+	}
+}
+
+// isConnected reports whether a TUI WebSocket client is currently connected.
+func (r *Renderer) isConnected() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.conn != nil
 }

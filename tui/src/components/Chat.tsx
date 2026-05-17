@@ -1,12 +1,11 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { type WSMessage } from "../ws-client.js";
+import Markdown from "./MarkdownWrapper.js";
+import { CodeBlock } from "./Markdown.js";
+import { ThinkingIndicator } from "./ThinkingIndicator.js";
+import type { Line } from "../types/tui.js";
 
-export interface Line {
-  id: number;
-  text: string;
-  type: "delta" | "thinking" | "tool" | "error" | "info" | "line";
-}
+export type { Line } from "../types/tui.js";
 
 export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean }) {
 
@@ -29,16 +28,19 @@ export function Chat({ lines, isThinking }: { lines: Line[]; isThinking: boolean
             <Text color="gray">{line.text}</Text>
           )}
           {line.type === "delta" && (
-            <Text>{line.text}</Text>
+            <Markdown>{line.text}</Markdown>
           )}
           {line.type === "line" && (
-            <Text>{line.text}</Text>
+            <Markdown>{line.text}</Markdown>
+          )}
+          {line.type === "code" && (
+            <CodeBlock code={line.text} language={line.codeLanguage} />
           )}
         </Box>
       ))}
       {isThinking && (
         <Box>
-          <Text color="yellow">⠋ Thinking...</Text>
+          <ThinkingIndicator />
         </Box>
       )}
     </Box>

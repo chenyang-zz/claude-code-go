@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -142,6 +143,11 @@ func (r *Runner) Run(ctx context.Context, args []string) error {
 
 	parsed, err := ParseArgs(args)
 	if err != nil {
+		// TUI mode: enter interactive loop, reading prompts from WebSocket
+		// input instead of requiring CLI args.
+		if r.Input != nil && r.Input != os.Stdin {
+			return r.runInteractiveTUI(ctx)
+		}
 		return err
 	}
 
@@ -308,6 +314,34 @@ func (r *Runner) runPrompt(ctx context.Context, history conversation.History, pr
 		if _, err := r.AutoSave.PersistHistoryInProject(ctx, r.sessionID(), r.ProjectPath, finalHistory); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// runInteractiveTUI enters an interactive read loop for TUI mode, reading
+// prompts from the WebSocket input reader instead of CLI args.
+func (r *Runner) runInteractiveTUI(ctx context.Context) error {
+	scanner := bufio.NewScanner(r.Input)
+	for scanner.Scan() {
+		prompt := strings.TrimSpace(scanner.Text())
+		if prompt == "" {
+			continue
+		}
+
+		history, err := r.restoreHistory(ctx, false, false)
+		if err != nil {
+			if errors.Is(err, errContinueHandled) {
+				continue
+			}
+			return err
+		}
+
+		if err := r.runPrompt(ctx, history, prompt); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("tui input: %w", err)
 	}
 	return nil
 }

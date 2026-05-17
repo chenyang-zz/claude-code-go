@@ -3,3 +3,4 @@
 .gitnexus
 .agents/
 node_modules
+tui/logs/
